@@ -1,0 +1,8 @@
+.DS_Store
+*/__pycache__/**
+src/build/**
+src/dist/**
+src/engine/__pycache__/**
+src/gui/__pycache__/**
+data/*
+src/dm41version.py
