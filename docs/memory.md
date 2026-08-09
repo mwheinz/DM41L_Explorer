@@ -68,10 +68,5 @@ R00 contains the address of the first data memory register (which the user sees 
 ### Alpha Storage:
 - A register in main memory holding ASCII data will begin with 0x10 in the MSB and can hold up to 6 ASCII characters. If the ASCII data is less than 6 characters long, it will be prepended with one or more NUL bytes until the data is 6 characters long.
 
-#### Program instructions
+### Program instructions
 - instructions are read from registers as bytes and are read from higher addresses to lower ones.
-
-## 4. Addressing and Indexing Logic
-- **Register Indexing:** Memory dump labels (e.g., 00, 04, 08) indicate **register indices**, not byte offsets.
-- **Address Calculation:** The absolute memory location is determined by: $$\text{Byte Address} = \text{Register Index} \times 7$$
-- **Row Increments:** Each row in a dump typically displays 4 registers, representing a 28-byte jump between labeled rows. When gaps exist, they indicate empty (zeroed) memory regions.

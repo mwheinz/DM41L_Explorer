@@ -8,7 +8,7 @@ HP41 CPU registers.
 
 import re
 import logging
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional, Union
 from pathlib import Path
 from decimal import Decimal, Context, ROUND_HALF_EVEN
 
@@ -24,8 +24,14 @@ class Register:
     of parts of multiple physical registers. In addition, some status
     registers contain multiple smaller bitfields.
     """
-    def __init__(self, data: bytes = None, size: int = 0,
-                 ascii_only: bool = False, read_only: bool = False):
+
+    def __init__(
+        self,
+        data: bytes = None,
+        size: int = 0,
+        ascii_only: bool = False,
+        read_only: bool = False,
+    ):
         if data is not None:
             self._data = bytearray(data)
         else:
@@ -49,7 +55,7 @@ class Register:
         except ValueError as e:
             raise ValueError(f"Invalid hexadecimal data: {e}") from e
 
-    def to_hex(self) -> str:
+    def get_hex(self) -> str:
         return self._data.hex()
 
     def _get_nibbles(self) -> list[int]:
@@ -64,8 +70,7 @@ class Register:
         """Reads the BCD-encoded number from this register."""
         if self.size != 7:
             raise ValueError(
-                "BCD operations require a 7-byte register, "\
-                f"got {self.size} bytes."
+                "BCD operations require a 7-byte register, " f"got {self.size} bytes."
             )
 
         nibbles = self._get_nibbles()
@@ -83,7 +88,7 @@ class Register:
         mantissa_val = 0
         for i in range(1, 11):
             n = nibbles[i]
-            if not (0 <= n <= 9):
+            if n < 0 or n > 9:
                 raise ValueError(f"Invalid mantissa digit at nibble {i}: {hex(n)}")
             mantissa_val = mantissa_val * 10 + n
 
@@ -104,7 +109,7 @@ class Register:
 
         exponent_val = e1 * 10 + e2
 
-        # Apply the 100-X rule for negative exponents. 
+        # Apply the 100-X rule for negative exponents.
         # If xs_sign is negative, the stored exponent is 100 - |E|.
         if xs_sign == -1:
             total_exponent = -(100 - exponent_val)
@@ -120,8 +125,7 @@ class Register:
         """Writes a float to this register in BCD format."""
         if self.size != 7:
             raise ValueError(
-                "BCD operations require a 7-byte register, " \
-                f"got {self.size} bytes."
+                "BCD operations require a 7-byte register, " f"got {self.size} bytes."
             )
 
         if number == 0:
@@ -183,7 +187,7 @@ class Register:
             new_data.append(byte)
         self._data = new_data
 
-    def to_ascii(self) -> str:
+    def get_ascii(self) -> str:
         """
         Reads this register as raw ASCII text, one character per byte,
         MSB-byte first. Non-printable bytes (including 0x00 padding) are
@@ -198,7 +202,7 @@ class Register:
             chars.append(chr(byte) if 0x20 <= byte <= 0x7E else ".")
         return "".join(chars)
 
-    def from_ascii(self, text: str):
+    def set_ascii(self, text: str):
         """
         Writes raw ASCII text into this register, one character per byte,
         MSB-byte first. Text shorter than the register is padded with
@@ -226,24 +230,23 @@ class Register:
         )
 
     def __str__(self) -> str:
-        '''
-        Note that this only works for main data and extended memory
-        data files. ASCII data in XM can be variable length and is
-        byte-packed.
-        '''
+        """
+        Note that this only works for PrimaryData. ASCII data in XM can be
+        variable length and is byte-packed. The StatusRegisters.Alpha register
+        is 25 bytes long and doesn't have the header byte.
+        """
         if self._data[0] == 0x10:
-            text=""
+            text = ""
             for b in self._data[1:]:
                 if b != 0:
                     text += chr(b)
             if text.isprintable():
-                return '"'+text+'"'
+                return '"' + text + '"'
             return self._data.hex()
-        else:
-            try:
-                return f"{self.get_bcd_number():.8g}"
-            except ValueError:
-                pass
+        try:
+            return f"{self.get_bcd_number():.8g}"
+        except ValueError:
+            pass
 
         return self._data.hex()
 
@@ -256,34 +259,28 @@ class Register:
         self._data[self.size - index - 1] = value
 
     def __repr__(self):
-        return f"Register({self.to_hex()})"
+        return f"Register({self.get_hex()})"
 
+class AlphaRegister(Register):
+    """Represents the HP41/DM41 alpha register."""
+    def __str__(self):
+        skip_nulls = True
+        text=""
+        for b in self._data:
+            if b != 0x00 and skip_nulls:
+                skip_nulls = False
+            if not skip_nulls:
+                if 32 <= b <= 127:
+                    c = chr(b)
+                else:
+                    c = "."
+                text = text + c
+        return text
 
-# --- Memory region layout --------------------------------------------------
-#
-# Region layout (addresses are register indices, not byte offsets):
-#
-#     0x000 - 0x00F   System Registers     (T, Z, Y, X, LastX, M, N, O, P, Q,
-#                                          F, a, b, c, d/Flags, e)
-#     0x010 - 0x03F   I/O Buffer
-#     0x040 - 0x0BF   Extended Data Memory (first section)
-#     0x0C0 - .END.-1 Key Assignments      (ends at the first all-zero
-#                                           register found at/after 0xC0)
-#     .END. - R00-1   Program Memory
-#     R00   - 0x1FF   Primary Data Memory
-#     0x200 - end     Extended Data Memory (remaining XM)
-#
-# Any addresses not covered by one of the above (e.g. free/unused space
-# between the key-assignment area and program memory) are reported as an
-# "Unused" region so the whole address space is still accounted for.
-#
-# Note: the Void Buffer is defined here for completeness, but is unused
-# in the DM41L emulator and inaccessible in an actual HP41.
-
-STATUS_REGISTERS_RANGE  = (0x00, 0x0F)
-VOID_RANGE              = (0x10, 0x3F)
-XM_REGION_RANGES        = (0x40, 0xBF, 0x200, 0x3FF)
-KEY_ASSIGNMENTS_RANGE   = (0xC0, 0xC0) # Key assignments are variable length.
+STATUS_REGISTERS_RANGE = (0x00, 0x0F)
+VOID_RANGE = (0x10, 0x3F)
+XM_REGION_RANGES = (0x40, 0xBF, 0x200, 0x3FF)
+KEY_ASSIGNMENTS_RANGE = (0xC0, 0xC0)  # Key assignments are variable length.
 PRIMARY_DATA_END = 0x1FF
 
 ZERO_REGISTER_HEX = "00000000000000"
@@ -300,29 +297,30 @@ class MemoryRegion:
 
     key: str = "region"
     label: str = "Region"
-    range: list
+    address_range: list
 
-    def __init__(self, memory: "Memory", range: list):
+    def __init__(self, memory: "Memory", address_range: list):
         self._memory = memory
-        self.range = range
+        self.address_range = address_range
 
     def __contains__(self, addr: int) -> bool:
-        return self.range[0] <= addr <= self.range[1]
+        return self.address_range[0] <= addr <= self.address_range[1]
 
     def __iter__(self):
-        return iter(range(self.range[0], self.range[1] + 1))
+        return iter(range(self.address_range[0], self.address_range[1] + 1))
 
     def __len__(self) -> int:
-        return self.range[1] - self.range[0] + 1
+        return self.address_range[1] - self.address_range[0] + 1
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}(0x{self.range[0]:03X}-0x{self.range[1]:03X})"
+        return f"{type(self).__name__}(0x{self.address_range[0]:03X}-" \
+               f"0x{self.address_range[1]:03X})"
 
     def _check_addr(self, addr: int):
         if addr not in self:
             raise ValueError(
                 f"Address 0x{addr:03X} is outside {type(self).__name__} "
-                f"(0x{self.range[0]:03X}-0x{self.range[1]:03X})"
+                f"(0x{self.address_range[0]:03X}-0x{self.address_range[1]:03X})"
             )
 
     def get_register(self, addr: int) -> Register:
@@ -340,99 +338,108 @@ class MemoryRegion:
         return {addr: self.get_register(addr) for addr in self}
 
 
+# Labels for the 16 status registers, in address order.
+STATUS_REGISTER_LABELS = [
+    "T", "Z", "Y", "X",
+    "LastX", "M", "N", "O",
+    "P", "Q", "F", "a",
+    "b", "c", "d / Flags", "e",
+]
+
 class StatusRegisters(MemoryRegion):
     """The 16 named CPU/system registers, T through e."""
-
-    # Labels for the 16 status registers, in address order.
-    _named = [
-        "T", "Z", "Y", "X",
-        "LastX", "M", "N", "O",
-        "P", "Q", "F", "a",
-        "b", "c", "d / Flags", "e",
-    ]
 
     key = "status_registers"
     label = "Status Registers"
 
     def __init__(self, memory: "Memory"):
         super().__init__(memory, STATUS_REGISTERS_RANGE)
-        bd = self._data[5] + self._data[6] + self._data[7] + self._data[8][:3]
-        self.alpha = Register(data = bd, ascii_only = True)
-
-    def label(self, addr: int) -> str:
-        return _named[addr]
+        bd = self.get_register(8)._data[4:7] + self.get_register(7)._data + \
+                self.get_register(6)._data + self.get_register(5)._data
+        self.alpha = AlphaRegister(data=bd, ascii_only=True, read_only=True)
 
     def T(self) -> Register:
-        return self._data[0]
+        return self.get_register(0)
 
     def Z(self) -> Register:
-        return self._data[1]
+        return self.get_register(1)
 
     def Y(self) -> Register:
-        return self._data[2]
+        return self.get_register(2)
 
     def X(self) -> Register:
-        return self._data[3]
+        return self.get_register(3)
 
     def LastX(self) -> Register:
-        return self._data[4]
+        return self.get_register(4)
 
     def M(self) -> Register:
-        return self._data[5]
+        return self.get_register(5)
 
     def N(self) -> Register:
-        return self._data[6]
+        return self.get_register(6)
 
     def O(self) -> Register:
-        return self._data[7]
+        return self.get_register(7)
 
     def P(self) -> Register:
-        return self._data[8]
+        return self.get_register(8)
 
     def Q(self) -> Register:
-        return self._data[9]
+        return self.get_register(9)
 
     def F(self) -> Register:
-        return self._data[10]
+        return self.get_register(10)
 
     def a(self) -> Register:
-        return self._data[11]
+        return self.get_register(11)
 
     def b(self) -> Register:
-        return self._data[12]
+        return self.get_register(12)
 
     def c(self) -> Register:
-        return self._data[13]
+        return self.get_register(13)
 
     def d(self) -> Register:
-        return self._data[14]
+        return self.get_register(14)
 
     def e(self) -> Register:
-        return self._data[15]
+        return self.get_register(15)
 
     def Flags(self) -> Register:
-        return self._data[14]
+        return self.get_register(14)
 
     def label_for(self, addr: int) -> str:
         """The system-register name (e.g. 'X') for an address in this region."""
-        self._check_addr(addr)
-        return SYSTEM_REGISTER_LABELS[addr]
+        if 0x00 <= addr <= 0x04:
+            return f"{STATUS_REGISTER_LABELS[addr]}: " \
+                   f"{self.get_register(addr).get_bcd_number()}"
+        if 0x05 <= addr <= 0x08:
+            return f"{STATUS_REGISTER_LABELS[addr]}: " \
+                   f"{self.get_register(addr).get_ascii()}"
+        if 0x09 <= addr <= 0x0f:
+            return f"{STATUS_REGISTER_LABELS[addr]}: " \
+                   f"{self.get_register(addr).get_hex()}"
+        return None
 
 
 class KeyAssignments(MemoryRegion):
     """Need more research."""
+
     key = "key_assignments"
     label = "Key Assignments"
 
 
 class Alarms(MemoryRegion):
     """Need more research."""
+
     key = "alarms"
     label = "Alarms"
 
 
 class ProgramMemory(MemoryRegion):
     """Need more research."""
+
     key = "program_memory"
     label = "Program Memory"
 
@@ -613,7 +620,7 @@ class Memory:
                 while count < 4 and (i + count) < n:
                     next_idx = sorted_indices[i + count]
                     if next_idx == base_idx + count:
-                        row.append(self._core_memory[next_idx].to_hex())
+                        row.append(self._core_memory[next_idx].get_hex())
                         count += 1
                     else:
                         break
@@ -623,17 +630,17 @@ class Memory:
         # Section III: Special Registers
         if self._special_registers:
             # These need to be emitted in the same order they first appeared.
-            A = self._special_registers["A"].to_hex()
-            B = self._special_registers["B"].to_hex()
-            C = self._special_registers["C"].to_hex()
+            A = self._special_registers["A"].get_hex()
+            B = self._special_registers["B"].get_hex()
+            C = self._special_registers["C"].get_hex()
             lines.append(f"A: {A} B: {B} C: {C}")
             # S may not be present.
             S = self._special_registers.get("S", None)
             if S is not None:
-                lines.append(f"S: {S.to_hex()}")
-            M = self._special_registers["M"].to_hex()
-            N = self._special_registers["N"].to_hex()
-            G = self._special_registers["G"].to_hex()
+                lines.append(f"S: {S.get_hex()}")
+            M = self._special_registers["M"].get_hex()
+            N = self._special_registers["N"].get_hex()
+            G = self._special_registers["G"].get_hex()
             lines.append(f"M: {M} N: {N} G: {G}")
 
         return "\n".join(lines) + "\n"
@@ -641,211 +648,3 @@ class Memory:
     def to_file(self, path: Union[str, Path]):
         with open(path, "w", encoding="utf-8") as f:
             f.write(self.to_string())
-
-    # Access system registers by name. Delegates to the SystemRegisters
-    # region so there's a single implementation of "where is register X".
-    @property
-    def system_registers(self) -> SystemRegisters:
-        return SystemRegisters(self, 0x000, SYSTEM_REGISTERS_END)
-
-    def T(self) -> Register:
-        return self.system_registers.T()
-
-    def Z(self) -> Register:
-        return self.system_registers.Z()
-
-    def Y(self) -> Register:
-        return self.system_registers.Y()
-
-    def X(self) -> Register:
-        return self.system_registers.X()
-
-    def LastX(self) -> Register:
-        return self.system_registers.LastX()
-
-    def M(self) -> Register:
-        return self.system_registers.M()
-
-    def N(self) -> Register:
-        return self.system_registers.N()
-
-    def O(self) -> Register:
-        return self.system_registers.O()
-
-    def P(self) -> Register:
-        return self.system_registers.P()
-
-    def Q(self) -> Register:
-        return self.system_registers.Q()
-
-    def F(self) -> Register:
-        return self.system_registers.F()
-
-    def a(self) -> Register:
-        return self.system_registers.a()
-
-    def b(self) -> Register:
-        return self.system_registers.b()
-
-    def c(self) -> Register:
-        return self.system_registers.c()
-
-    def d(self) -> Register:
-        return self.system_registers.d()
-
-    def e(self) -> Register:
-        return self.system_registers.e()
-
-    def Flags(self) -> Register:
-        return self.system_registers.Flags()
-
-    # The beginning (end) of program storage
-    # Programs begin at 1 byte less than R00
-    # and end at this value.
-    def DotEnd(self) -> int:
-        c = self.c()
-        return (c[1] & 0x0F) * 256 + c[0]
-
-    # The beginning of main data storage.
-    def R00(self) -> int:
-        c = self.c()
-        return (c[2] << 4) + ((c[1] >> 4) & 0xF)
-
-    # --- Region access -------------------------------------------------
-    #
-    # Memory is still fundamentally a flat collection of registers
-    # (get_register/set_register above), but different parts of that
-    # collection behave differently -- primary data holds BCD numbers,
-    # system registers have names, key assignments and program memory
-    # have dump-dependent boundaries. regions() computes the current
-    # layout and returns typed MemoryRegion objects so callers can work
-    # with a region the way that's appropriate for its kind, e.g.:
-    #
-    #     for region in memory.regions():
-    #         if isinstance(region, PrimaryData):
-    #             ...
-
-    def _highest_known_address(self) -> int:
-        """The highest register address actually present in the dump."""
-        if not self._core_memory:
-            return PRIMARY_DATA_END
-        return max(PRIMARY_DATA_END, max(self._core_memory.keys()))
-
-    def _find_key_assignments_end(self, scan_limit: int) -> int:
-        """
-        Scans upward from KEY_ASSIGNMENTS_START looking for the first
-        all-zero register, which marks the end of the custom key
-        assignment list. Returns the address of that terminating register
-        (exclusive end of the key-assignment region), or scan_limit + 1 if
-        no zero register is found within the scanned range.
-        """
-        addr = KEY_ASSIGNMENTS_START
-        while addr <= scan_limit:
-            reg = self.get_register(addr)
-            if reg is not None and reg.to_hex() == ZERO_REGISTER_HEX:
-                return addr
-            addr += 1
-        return scan_limit + 1
-
-    def regions(self) -> List[MemoryRegion]:
-        """
-        Returns the list of MemoryRegion objects covering every addressable
-        register in this dump, in ascending address order, with no gaps
-        and no overlaps. See the module-level layout comment above
-        SYSTEM_REGISTERS_END for the region map.
-        """
-        try:
-            dot_end = self.DotEnd()
-        except Exception:
-            dot_end = None
-        try:
-            r00 = self.R00()
-        except Exception:
-            r00 = None
-
-        highest = self._highest_known_address()
-
-        # The key-assignment scan shouldn't run past the start of program
-        # memory / primary data, whichever comes first -- otherwise a
-        # sparse dump (all zeros beyond the key area) would make it
-        # swallow those regions too.
-        candidate_limits = [PRIMARY_DATA_END]  # fallback if DotEnd/R00 unavailable
-        if dot_end is not None:
-            candidate_limits.append(dot_end)
-        if r00 is not None:
-            candidate_limits.append(r00)
-        scan_limit = max(KEY_ASSIGNMENTS_START, min(candidate_limits) - 1)
-        key_end_exclusive = self._find_key_assignments_end(scan_limit)
-
-        # Build a raw (unsorted-by-necessity, but naturally ordered) list
-        # of "claimed" spans, then fill any gaps with "unused".
-        claimed: List[MemoryRegion] = [
-            SystemRegisters(self, 0x000, SYSTEM_REGISTERS_END),
-            ExtendedMemory(self, XM_REGION_BEGIN, XM_REGION_END),
-        ]
-
-        if key_end_exclusive > KEY_ASSIGNMENTS_START:
-            claimed.append(
-                KeyAssignments(self, KEY_ASSIGNMENTS_START, key_end_exclusive - 1)
-            )
-
-        if dot_end is not None and r00 is not None and r00 - 1 >= dot_end:
-            claimed.append(ProgramMemory(self, dot_end, r00 - 1))
-
-        if r00 is not None and r00 > XM_REGION_END:
-            primary_end = max(r00 - 1, min(PRIMARY_DATA_END, highest))
-            if primary_end >= r00:
-                claimed.append(PrimaryData(self, r00, primary_end))
-
-        if highest > PRIMARY_DATA_END:
-            claimed.append(ExtendedMemory(self, PRIMARY_DATA_END + 1, highest))
-
-        claimed.sort(key=lambda r: r.start)
-
-        # Fill gaps between claimed regions with "unused" spans so the
-        # full 0x000-highest range is accounted for with no holes.
-        regions: List[MemoryRegion] = []
-        cursor = 0
-        for region in claimed:
-            if region.start > cursor:
-                regions.append(UnusedRegion(self, cursor, region.start - 1))
-            regions.append(region)
-            cursor = max(cursor, region.end + 1)
-
-        if cursor <= highest:
-            regions.append(UnusedRegion(self, cursor, highest))
-
-        return regions
-
-    @staticmethod
-    def region_for_address(
-        regions: List[MemoryRegion], addr: int
-    ) -> Optional[MemoryRegion]:
-        """Convenience lookup: which region (if any) contains this address."""
-        for region in regions:
-            if addr in region:
-                return region
-        return None
-
-
-# --- Validation Test against provided data ---
-if __name__ == "__main__":
-    FILE_NAME = "data/memory_test.dm41"
-    with open(FILE_NAME, "r") as fil:
-        test_input = fil.read()
-
-    print("--- Original File ---\n" + test_input)
-
-    mem = Memory.from_file(FILE_NAME)
-    dump = mem.to_string()
-
-    print("--- Generated Dump ---\n" + dump)
-
-    # Verification round-trip
-    reloaded = Memory.from_string(dump)
-    dump = reloaded.to_string()
-    print("--- Reloaded Dump ---\n" + dump)
-
-    assert reloaded == mem
-
-    print(f"DotEnd = {reloaded.DotEnd():03X}, " f"R00 = {reloaded.R00():03X}")
