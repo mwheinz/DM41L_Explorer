@@ -1,5 +1,5 @@
 .DS_Store
-*/__pycache__/**
+**/__pycache__/**
 src/build/**
 src/dist/**
 src/engine/__pycache__/**
