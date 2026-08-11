@@ -315,7 +315,7 @@ def test_status_registers_invalid_address(status_memory):
 # --- Extended Memory / XMFile Tests ---
 
 from pathlib import Path
-from memory import ExtendedMemory
+from memory import ExtendedMemory, ZERO_REGISTER, XM_REGIONS, MemoryError
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -423,3 +423,141 @@ def test_xm_get_program_bytes_wrong_type_raises():
     data_file = next(f for f in xm.list_files() if f.file_type == xm.TYPE_DATA)
     with pytest.raises(ValueError):
         data_file.get_program_bytes()
+
+
+# --- ExtendedMemory.add_file() ---
+#
+# Each test round-trips through list_files() rather than asserting on raw
+# register bytes -- that's the strongest available check, since list_files()
+# is independently tested against real captured dumps above.
+
+
+def test_xm_add_file_bootstraps_empty_extended_memory():
+    """Adding a file to extended memory that has never been used at all
+    must both write the file and initialize region 0's pointer register
+    (0x040, all-zero beforehand) so list_files() recognizes it."""
+    xm = _load_xm("empty.dm41")
+    assert xm.list_files() == []
+
+    added = xm.add_file("HELLO", xm.TYPE_DATA, numbers=[1, 2, 3.5, -42])
+    assert added.name == "HELLO  "
+
+    files = xm.list_files()
+    assert len(files) == 1
+    assert files[0].name == "HELLO  "
+    assert files[0].get_numbers() == [1, 2, 3.5, -42]
+
+
+def test_xm_add_file_appends_after_existing_files():
+    """Adding a file to an already-populated region must place it after
+    (below) the current last file, and must not disturb any existing
+    file's content."""
+    xm = _load_xm("6x-xm.dm41")
+    before = {f.name: f for f in xm.list_files()}
+
+    xm.add_file("NOTES", xm.TYPE_ASCII, records=["hello", "world", "a third record"])
+
+    after = {f.name: f for f in xm.list_files()}
+    assert set(after) == set(before) | {"NOTES  "}
+    assert after["NOTES  "].get_records() == ["hello", "world", "a third record"]
+
+    # Every pre-existing file must read back exactly as it did before.
+    for name, old in before.items():
+        new = after[name]
+        assert new.segments == old.segments
+        assert new.file_type == old.file_type
+        if old.file_type == xm.TYPE_DATA:
+            assert new.get_numbers() == old.get_numbers()
+        elif old.file_type == xm.TYPE_ASCII:
+            assert new.get_records() == old.get_records()
+        elif old.file_type == xm.TYPE_PROGRAM:
+            assert new.get_instruction_bytes() == old.get_instruction_bytes()
+            assert new.checksum_valid is True
+
+
+def test_xm_add_file_program_checksum_and_roundtrip():
+    xm = _load_xm("empty.dm41")
+    instructions = bytes([0x1D, 0x2E, 0x3F, 0x40, 0x50] * 3)  # 15 bytes
+
+    added = xm.add_file("MYPROG", xm.TYPE_PROGRAM, instruction_bytes=instructions)
+    assert added.byte_length == 15
+
+    files = xm.list_files()
+    assert len(files) == 1
+    prog = files[0]
+    assert prog.name == "MYPROG "
+    assert prog.byte_length == 15
+    assert prog.get_instruction_bytes() == instructions
+    assert prog.checksum_valid is True
+
+
+def test_xm_add_file_spans_regions_when_it_does_not_fit():
+    """A file added when region 0 doesn't have enough room left must
+    spill into region 1 exactly the way a naturally-created spanning file
+    does (see docs/memory.md sec. 4.5), and read back correctly across
+    both segments."""
+    xm = _load_xm("empty.dm41")
+    xm.add_file("SMALL", xm.TYPE_DATA, numbers=list(range(70)))
+
+    big_numbers = [float(i) for i in range(60)]
+    added = xm.add_file("BIGFILE", xm.TYPE_DATA, numbers=big_numbers)
+    assert added.spans_regions is True
+    assert len(added.segments) == 2
+
+    files = {f.name: f for f in xm.list_files()}
+    big = files["BIGFILE"]
+    assert big.spans_regions is True
+    assert big.get_numbers() == big_numbers
+
+    # Region 1's own pointer register must have been bootstrapped too,
+    # since this is the first time anything has been written there.
+    r201 = xm.get_register(0x201)
+    assert r201 != ZERO_REGISTER
+    ttt = (r201[1] & 0x0F) * 256 + r201[0]
+    assert ttt == XM_REGIONS[1][1]
+
+
+def test_xm_add_file_no_room_raises():
+    xm = _load_xm("empty.dm41")
+    with pytest.raises(MemoryError):
+        xm.add_file("HUGE", xm.TYPE_DATA, numbers=[float(i) for i in range(4000)])
+
+
+def test_xm_add_file_rejects_name_over_seven_characters():
+    xm = _load_xm("empty.dm41")
+    with pytest.raises(ValueError):
+        xm.add_file("TOOLONGNAME", xm.TYPE_DATA, numbers=[1])
+
+
+def test_xm_add_file_rejects_wrong_argument_for_type():
+    xm = _load_xm("empty.dm41")
+    with pytest.raises(ValueError):
+        xm.add_file("BADARGS", xm.TYPE_DATA, records=["oops"])
+    with pytest.raises(ValueError):
+        xm.add_file("NOARGS", xm.TYPE_ASCII)
+
+
+def test_xm_add_file_dump_rows_stay_page_aligned():
+    """to_string() must only ever emit rows starting on a 4-register-
+    aligned address, filling in any untouched register in a partially-
+    used page with the zero register -- the DM41L's loader rejects a
+    dump with a misaligned row (confirmed: it rejected one after adding
+    a 6-register ASCII file to empty.dm41, which left a 2-register gap
+    at the top of a page before the file's own registers began)."""
+    xm = _load_xm("empty.dm41")
+    xm.add_file("NOTES", xm.TYPE_ASCII, records=["1", "2", "3", "4", "5", "-16"])
+
+    dump = xm._memory.to_string()
+    for line in dump.splitlines()[1:]:
+        line = line.strip()
+        if not line or ":" in line.split()[0]:
+            continue  # blank line or the special-register section
+        base = int(line.split()[0], 16)
+        assert base % 4 == 0, f"row {line!r} doesn't start on a 4-register boundary"
+
+    # And it must still round-trip correctly.
+    reloaded = Memory.from_string(dump)
+    xm2 = ExtendedMemory(reloaded, address_range=[0x40, 0x3FF])
+    files = xm2.list_files()
+    assert len(files) == 1
+    assert files[0].get_records() == ["1", "2", "3", "4", "5", "-16"]

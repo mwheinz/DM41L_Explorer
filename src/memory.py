@@ -849,6 +849,292 @@ class ExtendedMemory(MemoryRegion):
             files.append(file)
         return files
 
+    def _find_region(self, addr: int) -> int:
+        """The index into XM_REGIONS whose *usable* span (just above the
+        region's reserved pointer register, up through its ceiling)
+        contains addr."""
+        for i, (lo, hi) in enumerate(XM_REGIONS):
+            if lo < addr <= hi:
+                return i
+        raise MemoryError(f"Address 0x{addr:x} is not within any writable XM region")
+
+    def _next_slot(self) -> tuple:
+        """
+        Where a newly-appended file's name register should go: returns
+        (name_addr, region_index, needs_bootstrap).
+
+        Mirrors list_files(): the position list_files() would check next
+        (and find EOM/free space) right after the last existing file is
+        exactly where a new file belongs -- see the note on
+        XMFile.data_start in list_files()'s docstring. needs_bootstrap is
+        True only when extended memory has never been used at all (region
+        0's pointer register is still all-zero), in which case that
+        pointer register doesn't exist yet and must be created from
+        scratch.
+        """
+        files = self.list_files()
+        if files:
+            name_addr = files[-1].data_start - 1
+            return name_addr, self._find_region(name_addr), False
+
+        region0_header = self.get_register(XM_REGIONS[0][0])
+        if region0_header == ZERO_REGISTER:
+            return XM_REGIONS[0][1], 0, True
+
+        # Region 0's pointer register is already initialized but every file
+        # has apparently been deleted -- trust its TTT field, same as
+        # list_files() does.
+        addr = (region0_header[1] & 0x0F) * 256 + region0_header[0]
+        return addr, self._find_region(addr), False
+
+    def _allocate_segments(
+        self, name_addr: int, region_index: int, register_count: int
+    ) -> tuple:
+        """
+        Works out where a new file's register_count data registers land,
+        starting immediately below the header at name_addr - 1, spilling
+        into the next XM region if it doesn't fit in this one's remaining
+        space -- the exact inverse of the address math in list_files()
+        (see its docstring for the cross-region-continuation details), so
+        that list_files() reading the result back reconstructs the same
+        segments.
+
+        Returns (segments, next_name_addr, ending_region): segments is in
+        the same [[start, end], ...] shape list_files() produces;
+        next_name_addr is where *this* file's own successor (or an EOM
+        sentinel) belongs, in ending_region.
+        """
+        header_addr = name_addr - 1
+        cursor = header_addr - (register_count + 1)
+
+        if cursor <= XM_REGIONS[region_index][0]:
+            # Spans into the next region, identically to the reading side.
+            segments = [[XM_REGIONS[region_index][0] + 1, header_addr - 1]]
+            s = XM_REGIONS[region_index][0] - cursor
+            next_region = region_index + 1
+            if next_region >= len(XM_REGIONS):
+                raise MemoryError(
+                    "Not enough free space in extended memory for this "
+                    "file -- no further XM region is available to spill "
+                    "into."
+                )
+            ceiling = XM_REGIONS[next_region][1]
+            cursor = ceiling - s
+            if cursor + 1 <= XM_REGIONS[next_region][0]:
+                raise MemoryError(
+                    "Not enough free space in extended memory for this "
+                    "file -- it would need to spill into a third region, "
+                    "which isn't supported (or confirmed to work on real "
+                    "hardware -- see docs/memory.md sec. 4.5)."
+                )
+            segments.append([cursor + 1, ceiling])
+            return segments, cursor, next_region
+
+        segments = [[cursor + 1, header_addr - 1]]
+        return segments, cursor, region_index
+
+    @staticmethod
+    def _build_header(
+        file_type: int, header_addr: int, register_length: int,
+        byte_length: Optional[int] = None,
+    ) -> Register:
+        """Builds a header register per the formats in docs/memory.md sec.
+        4.3, inverting the exact formulas _parse_header() uses to read
+        them back -- so a file written this way is guaranteed to
+        round-trip through list_files()."""
+        data = bytearray(7)
+        if file_type == XMFile.TYPE_PROGRAM:
+            data[0] = 0x10
+            data[4] = (byte_length >> 4) & 0xFF
+            data[5] = ((byte_length & 0x0F) << 4) | ((register_length >> 8) & 0x0F)
+            data[6] = register_length & 0xFF
+        else:
+            # Data/ASCII: AAA (the header's own address) in nibbles 1-3,
+            # RRR left at 0 and, for ASCII, CC (byte 3) also left at 0 --
+            # both are documented as runtime cursors for an *open* file
+            # (docs/memory.md sec. 4.3); a freshly-written, not-currently-
+            # open file uses 0 for both, but this isn't confirmed against
+            # a real freshly-saved dump.
+            data[0] = (file_type << 4) | ((header_addr >> 8) & 0x0F)
+            data[1] = header_addr & 0xFF
+            data[5] = (register_length >> 8) & 0x0F
+            data[6] = register_length & 0xFF
+        return Register(data=bytes(data))
+
+    @staticmethod
+    def _build_region_pointer(region_index: int) -> Register:
+        """Builds the 000WW0PPNNNTTT pointer register for XM_REGIONS[region_index]
+        (docs/memory.md sec. 4.1), used only to bootstrap a region that has
+        never held a file. TTT/NNN (this region's own ceiling, and the next
+        region's ceiling or 0) are well-confirmed. WW/PP ("currently"/
+        "previously open file index") are left at 0 -- their real meaning
+        and whether a loadable dump requires anything else there is NOT
+        confirmed; docs/memory.md flags this explicitly."""
+        ttt = XM_REGIONS[region_index][1]
+        next_region = region_index + 1
+        nnn = XM_REGIONS[next_region][1] if next_region < len(XM_REGIONS) else 0
+        data = bytearray(7)
+        data[4] = (nnn >> 4) & 0xFF
+        data[5] = ((nnn & 0x0F) << 4) | ((ttt >> 8) & 0x0F)
+        data[6] = ttt & 0xFF
+        return Register(data=bytes(data))
+
+    def add_file(
+        self,
+        name: str,
+        file_type: int,
+        *,
+        numbers: Optional[list] = None,
+        records: Optional[list] = None,
+        instruction_bytes: Optional[bytes] = None,
+    ) -> XMFile:
+        """
+        Appends a new file to extended memory and returns the XMFile
+        describing it.
+
+        Exactly one of the following must be given, matching file_type:
+          - numbers (TYPE_DATA): a list of floats, one BCD register each.
+          - records (TYPE_ASCII): a list of strings, packed as
+            [1-byte length][text] records (docs/memory.md sec. 4.3), with
+            a trailing 0x00 terminator byte always written explicitly so
+            get_records() has a real stopping point even when the packed
+            content exactly fills a whole number of registers.
+          - instruction_bytes (TYPE_PROGRAM): raw instruction bytes; a
+            modulo-256 checksum byte is appended automatically.
+
+        New files are always appended after whatever the current last
+        file is (or at the very top of extended memory, if it's empty) --
+        matching the "files are packed top-down in creation order"
+        behavior documented in docs/memory.md sec. 4.2/4.5. There's no
+        support (yet) for reusing space freed by a deleted file.
+
+        Raises MemoryError if there isn't enough contiguous XM space left
+        (see _allocate_segments()).
+        """
+        if not name or len(name) > 7:
+            raise ValueError(
+                f"File name {name!r} must be 1-7 characters, got {len(name)}."
+            )
+        try:
+            name.encode("ascii")
+        except UnicodeEncodeError as e:
+            raise ValueError(f"File name contains non-ASCII characters: {e}") from e
+        padded_name = name.ljust(7)
+
+        byte_length = None
+        given = [x for x in (numbers, records, instruction_bytes) if x is not None]
+        if len(given) != 1:
+            raise ValueError(
+                "Pass exactly one of numbers=, records=, or instruction_bytes=."
+            )
+
+        if file_type == self.TYPE_DATA:
+            if numbers is None:
+                raise ValueError("Data files require numbers=[...]")
+            if not numbers:
+                raise ValueError("Data files require at least one number")
+            data_registers = []
+            for n in numbers:
+                reg = Register(size=7)
+                reg.set_bcd_number(n)
+                data_registers.append(reg)
+
+        elif file_type == self.TYPE_ASCII:
+            if records is None:
+                raise ValueError("ASCII files require records=[...]")
+            if not records:
+                raise ValueError("ASCII files require at least one record")
+            stream = bytearray()
+            for r in records:
+                encoded = r.encode("ascii")
+                if len(encoded) > 255:
+                    raise ValueError(
+                        f"Record {r!r} is longer than 255 characters "
+                        "(1-byte length prefix can't hold it)."
+                    )
+                stream.append(len(encoded))
+                stream += encoded
+            stream.append(0)  # Explicit end-of-records marker.
+            while len(stream) % 7 != 0:
+                stream.append(0)
+            data_registers = [
+                Register(data=bytes(stream[i : i + 7]))
+                for i in range(0, len(stream), 7)
+            ]
+
+        elif file_type == self.TYPE_PROGRAM:
+            if instruction_bytes is None:
+                raise ValueError("Program files require instruction_bytes=b'...'")
+            if not instruction_bytes:
+                raise ValueError("Program files require at least one instruction byte")
+            if len(instruction_bytes) > 0xFFF:
+                raise ValueError(
+                    "Instruction byte count doesn't fit in the header's "
+                    "3-nibble field (max 4095)."
+                )
+            byte_length = len(instruction_bytes)
+            checksum = sum(instruction_bytes) % 256
+            stream = bytearray(instruction_bytes)
+            stream.append(checksum)
+            while len(stream) % 7 != 0:
+                stream.append(0)
+            data_registers = [
+                Register(data=bytes(stream[i : i + 7]))
+                for i in range(0, len(stream), 7)
+            ]
+
+        else:
+            raise ValueError(f"Unknown file_type: {file_type}")
+
+        register_length = len(data_registers)
+        if register_length > 0xFFF:
+            raise ValueError(
+                "File is too long to declare in the header's 3-nibble "
+                "register-length field (max 4095 registers)."
+            )
+
+        name_addr, region_index, needs_bootstrap = self._next_slot()
+        segments, next_name_addr, ending_region = self._allocate_segments(
+            name_addr, region_index, register_length
+        )
+        header_addr = name_addr - 1
+
+        name_reg = Register(size=7)
+        name_reg.set_ascii(padded_name)
+        self.set_register(name_addr, name_reg)
+        self.set_register(
+            header_addr,
+            self._build_header(file_type, header_addr, register_length, byte_length),
+        )
+
+        # Data registers, header-adjacent first, walking each segment in
+        # descending-address order -- the write-side mirror of
+        # XMFile.data_registers().
+        i = 0
+        for start, end in segments:
+            for addr in range(end, start - 1, -1):
+                self.set_register(addr, data_registers[i])
+                i += 1
+
+        # Terminate the directory with a fresh EOM sentinel, if there's
+        # still room for one below what we just wrote.
+        if next_name_addr > XM_REGIONS[ending_region][0]:
+            self.set_register(next_name_addr, EOM_REGISTER)
+
+        if needs_bootstrap:
+            self.set_register(XM_REGIONS[0][0], self._build_region_pointer(0))
+        if ending_region == 1 and self.get_register(XM_REGIONS[1][0]) == ZERO_REGISTER:
+            self.set_register(XM_REGIONS[1][0], self._build_region_pointer(1))
+
+        return XMFile(
+            memory=self._memory,
+            header_addr=header_addr,
+            file_type=file_type,
+            name=padded_name,
+            segments=segments,
+            declared_length=register_length,
+            byte_length=byte_length,
+        )
 
 class UnusedRegion(MemoryRegion):
     key = "unused"
@@ -988,25 +1274,29 @@ class Memory:
     def to_string(self) -> str:
         lines = [self._header]
 
-        # Section II: Core Memory with sparse row grouping
+        # Section II: Core Memory, grouped into complete 4-register pages.
+        #
+        # Every real captured dump (see tests/data/*.dm41) only ever
+        # starts a row on a 4-register-aligned address (0x00, 0x04, 0x08,
+        # ...) and always writes all 4 registers of that page -- whole
+        # *pages* can be skipped entirely (e.g. the unused Void region),
+        # but a page that has any register set is always written in
+        # full. The DM41L's own loader appears to require this: it
+        # rejected a dump with a row starting at a non-aligned address
+        # (e.g. 0xba instead of 0xb8). So rather than grouping by
+        # whatever runs of addresses happen to already be present in
+        # _core_memory, group by aligned page and fill in any missing
+        # register in a page that has at least one entry -- missing ones
+        # default to the zero register, same as get_register() already
+        # does for any address with no explicit entry.
         sorted_indices = sorted(self._core_memory.keys())
         if sorted_indices:
-            i = 0
-            n = len(sorted_indices)
-
-            while i < n:
-                base_idx = sorted_indices[i]
+            pages = sorted({idx - (idx % 4) for idx in sorted_indices})
+            for base_idx in pages:
                 row = [f"{base_idx:02x}"]
-                count = 0
-                while count < 4 and (i + count) < n:
-                    next_idx = sorted_indices[i + count]
-                    if next_idx == base_idx + count:
-                        row.append(self._core_memory[next_idx].get_hex())
-                        count += 1
-                    else:
-                        break
+                for offset in range(4):
+                    row.append(self.get_register(base_idx + offset).get_hex())
                 lines.append("  ".join(row))
-                i += count
 
         # Section III: Special Registers
         if self._special_registers:
