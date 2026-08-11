@@ -21,6 +21,10 @@ from decimal import Decimal, Context, ROUND_HALF_EVEN
 
 logger = logging.getLogger(__name__)
 
+class MemoryError(ValueError):
+    """
+    Raised when a register in the data dump contains an illegal value.
+    """
 
 class Register:
     """
@@ -286,12 +290,13 @@ class AlphaRegister(Register):
 
 STATUS_REGISTERS_RANGE = (0x00, 0x0F)
 VOID_RANGE = (0x10, 0x3F)
-XM_REGION_RANGES = (0x40, 0xBF, 0x200, 0x3FF)
 KEY_ASSIGNMENTS_RANGE = (0xC0, 0xC0)  # Key assignments are variable length.
 PRIMARY_DATA_END = 0x1FF
 
 ZERO_REGISTER_HEX = "00000000000000"
-
+ZERO_REGISTER = Register(size = 7)
+EOM_REGISTER_HEX = "ffffffffffffff"
+EOM_REGISTER = Register.from_hex(EOM_REGISTER_HEX)
 
 class MemoryRegion:
     """
@@ -469,10 +474,9 @@ class PrimaryData(MemoryRegion):
         self.set_register(addr, register)
 
 
-# The extended-memory regions the calculator can address. Region 0 is the
-# built-in 128-register block (present on every CX); regions 1 and 2 are
-# plug-in XM modules and may not be present in a given dump.
-XM_REGIONS = [(0x40, 0xBF), (0x201, 0x2EF), (0x301, 0x3EF)]
+# The extended-memory regions the calculator can address. Regions 0 and 1
+# are always present in the DM41L emulator.
+XM_REGIONS = [(0x40, 0xBF), (0x201, 0x2EF)]
 
 
 class XMFile:
@@ -777,127 +781,72 @@ class ExtendedMemory(MemoryRegion):
     def list_files(self) -> list[XMFile]:
         """
         Walks every XM region top-down and returns the files found, in
-        address order (lowest-address/oldest file first, across all
-        regions).
+        address order.
 
-        A file's data can span into the next region: within a region,
-        files are packed from the top down as they're created, so the
-        *last*-created file in a region -- the one with the lowest header
-        address, i.e. index 0 once headers are sorted ascending -- is the
-        one competing for whatever space is left, and can run out of room
-        before reaching its header's declared_length. When that happens,
-        the remaining registers continue at the very top of the next
-        region (addresses counting down from that region's ceiling),
-        confirmed against 6x-xm.dm41: XM4.000 (in region 0) is 9 registers
-        short of its declared 32, and those 9 registers -- continuing the
-        same 64.095-95.095 numeric sequence with no gap -- sit at the top
-        of region 1 (0x2e7-0x2ef), directly above XMALPHA's header. This
-        also explains fillextended.dm41's FILLMEM, whose declared_length
-        (362) is the entire XM capacity: it's built to span every region.
-
-        Because that reserved continuation space sits above every real
-        header in the next region, it's carved out *before* that region's
-        own headers are searched for, so continuation bytes (which can
-        incidentally look header-shaped, e.g. mid-stream ASCII record
-        bytes) are never misread as a header.
+        A file's data can span multiple regions.
         """
         files = []
-        carry_needed = 0
-        carry_file: Optional[XMFile] = None
 
-        for region_start, region_end in XM_REGIONS:
-            region_size = region_end - region_start + 1
-            reserved_top = 0
-            if carry_needed > 0:
-                reserved_top = min(carry_needed, region_size)
-                continuation_start = region_end - reserved_top + 1
-                carry_file.segments.append((continuation_start, region_end))
-                carry_needed -= reserved_top
+        # Notes: In theory we should be able to handle 1, 2, or 3 extended
+        # memory regions but as a practical matter, the DM41L emulator always
+        # has exactly two. These two regions occupy (0x40-0x0bf) and
+        # (0x201-0x2ef).
+        #
+        # Also, while the contents of the XM header registers would probably
+        # be initialized at boot time on a real HP41 calculator, the DM41L
+        # emulator does not initialize them until the first file is created.
+        # We can use this as a simple check for whether extended memory is
+        # empty or not.
 
-            if carry_needed > 0:
-                # The whole region (and then some) was consumed continuing
-                # the previous region's file -- nothing left here for this
-                # region's own files. Keep carrying into the next region.
-                continue
+        # If the last 3 nibbles of the region header 
+        # equal 0, there are no XM files.
+        current_region = 0
+        region_header_addr = XM_REGIONS[current_region][0]
+        region_header = self.get_register(region_header_addr)
+        if region_header == ZERO_REGISTER:
+            return []
 
-            # available_ceiling is the highest address this region's own
-            # headers/files may use -- excludes the reserved continuation
-            # space (if any) at the top.
-            available_ceiling = region_end - reserved_top
+        # Compare what the memory dump says should be the top of the first
+        # XM region with what we know it should be...
+        addr = (region_header[1] & 0x0f) * 256 + region_header[0] 
+        if addr != XM_REGIONS[current_region][1]:
+            raise MemoryError(f"Invalid XM header: {addr:x} != 0x" \
+                              f"{XM_REGIONS[current_region][1]}")
 
-            headers = []
-            header_info = {}
-            for addr in range(region_start, available_ceiling):
-                raw = self._memory.get_register(addr)._data
-                next_raw = self._memory.get_register(addr + 1)._data
-                info = self._parse_header(addr, raw)
-                if info is not None and self._looks_like_name(next_raw):
-                    headers.append(addr)
-                    header_info[addr] = info
-            headers.sort()
+        while self.get_register(addr) != EOM_REGISTER:
+            name = self.get_register(addr).get_ascii()
+            addr -= 1
+            segments=[]
+            header_addr = addr
+            header_register = self.get_register(addr)
+            header = ExtendedMemory._parse_header(addr, header_register._data)
+            if header is None:
+                raise MemoryError("Detected invalid XM file header. "\
+                                f"0x{addr:x}: {header_register.get_hex()}")
 
-            region_files = []
-            for i, header_addr in enumerate(headers):
-                # The very first register of each region (region_start) is
-                # always a reserved config/boundary record -- e.g. 0x40 and
-                # 0x201 hold something like "000030032ef0bf" (last opened
-                # file, pointer to the next region, pointer to the top of the
-                # current region) in every sample dump, never real file data.
-                # Documentation indicates that the partition between the end
-                # of used extended memory and the unused portion is
-                # ffffffffffffff. Data between that register and the "floor"
-                # (either 0xc1 or 0x202) of extended memory will be garbage
-                # and may contain data from deleted files.
-                natural_floor = headers[i - 1] + 2 if i > 0 else region_start + 1
-                ceiling = header_addr - 1
+            addr -= header["register_length"]+1
+            if addr <= XM_REGIONS[current_region][0]:
+                # File spans regions.
+                segments = [[ XM_REGIONS[current_region][0]+1, header_addr-1 ]]
 
-                # A register of all 0xFF marks "free space starts here" (seen
-                # in 3x-xm.dm41's XMBC2 and fillextended.dm41's region 2).
-                # If one is found between the natural floor and the header,
-                # the file's real data starts just above it -- the region
-                # below the sentinel down to natural_floor is simply unused,
-                # not part of this file.
-                floor = natural_floor
-                for addr in range(ceiling, natural_floor - 1, -1):
-                    if self._memory.get_register(addr)._data == b"\xff" * 7:
-                        floor = addr + 1
-                        break
-                info = header_info[header_addr]
-                name_reg = self._memory.get_register(header_addr + 1)
-                # Trailing 0x20 (space) padding prints as literal spaces;
-                # trailing NUL padding prints as '.'. Strip both.
-                name = name_reg.get_ascii().rstrip(" .")
-                region_files.append(
-                    XMFile(
-                        self._memory,
-                        header_addr=header_addr,
-                        file_type=info["file_type"],
-                        name=name,
-                        segments=[(floor, ceiling)],
-                        declared_length=info["register_length"],
-                        byte_length=info["byte_length"],
-                    )
-                )
+                s = XM_REGIONS[current_region][0] - addr
+                current_region += 1
+                addr = XM_REGIONS[current_region][1] - s
+                
+                segments.append([ addr+1, XM_REGIONS[current_region][1] ])
 
-            files.extend(region_files)
-
-            # headers is sorted ascending, so region_files[0] is the file
-            # with the lowest header address -- the last-created, bottommost
-            # file in this region, and the only one that can legitimately
-            # run short of its declared_length by hitting the region floor.
-            if region_files:
-                bottommost = region_files[0]
-                shortfall = bottommost.declared_length - bottommost.num_registers
-                if shortfall > 0:
-                    carry_needed = shortfall
-                    carry_file = bottommost
-                else:
-                    carry_needed = 0
-                    carry_file = None
             else:
-                carry_needed = 0
-                carry_file = None
-
+                # File only has 1 segment.
+                segments = [[ addr+1, header_addr-1 ]]
+        
+            file = XMFile(memory = self._memory,
+                          name = name,
+                          header_addr = header_addr,
+                          file_type = header["file_type"],
+                          declared_length = header["register_length"],
+                          byte_length = header.get("byte_length", None),
+                          segments = segments)
+            files.append(file)
         return files
 
 
