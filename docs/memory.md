@@ -3,7 +3,10 @@ Tags: Active, DM41 Explorer
 ----------------------------------------
 # DM41 Explorer: Hardware Memory Architecture Reference
 
-The purpose of the DM41 Explorer project is to design a python application that can read, write, and edit the memory of the DM41L emulator via the DM41L's serial port. This document outlines the memory architecture of the original HP41C calculator hardware and it's implementation in the DM41L. 
+The purpose of the DM41 Explorer project is to design a python application that
+can read, write, and edit the memory of the DM41L emulator via the DM41L's
+serial port. This document outlines the memory architecture of the original
+HP41C calculator hardware and it's implementation in the DM41L. 
 
 Note on limitations: The DM41L specifically emulates the HP41CX
 calculator, which was an upgraded version of the HP41C and
@@ -21,14 +24,27 @@ behavior confirmed against real memory dumps (see
 documentation. Where something is still a guess, it's flagged
 as such rather than stated as fact.
 
-A note on sources: Much of this data was derived from "HP-41 Advanced Programming Tips"
-by Alan McCornack & Keith Jarett, "HP41 Extended Functions Made Easy", "HP41 Synthetic Programming" and other documentation found on the internet in PDF format. 
+A note on sources: Much of this data was derived from "HP-41 Advanced
+Programming Tips" by Alan McCornack & Keith Jarett, "HP41 Extended Functions
+Made Easy", "HP41 Synthetic Programming" and other documentation found on the
+internet in PDF format. 
 
 ## 1. Core Architectural Specifications
-- **Target Model:** DM41L which emulates the HP41CX (part of the HP41C series: basic C, expanded memory CV, and extended capabilities CX).
-- **Memory Hardware:** The HP41 organized its memory into 7-byte (56-bit) registers. The DM41 emulator mimics this organization.
-- **Instruction Set:** Operates on a variable-length instruction set where opcodes are between **1 and 3 bytes** long. This requires careful alignment for disassembly as code fragments may not align with register boundaries.
-- **Execution Model:** When the HP41 series was developed, many modern computer architecture conventions had not yet stablized. In particular, the HP41 employs a **Reverse Execution Model** where the instruction pointer moves from higher memory addresses to lower memory addresses ($N \rightarrow 0$). This explains why program termination sequences (like "...END...") appear at relatively low register indices in dumps, while the entry point resides in high memory. This same high-to-low convention governs saved files in Extended Memory (see §4), but not user data stored in main memory.
+- **Target Model:** DM41L which emulates the HP41CX (part of the HP41C series:
+  basic C, expanded memory CV, and extended capabilities CX).
+- **Memory Hardware:** The HP41 organized its memory into 7-byte (56-bit)
+  registers. The DM41 emulator mimics this organization.
+- **Instruction Set:** Operates on a variable-length instruction set where
+  opcodes are between **1 and 3 bytes** long. This requires careful alignment
+  for disassembly as code fragments may not align with register boundaries.
+- **Execution Model:** When the HP41 series was developed, many modern computer
+  architecture conventions had not yet stablized. In particular, the HP41
+  employs a **Reverse Execution Model** where the instruction pointer moves
+  from higher memory addresses to lower memory addresses ($N \rightarrow 0$).
+  This explains why program termination sequences (like "...END...") appear at
+  relatively low register indices in dumps, while the entry point resides in
+  high memory. This same high-to-low convention governs saved files in Extended
+  Memory (see §4), but not user data stored in main memory.
 
 ## 2. Memory Register Structure and Data Formats
 
@@ -64,7 +80,8 @@ $10^{-99}$ to $10^{99}$.
 
 ## 3. Memory Architecture
 
-The calculator's memory is divided into regions where the hardware registers are interpreted differently:
+The calculator's memory is divided into regions where the hardware registers
+are interpreted differently:
 
 | Region | Description | Start | End |
 | ----------- | ----------- | ----------- | ----------- | 
@@ -74,7 +91,9 @@ The calculator's memory is divided into regions where the hardware registers are
 | Main Memory | Main memory consists of 319 registers that are subdivided into variable length sub-regions. | 0xC0 | 0x1FF |
 | Extended Memory #1 | File-oriented memory region. | 0x200 | 0x2FF |
 
-An additional memory region may exist in actual HP41CV and HP41CX calculators if an an addition Extended Memory module is installed, but this is not reflected in the DM41L emulator.
+An additional memory region may exist in actual HP41CV and HP41CX calculators
+if an an addition Extended Memory module is installed, but this is not
+reflected in the DM41L emulator.
 
 ### Status Registers
 
@@ -100,7 +119,11 @@ An additional memory region may exist in actual HP41CV and HP41CX calculators if
 | e | shifted key assign: e[3:6], scratch: e[2], LineNo e[0:1] | 0x0f |
 
 #### HP41 Alpha display:
-The main display of the HP41 series and the DM41L emulator is actually composed of Status Registers M, N, O, and part of register P. The user sees this as a continuous buffer of 24 ASCII characters but the physical memory is still comprised of 7-byte registers.
+
+The main display of the HP41 series and the DM41L emulator is actually composed
+of Status Registers M, N, O, and part of register P. The user sees this as a
+continuous buffer of 24 ASCII characters but the physical memory is still
+comprised of 7-byte registers.
 
 ### Main Memory
 
@@ -158,11 +181,16 @@ Two nibbles make one byte; seven bytes make one register.
 * **0x200:** Always zero? Purpose unknown.
 * **0x201:** 000WW0PPNNNTTT or 00000000000000 (if no XM files have been created)
 
-- TTT is the address of the top of the current XM region. For the DM41L emulator this will be either 0xbf or 0x2ef.
-- NNN is the address of the top of the next block of XM memory. For the DM41L emulator this will be either 0x2ef or zero.
-- WW is the index of the currently open XM file. (It is unclear if this is true for register 0x201.)
-- PP maybe the index of the previously open XM file. (It is unclear if this is true for register 0x201.)
-- unused nibbles are not guaranteed to be zero, they may be used as temporary memory for internal operations.
+- TTT is the address of the top of the current XM region. For the DM41L
+  emulator this will be either 0xbf or 0x2ef.
+- NNN is the address of the top of the next block of XM memory. For the DM41L
+  emulator this will be either 0x2ef or zero.
+- WW is the index of the currently open XM file. (It is unclear if this is true
+  for register 0x201.)
+- PP maybe the index of the previously open XM file. (It is unclear if this is
+  true for register 0x201.)
+- unused nibbles are not guaranteed to be zero, they may be used as temporary
+  memory for internal operations.
 
 ### 4.2 XM File Structure — General Layout
 
