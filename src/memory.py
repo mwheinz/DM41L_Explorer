@@ -588,10 +588,15 @@ class XMFile:
         3x-xm.dm41 and the repeating "FILLMEM" records in fillextended.dm41.
 
         Stops at the first length byte of 0, or one that would run past the
-        end of this file's allocated registers -- this keeps leftover
-        uninitialized fill bytes below a partially-used file from being
-        misread as records, but hasn't been tested against a file that
-        legitimately contains a zero-length record.
+        end of this file's allocated registers. A real DM41L-created file
+        (2 ASCII records) terminates its record stream with an explicit
+        0xFF length byte -- the same "0xFF marks free/end" convention used
+        elsewhere in this format (docs/memory.md sec. 4.5) -- which is
+        always caught by the overrun check here regardless of position, so
+        no separate 0xFF check is needed. The `length == 0` branch is a
+        defensive fallback for leftover zero-filled space below a
+        partially-used file; it hasn't been tested against a file that
+        legitimately contains a genuine zero-length record.
         """
         if self.file_type != self.TYPE_ASCII:
             raise ValueError(f"{self.name!r} is not an ASCII file ({self.type_label})")
@@ -962,18 +967,34 @@ class ExtendedMemory(MemoryRegion):
         return Register(data=bytes(data))
 
     @staticmethod
-    def _build_region_pointer(region_index: int) -> Register:
-        """Builds the 000WW0PPNNNTTT pointer register for XM_REGIONS[region_index]
-        (docs/memory.md sec. 4.1), used only to bootstrap a region that has
-        never held a file. TTT/NNN (this region's own ceiling, and the next
-        region's ceiling or 0) are well-confirmed. WW/PP ("currently"/
-        "previously open file index") are left at 0 -- their real meaning
-        and whether a loadable dump requires anything else there is NOT
-        confirmed; docs/memory.md flags this explicitly."""
+    def _build_region_pointer(
+        region_index: int, *, next_region_active: bool, ww: int, pp: int
+    ) -> Register:
+        """
+        Builds the 000WW0PPNNNTTT pointer register for XM_REGIONS[region_index]
+        (docs/memory.md sec. 4.1).
+
+        TTT is this region's own ceiling (well-confirmed). NNN is the next
+        region's ceiling, but only when next_region_active -- **confirmed**
+        by comparing real captures: a single, non-spanning file
+        (tests/data/helloworld.dm41) leaves NNN at 0 even though region 1
+        exists in hardware, while dumps with an actually-spanning file
+        (3x-xm.dm41, 6x-xm.dm41) show NNN as region 1's ceiling. So NNN
+        reflects whether the next region is *in use*, not merely whether
+        it exists in XM_REGIONS.
+
+        ww/pp ("currently"/"previously open file index", docs/memory.md
+        sec. 4.1) are caller-supplied -- see add_file()'s call sites for
+        what's actually confirmed for each region.
+        """
         ttt = XM_REGIONS[region_index][1]
         next_region = region_index + 1
-        nnn = XM_REGIONS[next_region][1] if next_region < len(XM_REGIONS) else 0
+        nnn = 0
+        if next_region_active and next_region < len(XM_REGIONS):
+            nnn = XM_REGIONS[next_region][1]
         data = bytearray(7)
+        data[2] = (ww & 0x0F) << 4
+        data[3] = pp & 0xFF
         data[4] = (nnn >> 4) & 0xFF
         data[5] = ((nnn & 0x0F) << 4) | ((ttt >> 8) & 0x0F)
         data[6] = ttt & 0xFF
@@ -996,9 +1017,12 @@ class ExtendedMemory(MemoryRegion):
           - numbers (TYPE_DATA): a list of floats, one BCD register each.
           - records (TYPE_ASCII): a list of strings, packed as
             [1-byte length][text] records (docs/memory.md sec. 4.3), with
-            a trailing 0x00 terminator byte always written explicitly so
-            get_records() has a real stopping point even when the packed
-            content exactly fills a whole number of registers.
+            a trailing 0xFF terminator byte always written explicitly, so
+            there's a real stopping point even when the packed content
+            exactly fills a whole number of registers. 0xFF (not 0x00) is
+            confirmed against a real DM41L-created 2-record ASCII file --
+            see docs/memory.md sec. 4.5 for the same 0xFF convention used
+            elsewhere in the format.
           - instruction_bytes (TYPE_PROGRAM): raw instruction bytes; a
             modulo-256 checksum byte is appended automatically.
 
@@ -1054,7 +1078,7 @@ class ExtendedMemory(MemoryRegion):
                     )
                 stream.append(len(encoded))
                 stream += encoded
-            stream.append(0)  # Explicit end-of-records marker.
+            stream.append(0xFF)  # Explicit end-of-records marker.
             while len(stream) % 7 != 0:
                 stream.append(0)
             data_registers = [
@@ -1121,10 +1145,57 @@ class ExtendedMemory(MemoryRegion):
         if next_name_addr > XM_REGIONS[ending_region][0]:
             self.set_register(next_name_addr, EOM_REGISTER)
 
+        # The first file to actually use region 1 -- whether that's this
+        # very file, or a later one appended after region 0 was already
+        # bootstrapped -- must be reflected in region 0's OWN pointer
+        # register's NNN field, not just region 1's. Missing this is a
+        # confirmed real bug: a dump where region 0 was bootstrapped by an
+        # earlier, non-spanning file (leaving NNN at 0, correctly, at that
+        # time) and only a *later* file first spans into region 1 left
+        # NNN stuck at 0 forever after -- the real DM41L trusts that field
+        # to know region 1 exists at all, so every file from the first
+        # spanning one onward (including ones entirely within region 1)
+        # was invisible to it, even though this tool's own list_files()
+        # never needed that field and so never caught it.
+        region1_is_new = (
+            ending_region == 1 and self.get_register(XM_REGIONS[1][0]) == ZERO_REGISTER
+        )
+
         if needs_bootstrap:
-            self.set_register(XM_REGIONS[0][0], self._build_region_pointer(0))
-        if ending_region == 1 and self.get_register(XM_REGIONS[1][0]) == ZERO_REGISTER:
-            self.set_register(XM_REGIONS[1][0], self._build_region_pointer(1))
+            # Confirmed against tests/data/helloworld.dm41 (a real DM41L,
+            # erased then given its very first XM file): ww=1, pp=0.
+            self.set_register(
+                XM_REGIONS[0][0],
+                self._build_region_pointer(
+                    0, next_region_active=region1_is_new, ww=1, pp=0
+                ),
+            )
+        elif region1_is_new:
+            # Region 0 was already bootstrapped by an earlier file; patch
+            # its NNN field only, preserving whatever WW/PP it already
+            # had (no confirmed rule for updating those on every append --
+            # see docs/memory.md sec. 4.1).
+            r40 = self.get_register(XM_REGIONS[0][0])
+            ww0 = (r40._data[2] >> 4) & 0x0F
+            pp0 = r40._data[3]
+            self.set_register(
+                XM_REGIONS[0][0],
+                self._build_region_pointer(0, next_region_active=True, ww=ww0, pp=pp0),
+            )
+
+        if region1_is_new:
+            # Confirmed against tests/data/3x-xm.dm41 and 6x-xm.dm41 (both
+            # real captures with a genuinely-spanning file): ww=0, and
+            # pp equal to XM_REGIONS[0][0] in both -- reads like a fixed
+            # back-link to region 0's own pointer register rather than a
+            # file count (both dumps have a different file count but the
+            # identical pp).
+            self.set_register(
+                XM_REGIONS[1][0],
+                self._build_region_pointer(
+                    1, next_region_active=False, ww=0, pp=XM_REGIONS[0][0]
+                ),
+            )
 
         return XMFile(
             memory=self._memory,

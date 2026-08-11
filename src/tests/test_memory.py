@@ -315,7 +315,7 @@ def test_status_registers_invalid_address(status_memory):
 # --- Extended Memory / XMFile Tests ---
 
 from pathlib import Path
-from memory import ExtendedMemory, ZERO_REGISTER, XM_REGIONS, MemoryError
+from memory import ExtendedMemory, MemoryError, XM_REGIONS
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -511,10 +511,71 @@ def test_xm_add_file_spans_regions_when_it_does_not_fit():
 
     # Region 1's own pointer register must have been bootstrapped too,
     # since this is the first time anything has been written there.
-    r201 = xm.get_register(0x201)
-    assert r201 != ZERO_REGISTER
-    ttt = (r201[1] & 0x0F) * 256 + r201[0]
-    assert ttt == XM_REGIONS[1][1]
+    # Confirmed against real captures with a genuinely-spanning file
+    # (tests/data/3x-xm.dm41, 6x-xm.dm41) -- both show this exact value.
+    assert xm.get_register(0x201).get_hex() == "000000400002ef"
+
+
+def test_xm_add_file_bootstrap_matches_real_device_pointer_register():
+    """A real DM41L, erased then given its very first (non-spanning) XM
+    file, wrote region 0's pointer register (0x040) as 000010000000bf --
+    notably with NNN left at 0 even though region 1 exists in hardware
+    (see tests/data/helloworld.dm41). add_file() bootstrapping the same
+    scenario must produce the identical register."""
+    real = _load_xm("helloworld.dm41")
+    assert real.get_register(0x40).get_hex() == "000010000000bf"
+
+    xm = _load_xm("empty.dm41")
+    xm.add_file("NOTES", xm.TYPE_ASCII, records=["HELLO", "WORLD"])
+    assert xm.get_register(0x40).get_hex() == "000010000000bf"
+
+
+def test_xm_add_file_updates_region0_nnn_when_a_later_file_first_spans():
+    """A real bug: region 0's pointer register (0x040) is only written
+    once, when the very first file bootstraps it -- at that point NNN is
+    correctly 0 if that file doesn't span. But if a *later* file (not the
+    first) is the one that first spans into region 1, 0x040 must be
+    patched then too, or its NNN field stays stuck at 0 forever and the
+    real DM41L never looks at region 1 again -- every file placed there
+    from that point on (including ones entirely inside region 1, not just
+    the spanning one) becomes invisible to it, even though this tool's
+    own list_files() doesn't depend on NNN and so doesn't notice.
+
+    Confirmed via a real repro: several small ASCII files that fit
+    entirely in region 0, followed by one large enough to span, followed
+    by more files placed entirely in region 1."""
+    xm = _load_xm("empty.dm41")
+
+    def nnn():
+        r40 = xm.get_register(0x40)
+        return (r40[2] << 4) | (r40[1] >> 4)
+
+    # Nine 9-record files fit entirely within region 0.
+    for i in range(1, 10):
+        xm.add_file(
+            f"NOTES{i}", xm.TYPE_ASCII,
+            records=[f"RECORD{n}" for n in range(1, 10)],
+        )
+        assert nnn() == 0, f"NNN went non-zero before any file spans (after NOTES{i})"
+
+    # The tenth is the one that spans.
+    tenth = xm.add_file(
+        "NOTES10", xm.TYPE_ASCII, records=[f"RECORD{n}" for n in range(1, 10)]
+    )
+    assert tenth.spans_regions is True
+    assert nnn() == XM_REGIONS[1][1]
+
+    # Ten more Data files land entirely within region 1 and must still be
+    # visible.
+    for i in range(1, 11):
+        xm.add_file(f"DATA{i}", xm.TYPE_DATA, numbers=list(range(1, 14)))
+        assert nnn() == XM_REGIONS[1][1]
+
+    files = xm.list_files()
+    assert len(files) == 20
+    assert {f.name.strip() for f in files} == {
+        f"NOTES{i}" for i in range(1, 11)
+    } | {f"DATA{i}" for i in range(1, 11)}
 
 
 def test_xm_add_file_no_room_raises():
@@ -561,3 +622,22 @@ def test_xm_add_file_dump_rows_stay_page_aligned():
     files = xm2.list_files()
     assert len(files) == 1
     assert files[0].get_records() == ["1", "2", "3", "4", "5", "-16"]
+
+
+def test_xm_add_file_ascii_matches_real_device_encoding():
+    """A real DM41L, given a fresh (erased) memory and told to create an
+    ASCII file called NOTES with records HELLO/WORLD, wrote its data
+    registers as 0548454c4c4f05 / 574f524c44ff00 -- terminating the
+    record stream with 0xFF (not 0x00). A file created by add_file()
+    with the same name and records must produce byte-identical data
+    registers to that real capture (see tests/data/helloworld.dm41,
+    and docs/memory.md sec. 4.3)."""
+    real = _load_xm("helloworld.dm41")
+    real_notes = next(f for f in real.list_files() if f.name == "NOTES  ")
+    real_register_hex = [r.get_hex() for r in real_notes.data_registers()]
+
+    xm = _load_xm("empty.dm41")
+    added = xm.add_file("NOTES", xm.TYPE_ASCII, records=["HELLO", "WORLD"])
+
+    assert [r.get_hex() for r in added.data_registers()] == real_register_hex
+    assert added.get_records() == ["HELLO", "WORLD"]

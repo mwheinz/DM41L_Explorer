@@ -184,11 +184,25 @@ Two nibbles make one byte; seven bytes make one register.
 - TTT is the address of the top of the current XM region. For the DM41L
   emulator this will be either 0xbf or 0x2ef.
 - NNN is the address of the top of the next block of XM memory. For the DM41L
-  emulator this will be either 0x2ef or zero.
+  emulator this will be either 0x2ef or zero. **Confirmed:** NNN reflects
+  whether the next region is actually *in use*, not merely whether it exists
+  — a single non-spanning file leaves NNN at zero in register 0x040 even
+  though region 1 exists in hardware (`tests/data/helloworld.dm41`), while a
+  file that actually spans into region 1 sets NNN to 0x2ef there
+  (`tests/data/3x-xm.dm41`, `6x-xm.dm41`).
 - WW is the index of the currently open XM file. (It is unclear if this is true
-  for register 0x201.)
+  for register 0x201.) **Observed:** register 0x040 for a freshly-created,
+  still-open single file (`helloworld.dm41`) has WW=01, PP=00; for two static,
+  presumably-closed multi-file dumps (`3x-xm.dm41` with 3 files, `6x-xm.dm41`
+  with 6 files) WW=PP=the file count (03/03 and 06/06 respectively) — consistent
+  with "currently/previously open" but not a confirmed transition rule, since
+  no capture of an *intermediate* append operation is available yet.
 - PP maybe the index of the previously open XM file. (It is unclear if this is
-  true for register 0x201.)
+  true for register 0x201.) In register 0x201 specifically, both available
+  spanning captures (`3x-xm.dm41`, `6x-xm.dm41`, despite differing file counts)
+  show the *identical* PP=0x40 — this looks more like a fixed back-link to
+  register 0x040's own address than a file-count-style index, but that's not
+  confirmed either.
 - unused nibbles are not guaranteed to be zero, they may be used as temporary
   memory for internal operations.
 
@@ -235,7 +249,7 @@ the same position — nibbles 11-13 (the low nibble of byte 5, plus all of byte
   - `CC` (nibbles 6-7): documented as pointing to a character within the current register.
   - `RRR` (nibbles 8-10): documented as pointing to the current register.
   - `SSS` (nibbles 11-13): length of the file in registers, per §4.3 above.
-  - ASCII file *contents* are packed as a byte stream across the file's data registers (nearest-header-first, concatenated in normal left-to-right byte order): a series of `[1-byte length][text bytes]` records back-to-back with no padding between them, running until a zero length byte or a length that would overrun the file's registers.
+  - ASCII file *contents* are packed as a byte stream across the file's data registers (nearest-header-first, concatenated in normal left-to-right byte order): a series of `[1-byte length][text bytes]` records back-to-back with no padding between them. **Confirmed** (by comparing a real DM41L-created 2-record file against a hand-packed one that used a `0x00` terminator and was rejected by the calculator): the record stream is terminated by a `0xFF` length byte, matching the same "`0xFF` marks free/end" convention as elsewhere in this format (see §4.5) — not by a `0x00` length byte.
 
 ### 4.5 File Boundaries, Free Space, and Open Questions
 
