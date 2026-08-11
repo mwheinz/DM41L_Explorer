@@ -28,9 +28,14 @@ def print_extended_memory(xm: ExtendedMemory):
         return
 
     for f in files:
+        if f.spans_regions:
+            span_str = " + ".join(f"0x{s:03x}-0x{e:03x}" for s, e in f.segments)
+            location = f"data={span_str} (spans regions)"
+        else:
+            location = f"data=0x{f.data_start:03x}-0x{f.data_end:03x}"
         print(
             f"{f.name!r:<12} {f.type_label:<6} "
-            f"header=0x{f.header_addr:03x}  data=0x{f.data_start:03x}-0x{f.data_end:03x} "
+            f"header=0x{f.header_addr:03x}  {location} "
             f"({f.num_registers} registers, header declares {f.declared_length})"
         )
         if f.file_type == xm.TYPE_DATA:
@@ -43,6 +48,15 @@ def print_extended_memory(xm: ExtendedMemory):
             preview = ", ".join(repr(r) for r in records[:8])
             more = f", ... ({len(records)} total)" if len(records) > 8 else ""
             print(f"    {preview}{more}")
+        elif f.file_type == xm.TYPE_PROGRAM:
+            checksum = f.checksum_valid
+            checksum_str = (
+                "valid" if checksum else "INVALID" if checksum is False else "unknown"
+            )
+            print(
+                f"    {f.byte_length} instruction bytes, checksum {checksum_str}"
+            )
+            print(f"    {f.get_instruction_bytes().hex()}")
         print()
 
 

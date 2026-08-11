@@ -486,22 +486,45 @@ class XMFile:
         header_addr: int,
         file_type: int,
         name: str,
-        data_start: int,
-        data_end: int,
+        segments: list,
         declared_length: int,
+        byte_length: Optional[int] = None,
     ):
         self._memory = memory
         self.header_addr = header_addr
         self.name_addr = header_addr + 1
         self.file_type = file_type
         self.name = name
-        # data_start/data_end are inclusive, data_end is always header_addr-1
-        # (the register directly below the header). data_start is derived
-        # from the next file below (or the region floor), NOT from
-        # declared_length -- see the note on ExtendedMemory.
-        self.data_start = data_start
-        self.data_end = data_end
+        # segments is a list of inclusive (start, end) address ranges, in
+        # record order: the first segment is in the header's own region and
+        # starts at data_end == header_addr-1 (the register directly below
+        # the header); a file whose declared_length doesn't fit in that
+        # region's remaining space continues with one or more further
+        # segments at the top of the next region(s) -- see the note on
+        # ExtendedMemory.list_files() about cross-region continuation.
+        # Each segment's start is derived structurally (from the next file
+        # below it, the region floor, or a region's remaining declared
+        # length), NOT assumed from declared_length.
+        self.segments = list(segments)
+        # Register count declared in the header (SSS in docs/memory.md).
         self.declared_length = declared_length
+        # Program files only: instruction-byte count declared in the header
+        # (BBB in docs/memory.md), not counting the trailing checksum byte.
+        # None for Data/ASCII files.
+        self.byte_length = byte_length
+
+    @property
+    def data_end(self) -> int:
+        """The highest address of this file's data -- always header_addr-1,
+        in the header's own region (the first/nearest-header segment)."""
+        return self.segments[0][1]
+
+    @property
+    def data_start(self) -> int:
+        """The lowest address of this file's data. For a file that spans
+        regions, this is in the *last* (furthest-from-header) segment,
+        which may be in a different region than header_addr."""
+        return self.segments[-1][0]
 
     @property
     def type_label(self) -> str:
@@ -509,25 +532,32 @@ class XMFile:
 
     @property
     def num_registers(self) -> int:
-        return self.data_end - self.data_start + 1
+        return sum(end - start + 1 for start, end in self.segments)
+
+    @property
+    def spans_regions(self) -> bool:
+        """True if this file's data continues past the region its header
+        lives in, into the top of one or more subsequent XM regions."""
+        return len(self.segments) > 1
 
     def __repr__(self):
-        return (
-            f"XMFile({self.name!r}, {self.type_label}, "
-            f"0x{self.data_start:03x}-0x{self.data_end:03x})"
-        )
+        span = ", ".join(f"0x{s:03x}-0x{e:03x}" for s, e in self.segments)
+        return f"XMFile({self.name!r}, {self.type_label}, {span})"
 
     def data_registers(self) -> list:
         """
         This file's data registers in record order: nearest the header
         (record 1) first, down to the farthest register (last record) --
-        i.e. descending address. Confirmed against known record sequences
-        in 3x-xm.dm41 (both Data and ASCII) and fillextended.dm41 (ASCII).
+        i.e. descending address within each segment, walking segments in
+        order. Confirmed against known record sequences in 3x-xm.dm41
+        (both Data and ASCII) and fillextended.dm41 (ASCII), and against
+        the record values that continue seamlessly across a region
+        boundary in 6x-xm.dm41's XM4.000 (see ExtendedMemory.list_files()).
         """
-        return [
-            self._memory.get_register(a)
-            for a in range(self.data_end, self.data_start - 1, -1)
-        ]
+        regs = []
+        for start, end in self.segments:
+            regs.extend(self._memory.get_register(a) for a in range(end, start - 1, -1))
+        return regs
 
     def get_numbers(self) -> list:
         """Data-type files: one BCD number per register, in record order."""
@@ -570,6 +600,50 @@ class XMFile:
             i += 1 + length
         return records
 
+    def get_program_bytes(self) -> bytes:
+        """
+        Program-type files: the raw byte stream for this file's registers,
+        in the same header-adjacent-first order as data_registers(). This
+        stream is exactly declared_length * 7 bytes long: the first
+        byte_length bytes are the program's instructions (read high-to-low
+        per the HP41's reverse execution model -- see docs/memory.md) and
+        the byte immediately after them is a modulo-256 checksum. Any bytes
+        beyond that (there shouldn't be any once byte_length is set
+        correctly) are leftover/padding.
+        """
+        if self.file_type != self.TYPE_PROGRAM:
+            raise ValueError(f"{self.name!r} is not a Program file ({self.type_label})")
+        stream = bytearray()
+        for reg in self.data_registers():
+            stream += bytes(reg._data)
+        return bytes(stream)
+
+    def get_instruction_bytes(self) -> bytes:
+        """Program-type files: just the instruction bytes, excluding the
+        trailing checksum byte (and any bytes past it)."""
+        data = self.get_program_bytes()
+        if self.byte_length is None:
+            return data
+        return data[: self.byte_length]
+
+    @property
+    def checksum_valid(self) -> Optional[bool]:
+        """
+        Program-type files: whether the byte immediately following the
+        declared instruction bytes matches a modulo-256 sum of those
+        instruction bytes, as described in docs/memory.md. Returns None if
+        byte_length wasn't available (so there's nothing to check against).
+        """
+        if self.file_type != self.TYPE_PROGRAM:
+            raise ValueError(f"{self.name!r} is not a Program file ({self.type_label})")
+        if self.byte_length is None:
+            return None
+        data = self.get_program_bytes()
+        if self.byte_length >= len(data):
+            return None
+        computed = sum(data[: self.byte_length]) % 256
+        return computed == data[self.byte_length]
+
 
 class ExtendedMemory(MemoryRegion):
     """
@@ -583,47 +657,49 @@ class ExtendedMemory(MemoryRegion):
     Header register layout, reverse-engineered from several known-content
     dumps (not from a documented spec -- see docs/memory.md for the sample
     data this is based on):
-      nibble 0      file type: 2 = Data, 3 = ASCII. (A 3rd file type for
-                    saved Programs/Apps is known to exist but not decoded --
-                    see the note below.)
-      remaining     NOT reliable. An earlier version of this code found
-                    headers by checking whether nibbles 1-3 equalled the
-                    header's own address, which held across several sample
-                    dumps -- but a dump generated by an independent test
-                    program (a self-copying program, not the original two
-                    file-creator apps) broke it: those bytes were plain
-                    zero. That, plus this same dump's Data-file header
-                    having a last byte (0xc8=200) that matches leftover CPU
-                    stack content rather than any sensible register count,
-                    points to these bytes being creator-supplied scratch
-                    space rather than an OS-enforced field -- i.e. the
-                    earlier pattern was likely specific to how Mike's first
-                    two test apps happened to write their headers, not a
-                    general rule. Don't trust any field here except type.
+      nibble 0      file type: 1 = Program, 2 = Data, 3 = ASCII.
+      nibble 1-3    (Data/ASCII only) AAA, the header's own address.
+                    Confirmed against every real header in every sample
+                    dump with no exceptions -- see _parse_header().
+      remaining     Register-count (SSS, all three types) and, for
+                    Program, instruction-byte-count (BBB) -- see
+                    _parse_header(). RRR/CC (Data/ASCII) aren't decoded;
+                    docs/memory.md has what's documented about them, but
+                    nothing here depends on them.
+                    Program headers ("10000000BBBSSS") are a special case:
+                    bytes 0-3 are a fixed 0x10 00 00 00 signature, and the
+                    BBB/SSS fields that follow it check out against real
+                    dumps -- confirmed by validating the trailing checksum
+                    byte (see XMFile.checksum_valid) against 6x-xm.dm41 and
+                    3x-xm.dm41's saved "PURXM" program.
 
-    Because the header content itself isn't trustworthy, list_files() finds
-    headers structurally instead: a register with a Data/ASCII type nibble
-    immediately followed by a register that looks like a 7-character name
-    (mostly printable ASCII). This matched every file in every sample dump
-    (old and new) with no false positives, including the empty-XM dumps.
+    list_files() finds Data/ASCII headers structurally: a register with a
+    Data/ASCII type nibble, whose AAA equals its own address, whose
+    reserved-zero nibbles are actually zero, immediately followed by a
+    register that looks like a 7-character name (mostly printable ASCII).
+    All four checks are needed -- confirmed against largedump.dm41, where a
+    run of ordinary packed text happened to satisfy the type-nibble and
+    name-shaped checks alone (see _parse_header() for the specifics) but
+    failed both AAA and the reserved-zero check, and would have produced a
+    phantom file without them. Program headers are found by their fixed
+    signature instead (see _parse_header()), which is what keeps mid-stream
+    bytes of a packed ASCII record (which can also start with a nibble of
+    1) from being misread as a Program header.
 
-    NOT YET UNDERSTOOD (both open questions, not yet worth guessing at):
-      - How a file continues once it outgrows one region into the next
-        (fillextended.dm41). A file that crosses a region boundary will
-        only be reported for the portion in the region where its header
-        was found.
-      - The Program/App file type. The self-copying test dump shows the
-        copied program's raw bytes landing in extended memory (duplicated
-        verbatim from where the program sits in main memory), but with
-        no header/name pair in the same shape as Data/ASCII files -- it
-        isn't picked up by list_files() at all yet, so a dump containing
-        one will under-report both the file count and the free space
-        available in that region.
+    NOT YET UNDERSTOOD:
+      - Whether a file can span more than two regions in one hop the same
+        way it spans two (list_files() carries a shortfall forward through
+        every region in turn, so this should already work, but it's only
+        been confirmed against a two-region span so far -- fillextended.dm41's
+        FILLMEM declares enough registers to need all three regions, which
+        would be the real test, but hasn't been checked register-by-register
+        the way the 6x-xm.dm41 case was).
     """
 
     key = "extended_memory"
     label = "Extended Memory"
 
+    TYPE_PROGRAM = XMFile.TYPE_PROGRAM
     TYPE_DATA = XMFile.TYPE_DATA
     TYPE_ASCII = XMFile.TYPE_ASCII
 
@@ -636,27 +712,139 @@ class ExtendedMemory(MemoryRegion):
         content (which mixes in raw length-prefix bytes)."""
         return sum(1 for b in raw if 0x20 <= b <= 0x7E) >= 5
 
+    @classmethod
+    def _parse_header(cls, addr: int, raw: bytes) -> Optional[dict]:
+        """
+        Attempts to interpret a 7-byte register at `addr` as an XM file
+        header. Returns None if `raw` doesn't match a known header shape,
+        otherwise a dict with file_type, register_length (SSS in
+        docs/memory.md, the register count declared in the header) and,
+        for Program files only, byte_length (BBB, the instruction-byte
+        count).
+
+        register_length/byte_length are read from the 3-nibble SSS field
+        (byte 5's low nibble + byte 6) and the 3-nibble BBB field (byte 4 +
+        byte 5's high nibble) respectively -- these positions are the same
+        across all three header formats in docs/memory.md.
+        """
+        if len(raw) != 7:
+            return None
+        file_type = raw[0] >> 4
+        if file_type not in (cls.TYPE_PROGRAM, cls.TYPE_DATA, cls.TYPE_ASCII):
+            return None
+
+        register_length = ((raw[5] & 0x0F) << 8) | raw[6]
+
+        if file_type == cls.TYPE_PROGRAM:
+            # Program headers are "10000000BBBSSS" -- bytes 0-3 are a fixed
+            # 0x10 00 00 00 signature. Without this check, mid-stream bytes
+            # of a packed ASCII record (which can also start with a nibble
+            # of 1) would be misread as Program headers.
+            if raw[0] != 0x10 or raw[1:4] != b"\x00\x00\x00":
+                return None
+            byte_length = (raw[4] << 4) | (raw[5] >> 4)
+            return {
+                "file_type": file_type,
+                "register_length": register_length,
+                "byte_length": byte_length,
+            }
+
+        # Data ("2AAA0000RRRSSS") and ASCII ("3AAA00CCRRRSSS") headers both
+        # encode the header's own address as AAA (nibble 1-3: the low
+        # nibble of byte 0, plus all of byte 1) and both specify a reserved
+        # run of nibbles that must literally be zero: nibble 4-7 for Data,
+        # nibble 4-5 for ASCII. Both are confirmed against every real
+        # header in every sample dump with no exceptions: AAA always equals
+        # the header's own address, and the reserved nibbles are always
+        # zero. (An earlier version of this code treated AAA as unreliable
+        # scratch space, based on a note about a dump that broke it -- that
+        # note turned out to have no dump or evidence behind it anywhere in
+        # this project, likely a mistaken claim from earlier work, and has
+        # been removed.) Requiring both -- on top of the type nibble and
+        # the name-shaped check on the next register -- is what tells a
+        # real header apart from a register that merely coincidences into
+        # looking like one: confirmed necessary against largedump.dm41,
+        # where a run of packed ASCII/program-literal text (".. UP.WAR" at
+        # 0x0ba, itself just mid-stream content of the real "TS" file) has
+        # a Data type nibble and a name-shaped register right after it, but
+        # its AAA is 0x055 (not its own address, 0x0ba) and its nibble 4-7
+        # is "5004" (not "0000").
+        aaa = ((raw[0] & 0x0F) << 8) | raw[1]
+        if aaa != addr:
+            return None
+        if file_type == cls.TYPE_DATA:
+            if raw[2:4] != b"\x00\x00":
+                return None
+        else:  # TYPE_ASCII -- nibble 4-5 is byte 2 in full; nibble 6-7
+            # (byte 3) is the CC field and isn't required to be zero.
+            if raw[2] != 0x00:
+                return None
+
+        return {"file_type": file_type, "register_length": register_length, "byte_length": None}
+
     def list_files(self) -> list[XMFile]:
         """
         Walks every XM region top-down and returns the files found, in
         address order (lowest-address/oldest file first, across all
         regions).
+
+        A file's data can span into the next region: within a region,
+        files are packed from the top down as they're created, so the
+        *last*-created file in a region -- the one with the lowest header
+        address, i.e. index 0 once headers are sorted ascending -- is the
+        one competing for whatever space is left, and can run out of room
+        before reaching its header's declared_length. When that happens,
+        the remaining registers continue at the very top of the next
+        region (addresses counting down from that region's ceiling),
+        confirmed against 6x-xm.dm41: XM4.000 (in region 0) is 9 registers
+        short of its declared 32, and those 9 registers -- continuing the
+        same 64.095-95.095 numeric sequence with no gap -- sit at the top
+        of region 1 (0x2e7-0x2ef), directly above XMALPHA's header. This
+        also explains fillextended.dm41's FILLMEM, whose declared_length
+        (362) is the entire XM capacity: it's built to span every region.
+
+        Because that reserved continuation space sits above every real
+        header in the next region, it's carved out *before* that region's
+        own headers are searched for, so continuation bytes (which can
+        incidentally look header-shaped, e.g. mid-stream ASCII record
+        bytes) are never misread as a header.
         """
         files = []
+        carry_needed = 0
+        carry_file: Optional[XMFile] = None
+
         for region_start, region_end in XM_REGIONS:
+            region_size = region_end - region_start + 1
+            reserved_top = 0
+            if carry_needed > 0:
+                reserved_top = min(carry_needed, region_size)
+                continuation_start = region_end - reserved_top + 1
+                carry_file.segments.append((continuation_start, region_end))
+                carry_needed -= reserved_top
+
+            if carry_needed > 0:
+                # The whole region (and then some) was consumed continuing
+                # the previous region's file -- nothing left here for this
+                # region's own files. Keep carrying into the next region.
+                continue
+
+            # available_ceiling is the highest address this region's own
+            # headers/files may use -- excludes the reserved continuation
+            # space (if any) at the top.
+            available_ceiling = region_end - reserved_top
+
             headers = []
-            for addr in range(region_start, region_end):
+            header_info = {}
+            for addr in range(region_start, available_ceiling):
                 raw = self._memory.get_register(addr)._data
                 next_raw = self._memory.get_register(addr + 1)._data
-                if len(raw) != 7 or len(next_raw) != 7:
-                    continue
-                file_type = raw[0] >> 4
-                if file_type in (self.TYPE_DATA, self.TYPE_ASCII) and self._looks_like_name(
-                    next_raw
-                ):
+                info = self._parse_header(addr, raw)
+                if info is not None and self._looks_like_name(next_raw):
                     headers.append(addr)
+                    header_info[addr] = info
             headers.sort()
 
+            region_files = []
             for i, header_addr in enumerate(headers):
                 # The very first register of each region (region_start) is
                 # always a reserved config/boundary record -- e.g. 0x40 and
@@ -678,24 +866,42 @@ class ExtendedMemory(MemoryRegion):
                     if self._memory.get_register(addr)._data == b"\xff" * 7:
                         floor = addr + 1
                         break
-                raw = self._memory.get_register(header_addr)._data
-                file_type = raw[0] >> 4
-                declared_length = raw[6]
+                info = header_info[header_addr]
                 name_reg = self._memory.get_register(header_addr + 1)
                 # Trailing 0x20 (space) padding prints as literal spaces;
                 # trailing NUL padding prints as '.'. Strip both.
                 name = name_reg.get_ascii().rstrip(" .")
-                files.append(
+                region_files.append(
                     XMFile(
                         self._memory,
                         header_addr=header_addr,
-                        file_type=file_type,
+                        file_type=info["file_type"],
                         name=name,
-                        data_start=floor,
-                        data_end=ceiling,
-                        declared_length=declared_length,
+                        segments=[(floor, ceiling)],
+                        declared_length=info["register_length"],
+                        byte_length=info["byte_length"],
                     )
                 )
+
+            files.extend(region_files)
+
+            # headers is sorted ascending, so region_files[0] is the file
+            # with the lowest header address -- the last-created, bottommost
+            # file in this region, and the only one that can legitimately
+            # run short of its declared_length by hitting the region floor.
+            if region_files:
+                bottommost = region_files[0]
+                shortfall = bottommost.declared_length - bottommost.num_registers
+                if shortfall > 0:
+                    carry_needed = shortfall
+                    carry_file = bottommost
+                else:
+                    carry_needed = 0
+                    carry_file = None
+            else:
+                carry_needed = 0
+                carry_file = None
+
         return files
 
 

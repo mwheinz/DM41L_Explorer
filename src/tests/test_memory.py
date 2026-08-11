@@ -310,3 +310,138 @@ def test_status_registers_invalid_address(status_memory):
     sr = StatusRegisters(status_memory)
     assert sr.label_for(0x20) is None
     assert sr.label_for(-1) is None
+
+
+# --- Extended Memory / XMFile Tests ---
+
+from pathlib import Path
+from memory import ExtendedMemory
+
+DATA_DIR = Path(__file__).parent / "data"
+
+
+def _load_xm(filename: str) -> ExtendedMemory:
+    memory = Memory.from_file(DATA_DIR / filename)
+    return ExtendedMemory(memory, address_range=[0x40, 0x3FF])
+
+
+def test_xm_6x_finds_all_six_files():
+    """6x-xm.dm41 has 4 Data files, 1 ASCII file, and 1 Program file (PURXM)."""
+    xm = _load_xm("6x-xm.dm41")
+    files = xm.list_files()
+    assert len(files) == 6
+
+    by_name = {f.name: f for f in files}
+    assert set(by_name) == {
+        "XM1.000", "XM2.000", "XM3.000", "XM4.000", "XMALPHA", "PURXM",
+    }
+
+    for name in ("XM1.000", "XM2.000", "XM3.000"):
+        assert by_name[name].file_type == xm.TYPE_DATA
+        assert by_name[name].num_registers == 32
+
+    # XM4.000 declares 32 registers but only 23 fit below it within region 0
+    # -- the remaining 9 continue at the top of region 1 (0x2e7-0x2ef, just
+    # above XMALPHA's header), confirmed by the BCD values there picking up
+    # exactly where region 0's data leaves off (see docstring on
+    # ExtendedMemory.list_files()).
+    xm4 = by_name["XM4.000"]
+    assert xm4.file_type == xm.TYPE_DATA
+    assert xm4.declared_length == 32
+    assert xm4.num_registers == 32
+    assert xm4.spans_regions is True
+    assert xm4.segments == [(0x041, 0x057), (0x2E7, 0x2EF)]
+    numbers = xm4.get_numbers()
+    assert len(numbers) == 32
+    assert numbers == pytest.approx([64.095 + i * 1.0 for i in range(32)])
+
+    assert by_name["XMALPHA"].file_type == xm.TYPE_ASCII
+    assert by_name["XMALPHA"].num_registers == 128
+    # Only some of the 128 allocated registers hold actual records; the
+    # rest are unused/zero-filled, so get_records() legitimately returns
+    # fewer entries than num_registers.
+    assert len(by_name["XMALPHA"].get_records()) > 0
+
+    assert by_name["PURXM"].file_type == xm.TYPE_PROGRAM
+    assert by_name["PURXM"].num_registers == 3
+    assert by_name["PURXM"].byte_length == 20
+    assert by_name["PURXM"].checksum_valid is True
+    assert len(by_name["PURXM"].get_instruction_bytes()) == 20
+
+
+def test_xm_3x_purxm_program_detected():
+    """3x-xm.dm41 also contains a saved PURXM program between XMBCD and
+    XMALPHA; before Program-header detection, its registers were wrongly
+    counted as part of XMALPHA's data (133 registers instead of 128)."""
+    xm = _load_xm("3x-xm.dm41")
+    files = xm.list_files()
+    by_name = {f.name: f for f in files}
+
+    assert set(by_name) == {"XMBCD", "XMALPHA", "PURXM"}
+    assert by_name["PURXM"].file_type == xm.TYPE_PROGRAM
+    assert by_name["PURXM"].checksum_valid is True
+    assert by_name["XMALPHA"].num_registers == 128
+
+
+def test_xm_program_header_rejects_non_signature_type1_nibble():
+    """A register merely starting with a 0x1 nibble (e.g. packed ASCII
+    record bytes) must not be mistaken for a Program header -- only the
+    fixed 0x10 00 00 00 signature counts."""
+    assert ExtendedMemory._parse_header(0x62, bytes.fromhex("18444546474849")) is None
+    assert ExtendedMemory._parse_header(0x263, bytes.fromhex("10000000014003")) is not None
+
+
+def test_xm_header_requires_aaa_match_own_address():
+    """A Data/ASCII header's AAA field (nibble 1-3) must equal its own
+    address -- confirmed reliable across every real header in every sample
+    dump, and what independently rules out largedump.dm41's phantom
+    'N.STAIR' header (AAA=0x055, not its real address 0x0ba)."""
+    real_header = bytes.fromhex("20580000020020")  # 6x-xm.dm41's XM4.000, AAA=0x058
+    assert ExtendedMemory._parse_header(0x058, real_header) is not None
+    assert ExtendedMemory._parse_header(0x059, real_header) is None
+
+    phantom_header = bytes.fromhex("20555004574152")  # largedump.dm41's false positive
+    assert ExtendedMemory._parse_header(0x0ba, phantom_header) is None
+
+
+def test_xm_register_length_reads_full_three_nibble_field():
+    """declared_length must read the full 3-nibble SSS field, not just the
+    header's last byte -- fillextended.dm41's FILLMEM file is declared as
+    362 registers (spanning multiple XM regions), which a single-byte read
+    would truncate to 106 (362 mod 256)."""
+    xm = _load_xm("fillextended.dm41")
+    files = xm.list_files()
+    assert len(files) == 1
+    assert files[0].declared_length == 362
+
+
+def test_xm_get_program_bytes_wrong_type_raises():
+    xm = _load_xm("6x-xm.dm41")
+    data_file = next(f for f in xm.list_files() if f.file_type == xm.TYPE_DATA)
+    with pytest.raises(ValueError):
+        data_file.get_program_bytes()
+
+
+def test_xm_largedump_no_false_positive_header():
+    """largedump.dm41 has a single ASCII file, TS (18 registers). Earlier
+    code split it into a truncated 2-register 'TS' plus a phantom 'N.STAIR'
+    Data file: mid-stream text in TS's own packed ASCII records (" UP.WAR")
+    happened to have a Data type nibble and a name-shaped following
+    register, but its reserved nibble 4-7 field was "5004", not the
+    documented "0000" -- a check real headers all satisfy and this false
+    match didn't."""
+    xm = _load_xm("largedump.dm41")
+    files = xm.list_files()
+    assert len(files) == 1
+
+    ts = files[0]
+    assert ts.name == "TS"
+    assert ts.file_type == xm.TYPE_ASCII
+    assert ts.declared_length == 18
+    assert ts.num_registers == 18
+    assert ts.segments == [(0x0AC, 0x0BD)]
+    assert ts.get_records() == [
+        "EMPTY", "STAIR DN", "STAIR UP", "WARP", "TREASURE", "FOOD",
+        "SWORD", "CLOAK", "STAFF", "EMPTY", "SKELETON", "SPIDER",
+        "WRAITH", "SPECTRE", "GARGOYLE", "DEMON",
+    ]

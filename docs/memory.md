@@ -3,19 +3,15 @@ Tags: Active, DM41 Explorer
 ----------------------------------------
 # DM41 Explorer: Hardware Memory Architecture Reference
 
-The purpose of the DM41 Explorer project is to design a python application that can read, write, and edit the memory of the DM41L emulator via the DM41L's serial port. This document outlines the memory architecture of the original physical calculator hardware and it's implementation in the DM41L. 
+The purpose of the DM41 Explorer project is to design a python application that can read, write, and edit the memory of the DM41 emulator via the DM41 emulator's serial port. This document outlines the memory architecture of the original physical calculator hardware — specifically targeting the **DM41 emulator of the HP41CX calculator**.
 
-Note on limitations: The DM41L specifically emulates the HP41CX calculator, which was an upgraded version of the HP41C and HP41CV models. The HP41C* series could be expanded with various ROM and RAM cartridges. The HP41C model had the most limited amount of main memory and no extended memory, while the HP41CV had the maximum amount of main memory already built in, but no extended memory. The HP41CX had the maximum amount of main memory and the equivalent of a time functions ROM cartridge and two extended memory cartridges already installed.
-
-A note on confidence: most of this document describes hardware behavior confirmed against real memory dumps (see `src/tests/data/*.dm41`), either because it matches published documentation or because it's been cross-checked against known content taken from a DM41L memory dump. (e.g. a file's declared length matching its actual size, or a checksum coming out valid). Where something is still a guess, it's flagged as such rather than stated as fact.
-
-A note on the DM41X emulator: When this project was begun, it was believed that the DM41L and DM41X were similar. It was later discovered that this was not the case - the DM41X does not produce memory dumps and is not compatible with this project.
+A note on confidence: most of this document describes hardware behavior confirmed against real memory dumps (see `src/tests/data/*.dm41`), either because it matches published documentation or because it's been cross-checked against known content (e.g. a file's declared length matching its actual size, or a checksum coming out valid). Where something is still a guess, it's flagged as such rather than stated as fact.
 
 ## 1. Core Architectural Specifications
 - **Target Model:** DM41L which emulates the HP41CX (part of the HP41C series: basic C, expanded memory CV, and extended capabilities CX).
 - **Memory Hardware:** The HP41 organized its memory into 7-byte (56-bit) registers. The DM41 emulator mimics this organization.
 - **Instruction Set:** Operates on a variable-length instruction set where opcodes are between **1 and 3 bytes** long. This requires careful alignment for disassembly as code fragments may not align with register boundaries.
-- **Execution Model:** When the HP41 series was developed, many modern computer architecture conventions had not yet stablized. In particular, the HP41 employs a **Reverse Execution Model** where the instruction pointer moves from higher memory addresses to lower memory addresses ($N \rightarrow 0$). This explains why program termination sequences (like "...END...") appear at relatively low register indices in dumps, while the entry point resides in high memory. This same high-to-low convention governs saved files in Extended Memory (see §4), but not user data stored in main memory.
+- **Execution Model:** Employs a **Reverse Execution Model**. The instruction pointer moves from higher memory addresses to lower memory addresses ($N \rightarrow 0$). This explains why program termination sequences (like "...END...") appear at relatively low register indices in dumps, while the entry point resides in high memory. This same high-to-low convention governs saved Program files in Extended Memory (see §4).
 
 ## 2. Memory Architecture
 
@@ -46,7 +42,7 @@ The calculator's memory is divided into regions where the hardware registers are
 | O | Alpha characters 15-21 | 0x07 | 
 | P | Alpha characters 22-25: P[0:3], scratch: P[4-6] | 0x08 |
 | Q | scratch | 0x09 |
-| F | Different sources may call this register "F", "R", or "Append". unshifted key assign: F[3:6], scratch: F[0:2] | 0x0a |
+| F | Different sources may call this register "F", "R", or "Append". unshifted key assign: F[3:6], scratch: R[0:2] | 0x0a |
 | Execution Stack | 2 registers that provide a 6-level address stack. Each entry in the stack is 2 bytes long. | 0x0b-0x0c |
 | a | return stack part 2 | 0x0b |
 | b | return stack part 1 | 0x0c | 
@@ -57,11 +53,7 @@ The calculator's memory is divided into regions where the hardware registers are
 R00 contains the address of the first data memory register (which the user sees
 as Register 00). ".END." indicates the end of the currently loaded user
 programs. The registers between ".END." and the last Alarm, Key Assignment or
-address 0x0C0 is currently unused. Unlike application instructions and XM
-files, main data memory registers begin at a low address and go UP towards the
-end of main memory. In other words, what the user sees as "Memory 00" is at
-address R00, "Memory 01" is at R00+1, "Memory 02" is at R00+2, et cetra. The
-highest user memory location will be at address 0x1ff.
+address 0x0C0 is currently unused.
 
 | Main Memory Sub-Region | Description | Start | End |
 | ----------- | ----------- | ----------- | ----------- | 
@@ -153,12 +145,12 @@ All three header formats are 14 nibbles (7 bytes) and share a `SSS` field in the
   - The saved-program's *name* register (7 ASCII characters, space-padded like Data/ASCII names) sits immediately above the header, following the same "name register above header register" convention as Data/ASCII files.
 
 * **Data**: `2AAA0000RRRSSS`
-  - `AAA` (nibbles 1-3): documented as "address of the header register" but **not reliable** — see §4.4.
+  - `AAA` (nibbles 1-3): the header's own address — confirmed reliable, see §4.4.
   - `RRR` (nibbles 8-10): documented as "address of the current record of the file". Registers in a data file are numbered from 0, with register zero being the register immediately below the name register.
   - `SSS` (nibbles 11-13): length of the file in registers, per §4.3 above.
 
 * **ASCII**: `3AAA00CCRRRSSS`
-  - `AAA` (nibbles 1-3): same caveat as Data.
+  - `AAA` (nibbles 1-3): the header's own address, same as Data — see §4.4.
   - `CC` (nibbles 6-7): documented as pointing to a character within the current register.
   - `RRR` (nibbles 8-10): documented as pointing to the current register.
   - `SSS` (nibbles 11-13): length of the file in registers, per §4.3 above.
@@ -166,16 +158,13 @@ All three header formats are 14 nibbles (7 bytes) and share a `SSS` field in the
 
 ### 4.4 Header Field Reliability
 
-The file-type nibble (and, for Program headers, the full `0x10 00 00 00` signature) is reliable. The rest of the Data/ASCII header — `AAA`, `RRR`, `CC` — is **not** reliable as a general rule:
+The file-type nibble, `AAA` (Data/ASCII), and the reserved always-zero nibbles that both formats specify (nibble 4-7 for Data, nibble 4-5 for ASCII) are all reliable — confirmed against every real header in every sample dump, with no exceptions: `AAA` always equals the header's own address, and the reserved nibbles are always zero. `RRR`/`CC` haven't been independently confirmed either way and aren't relied on by anything in this project.
 
-- An earlier version of this code found file headers by checking whether `AAA` equalled the header's own address, which held across several sample dumps.
-- But a dump generated by an independent test program (a self-copying program, not the two original file-creator apps) broke that check: those bytes were plain zero in its Data-file header.
-- That same dump's Data-file header also had a last byte (0xC8 = 200) matching leftover CPU stack content rather than any sensible register count.
-- Conclusion: `AAA`/`RRR`/`CC` are likely creator-supplied scratch space rather than an OS-enforced field — the earlier "AAA == own address" pattern was probably specific to how the two original test apps happened to write their headers, not a hardware guarantee. **Don't trust these fields**; only `SSS` (register count) has held up as reliable across every sample so far.
+(An earlier version of this document claimed `AAA` was unreliable, citing a dump from "an independent test program" that supposedly broke the pattern. That claim turned out to have no dump, data, or evidence behind it anywhere in this project — it was likely a mistaken note from earlier work, not something actually observed, and has been removed.)
 
-Because of this, file discovery works structurally rather than by trusting header content:
+Because of this, file discovery combines header content with structure, rather than relying on either alone:
 
-- **Data/ASCII headers** are found by looking for a register with a Data or ASCII type nibble immediately followed by a register that "looks like a name" — i.e. at least 5 of its 7 bytes are printable ASCII (0x20-0x7E). This is true of every real file name seen so far (always exactly 7 characters, sometimes space-padded) and false for BCD data, all-zero/all-0xFF filler, and packed ASCII-record content (which mixes in raw length-prefix bytes that usually aren't printable).
+- **Data/ASCII headers** are found by looking for a register with a Data or ASCII type nibble, whose `AAA` equals its own address, whose reserved nibbles are zero, and which is immediately followed by a register that "looks like a name" — i.e. at least 5 of its 7 bytes are printable ASCII (0x20-0x7E). The name-shaped check is true of every real file name seen so far (always exactly 7 characters, sometimes space-padded) and false for BCD data, all-zero/all-0xFF filler, and packed ASCII-record content (which mixes in raw length-prefix bytes that usually aren't printable). All of these checks together are needed — see §4.6 for a case where the type nibble and name-shaped check alone weren't enough.
 - **Program headers** are found by the fixed `0x10 00 00 00` signature (plus the same name-shaped check on the following register). This distinction matters: a register merely *starting* with a `1` nibble — which happens routinely in the middle of a packed ASCII record's byte stream — is not enough on its own to be mistaken for a Program header; the full 4-byte signature is required.
 - This combined approach has matched every file in every sample dump (old and new) with no known false positives, including the empty-XM dumps.
 
@@ -183,5 +172,13 @@ Because of this, file discovery works structurally rather than by trusting heade
 
 - Within a region, a file's data floor (its lowest-address register) is derived **structurally**, not from `SSS`: it's either the top of the next file below it (i.e. that file's name-register address + 1), or, for the bottommost file in a region, the region's natural floor (the register just above the region's reserved config/boundary record at its very start — e.g. 0x41 or 0x202).
 - A register of all `0xFF` bytes marks "free space starts here" partway through that natural range (seen in `3x-xm.dm41`'s second Data file and `fillextended.dm41`'s second region). When one is found between the natural floor and the file above it, the file's real data starts just above the sentinel — the space below the sentinel down to the natural floor is simply unused, not part of any file.
-- Because of this, a file's *actual* register count can legitimately be smaller than its header's declared `SSS` — this isn't a parsing bug, it's what happens when the calculator runs out of room and the header's declared length is never updated to match. Confirmed case: `6x-xm.dm41`'s `XM4.000` declares `SSS = 32` but only has 23 registers actually available below it (the other three Data files in the same region already consumed the rest of the 127 usable registers in Extended Memory #0).
-- **Not yet understood**: how a file continues once it outgrows a single region and spills into the next one. `fillextended.dm41`'s `FILLMEM` file declares `SSS = 362` — the entire XM capacity across all regions — which is direct evidence this happens, but the mechanism (how the continuation is linked, whether there's a second header, how record numbering carries across the boundary) hasn't been decoded yet. Today's tooling only reports the portion of such a file found in the region where its header sits, and under-reports its true size accordingly.
+- Because of this, a file's *actual* register count can legitimately be smaller than its header's declared `SSS` within a single region — but see below: the shortfall is usually made up by continuation in the next region, not simply lost.
+- **Cross-region continuation (confirmed):** within a region, files are packed from the top down in creation order, so the *last*-created file in a region — the one with the lowest header address, i.e. closest to the region's natural floor — is the one competing for whatever space is left, and can run out of room before reaching its header's declared `SSS`. When that happens, the remaining registers continue at the very **top** of the next region (counting down from that region's ceiling address), landing directly above whatever file's header already occupies that region's top. Confirmed against `6x-xm.dm41`: `XM4.000` (region 0, header at 0x058) is 9 registers short of its declared 32 within region 0 (only 0x041-0x057 fit), and those missing 9 registers sit at 0x2e7-0x2ef — the top of region 1, directly above `XMALPHA`'s header at 0x2e5 — continuing the exact same 64.095-95.095 numeric sequence with no gap or overlap. The same pattern explains `3x-xm.dm41`'s `XMBCD` (continues into 0x2cd-0x2ef) and `extendedmem.dm41`'s `XMALPHA` (continues into 0x2cb-0x2ef), and `fillextended.dm41`'s `FILLMEM`, whose declared `SSS = 362` is the *entire* XM capacity: it's built to span every region, and its two segments (0x041-0x0bd in region 0, 0x203-0x2ef in region 1) add up to exactly 362 with no leftover needed in region 2.
+- Because this reserved continuation space sits above every real header in the next region, tooling that looks for headers there must skip the reserved region first — otherwise continuation bytes (which can incidentally look header-shaped, e.g. mid-stream ASCII record bytes) risk being misread as a header.
+- **Not yet confirmed**: whether a file can span *more than two* regions in one hop the same way it spans two. The reserved-space mechanism above should generalize to that case, but it's only been checked register-by-register for a two-region span so far.
+
+### 4.6 Coincidental False-Positive Headers
+
+Because Data/ASCII headers are found by combining header content with structure (§4.4) rather than from context alone, it's worth knowing what a near-miss looks like: a run of ordinary packed text can satisfy *some* of the checks by coincidence, which is exactly why all of them are required together.
+
+Confirmed case: `largedump.dm41`'s `TS` is a single 18-register ASCII file (a game's room/item/monster vocabulary list — `EMPTY`, `STAIR DN`, `STAIR UP`, `WARP`, `TREASURE`, `FOOD`, `SWORD`, `CLOAK`, `STAFF`, `EMPTY`, `SKELETON`, `SPIDER`, `WRAITH`, `SPECTRE`, `GARGOYLE`, `DEMON`), floored by an `0xFF` sentinel at 0x0ab per §4.5. Partway through that text (the space character in `" UP.WARP"`, byte `0x20`) happens to have a Data type nibble, and the following register happens to look name-shaped too (`"N.STAIR"`, mostly-printable ASCII) — enough to satisfy two of the four checks in §4.4. But its `AAA` is `0x055`, not its own address `0x0ba`, and its reserved nibble 4-7 is `5,0,0,4`, not `0000` — failing the other two, which is what correctly rules it out. Without those two checks, this would have produced a phantom `N.STAIR` "file" that split `TS` in two and truncated it to just 2 registers.
