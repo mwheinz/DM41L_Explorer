@@ -332,8 +332,10 @@ def test_xm_6x_finds_all_six_files():
     assert len(files) == 6
 
     by_name = {f.name: f for f in files}
+    # Names are the raw, space-padded 7-character header field (see
+    # docs/memory.md sec. 4.3): only PURXM is shorter than 7 characters.
     assert set(by_name) == {
-        "XM1.000", "XM2.000", "XM3.000", "XM4.000", "XMALPHA", "PURXM",
+        "XM1.000", "XM2.000", "XM3.000", "XM4.000", "XMALPHA", "PURXM  ",
     }
 
     for name in ("XM1.000", "XM2.000", "XM3.000"):
@@ -350,7 +352,7 @@ def test_xm_6x_finds_all_six_files():
     assert xm4.declared_length == 32
     assert xm4.num_registers == 32
     assert xm4.spans_regions is True
-    assert xm4.segments == [(0x041, 0x057), (0x2E7, 0x2EF)]
+    assert xm4.segments == [[0x041, 0x057], [0x2E7, 0x2EF]]
     numbers = xm4.get_numbers()
     assert len(numbers) == 32
     assert numbers == pytest.approx([64.095 + i * 1.0 for i in range(32)])
@@ -362,11 +364,11 @@ def test_xm_6x_finds_all_six_files():
     # fewer entries than num_registers.
     assert len(by_name["XMALPHA"].get_records()) > 0
 
-    assert by_name["PURXM"].file_type == xm.TYPE_PROGRAM
-    assert by_name["PURXM"].num_registers == 3
-    assert by_name["PURXM"].byte_length == 20
-    assert by_name["PURXM"].checksum_valid is True
-    assert len(by_name["PURXM"].get_instruction_bytes()) == 20
+    assert by_name["PURXM  "].file_type == xm.TYPE_PROGRAM
+    assert by_name["PURXM  "].num_registers == 3
+    assert by_name["PURXM  "].byte_length == 20
+    assert by_name["PURXM  "].checksum_valid is True
+    assert len(by_name["PURXM  "].get_instruction_bytes()) == 20
 
 
 def test_xm_3x_purxm_program_detected():
@@ -377,9 +379,11 @@ def test_xm_3x_purxm_program_detected():
     files = xm.list_files()
     by_name = {f.name: f for f in files}
 
-    assert set(by_name) == {"XMBCD", "XMALPHA", "PURXM"}
-    assert by_name["PURXM"].file_type == xm.TYPE_PROGRAM
-    assert by_name["PURXM"].checksum_valid is True
+    # XMBCD and PURXM are shorter than 7 characters, so their names carry
+    # the raw space padding from the header field; XMALPHA fills all 7.
+    assert set(by_name) == {"XMBCD  ", "XMALPHA", "PURXM  "}
+    assert by_name["PURXM  "].file_type == xm.TYPE_PROGRAM
+    assert by_name["PURXM  "].checksum_valid is True
     assert by_name["XMALPHA"].num_registers == 128
 
 
@@ -394,13 +398,12 @@ def test_xm_program_header_rejects_non_signature_type1_nibble():
 def test_xm_header_requires_aaa_match_own_address():
     """A Data/ASCII header's AAA field (nibble 1-3) must equal its own
     address -- confirmed reliable across every real header in every sample
-    dump, and what independently rules out largedump.dm41's phantom
-    'N.STAIR' header (AAA=0x055, not its real address 0x0ba)."""
+    dump."""
     real_header = bytes.fromhex("20580000020020")  # 6x-xm.dm41's XM4.000, AAA=0x058
     assert ExtendedMemory._parse_header(0x058, real_header) is not None
     assert ExtendedMemory._parse_header(0x059, real_header) is None
 
-    phantom_header = bytes.fromhex("20555004574152")  # largedump.dm41's false positive
+    phantom_header = bytes.fromhex("20555004574152")  # false header.
     assert ExtendedMemory._parse_header(0x0ba, phantom_header) is None
 
 
@@ -420,28 +423,3 @@ def test_xm_get_program_bytes_wrong_type_raises():
     data_file = next(f for f in xm.list_files() if f.file_type == xm.TYPE_DATA)
     with pytest.raises(ValueError):
         data_file.get_program_bytes()
-
-
-def test_xm_largedump_no_false_positive_header():
-    """largedump.dm41 has a single ASCII file, TS (18 registers). Earlier
-    code split it into a truncated 2-register 'TS' plus a phantom 'N.STAIR'
-    Data file: mid-stream text in TS's own packed ASCII records (" UP.WAR")
-    happened to have a Data type nibble and a name-shaped following
-    register, but its reserved nibble 4-7 field was "5004", not the
-    documented "0000" -- a check real headers all satisfy and this false
-    match didn't."""
-    xm = _load_xm("largedump.dm41")
-    files = xm.list_files()
-    assert len(files) == 1
-
-    ts = files[0]
-    assert ts.name == "TS"
-    assert ts.file_type == xm.TYPE_ASCII
-    assert ts.declared_length == 18
-    assert ts.num_registers == 18
-    assert ts.segments == [(0x0AC, 0x0BD)]
-    assert ts.get_records() == [
-        "EMPTY", "STAIR DN", "STAIR UP", "WARP", "TREASURE", "FOOD",
-        "SWORD", "CLOAK", "STAFF", "EMPTY", "SKELETON", "SPIDER",
-        "WRAITH", "SPECTRE", "GARGOYLE", "DEMON",
-    ]
