@@ -45,8 +45,8 @@ def print_extended_memory(xm: ExtendedMemory):
             print(f"    {preview}{more}")
         elif f.file_type == xm.TYPE_ASCII:
             records = f.get_records()
-            preview = ", ".join(repr(r) for r in records[:8])
-            more = f", ... ({len(records)} total)" if len(records) > 8 else ""
+            preview = ", ".join(repr(r) for r in records[:16])
+            more = f", ... ({len(records)} total)" if len(records) > 16 else ""
             print(f"    {preview}{more}")
         elif f.file_type == xm.TYPE_PROGRAM:
             checksum = f.checksum_valid

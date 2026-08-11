@@ -4,6 +4,13 @@ A representation of the memory of a DM41 emulator.
 The dump consists of three parts: the header ("DM41"), the dump of main
 memory, and the "special registers" which I believe represent the emulated
 HP41 CPU registers.
+
+NOTE: The HP41C and DM41L are "little endian" - the LSB is considered to by
+"byte 0" and the MSB is considered "byte 6" - but DM41L dump files print hex
+data from MSB to LSB. That is, _data[0] contains the MSB of the register. and
+_data[6] contains the LSB. Care must be taken to remember this difference when
+comparing HP41 documentation with the implementation of the Register and
+Memory classes.
 """
 
 import re
@@ -686,14 +693,6 @@ class ExtendedMemory(MemoryRegion):
     bytes of a packed ASCII record (which can also start with a nibble of
     1) from being misread as a Program header.
 
-    NOT YET UNDERSTOOD:
-      - Whether a file can span more than two regions in one hop the same
-        way it spans two (list_files() carries a shortfall forward through
-        every region in turn, so this should already work, but it's only
-        been confirmed against a two-region span so far -- fillextended.dm41's
-        FILLMEM declares enough registers to need all three regions, which
-        would be the real test, but hasn't been checked register-by-register
-        the way the 6x-xm.dm41 case was).
     """
 
     key = "extended_memory"
@@ -756,19 +755,12 @@ class ExtendedMemory(MemoryRegion):
         # nibble 4-5 for ASCII. Both are confirmed against every real
         # header in every sample dump with no exceptions: AAA always equals
         # the header's own address, and the reserved nibbles are always
-        # zero. (An earlier version of this code treated AAA as unreliable
-        # scratch space, based on a note about a dump that broke it -- that
-        # note turned out to have no dump or evidence behind it anywhere in
-        # this project, likely a mistaken claim from earlier work, and has
-        # been removed.) Requiring both -- on top of the type nibble and
+        # zero. Requiring both -- on top of the type nibble and
         # the name-shaped check on the next register -- is what tells a
         # real header apart from a register that merely coincidences into
-        # looking like one: confirmed necessary against largedump.dm41,
-        # where a run of packed ASCII/program-literal text (".. UP.WAR" at
-        # 0x0ba, itself just mid-stream content of the real "TS" file) has
-        # a Data type nibble and a name-shaped register right after it, but
-        # its AAA is 0x055 (not its own address, 0x0ba) and its nibble 4-7
-        # is "5004" (not "0000").
+        # looking like one. (Certain advanced HP41 programming techniques
+        # can embed additional data in a file register; this is called
+        # "Non-normalized data".)
         aaa = ((raw[0] & 0x0F) << 8) | raw[1]
         if aaa != addr:
             return None
@@ -848,10 +840,14 @@ class ExtendedMemory(MemoryRegion):
             for i, header_addr in enumerate(headers):
                 # The very first register of each region (region_start) is
                 # always a reserved config/boundary record -- e.g. 0x40 and
-                # 0x201 hold something like "000030032ef0bf" (file count +
-                # the 0xBF/0x2EF region boundaries) in every sample dump,
-                # never real file data. The bottommost file's data can
-                # never reach down into it.
+                # 0x201 hold something like "000030032ef0bf" (last opened
+                # file, pointer to the next region, pointer to the top of the
+                # current region) in every sample dump, never real file data.
+                # Documentation indicates that the partition between the end
+                # of used extended memory and the unused portion is
+                # ffffffffffffff. Data between that register and the "floor"
+                # (either 0xc1 or 0x202) of extended memory will be garbage
+                # and may contain data from deleted files.
                 natural_floor = headers[i - 1] + 2 if i > 0 else region_start + 1
                 ceiling = header_addr - 1
 
