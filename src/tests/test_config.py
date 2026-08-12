@@ -1,0 +1,112 @@
+import json
+import os
+import pytest
+from config import ProjectConfig
+
+# chmod-based permission restrictions have no effect when running as root
+# (uid 0 bypasses the permission bits) -- see the matching guard in
+# test_commands.py.
+running_as_root = hasattr(os, "geteuid") and os.geteuid() == 0
+skip_if_root = pytest.mark.skipif(
+    running_as_root,
+    reason="chmod-based permission checks don't apply when running as root",
+)
+
+
+@pytest.fixture
+def prefs_file(tmp_path, monkeypatch):
+    """Points ProjectConfig.PREFS_FILE at a throwaway path for the test."""
+    fake_prefs_path = tmp_path / ".voyager_prefs.json"
+    monkeypatch.setattr(ProjectConfig, "PREFS_FILE", fake_prefs_path)
+    return fake_prefs_path
+
+
+def test_defaults_when_no_prefs_file(prefs_file):
+    """With no file on disk, all defaults should be used."""
+    config = ProjectConfig()
+    assert config.baudrate == ProjectConfig.DEFAULT_PREFS["baudrate"]
+    assert config.serial_port == ProjectConfig.DEFAULT_PREFS["serial_port"]
+    assert config.logging_level == ProjectConfig.DEFAULT_PREFS["logging_level"]
+
+
+def test_load_merges_saved_values_over_defaults(prefs_file):
+    """Only the keys present on disk should override the defaults."""
+    prefs_file.write_text(json.dumps({"baudrate": 115200}))
+    config = ProjectConfig()
+    assert config.baudrate == 115200
+    # Untouched keys should still fall back to defaults.
+    assert (
+        config.console_timeout_minutes
+        == ProjectConfig.DEFAULT_PREFS["console_timeout_minutes"]
+    )
+
+
+def test_load_raises_exception_on_corrupt_json(prefs_file):
+    """Corrupt JSON now raises an exception instead of falling back to defaults."""
+    prefs_file.write_text("{not valid json")
+    with pytest.raises(Exception) as excinfo:
+        ProjectConfig()
+    assert "Could not load preferences from" in str(excinfo.value)
+
+
+def test_save_writes_current_prefs_to_disk(prefs_file):
+    config = ProjectConfig()
+    config.baudrate = 57600
+    config.save()
+
+    on_disk = json.loads(prefs_file.read_text())
+    assert on_disk["baudrate"] == 57600
+
+
+def test_save_with_explicit_prefs_argument(prefs_file):
+    config = ProjectConfig()
+    new_prefs = {**ProjectConfig.DEFAULT_PREFS, "logging_level": "DEBUG"}
+    config.save(new_prefs)
+
+    on_disk = json.loads(prefs_file.read_text())
+    assert on_disk["logging_level"] == "DEBUG"
+    assert config.logging_level == "DEBUG"
+
+
+def test_property_setters_update_internal_state(prefs_file):
+    config = ProjectConfig()
+    config.serial_port = "/dev/tty.fake"
+    config.console_timeout_minutes = 5
+
+    assert config.serial_port == "/dev/tty.fake"
+    assert config.console_timeout_minutes == 5
+    assert config.get_all()["serial_port"] == "/dev/tty.fake"
+
+
+def test_round_trip_persists_across_instances(prefs_file):
+    """Saving with one instance and loading with a fresh one should agree."""
+    first = ProjectConfig()
+    first.baudrate = 4800
+    first.save()
+
+    second = ProjectConfig()
+    assert second.baudrate == 4800
+
+
+@skip_if_root
+def test_save_raises_exception_on_permission_error(tmp_path, monkeypatch):
+    """Verifies that save() raises an exception when writing fails."""
+    readonly_dir = tmp_path / "readonly_dir"
+    readonly_dir.mkdir()
+
+    # Read + execute only, no write: the directory stays traversable (so
+    # PREFS_FILE.exists() in load() still works, same as the ProjectConfig()
+    # constructor below expects) but writing a new file inside it fails.
+    # (stat.S_IREAD alone also strips the execute bit, which breaks
+    # exists()-style checks on children rather than exercising the write
+    # failure this test is meant to cover -- see the equivalent, correct
+    # 0o555 usage in test_commands.py's no_permission_on_parent test.)
+    os.chmod(readonly_dir, 0o555)
+
+    fake_prefs_path = readonly_dir / ".voyager_prefs.json"
+    monkeypatch.setattr(ProjectConfig, "PREFS_FILE", fake_prefs_path)
+
+    config = ProjectConfig()
+    with pytest.raises(Exception) as excinfo:
+        config.save()
+    assert "Could not save preferences to" in str(excinfo.value)
