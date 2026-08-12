@@ -9,6 +9,7 @@ pathspec==1.1.1
 platformdirs==4.10.1
 pluggy==1.6.0
 Pygments==2.20.0
+pyinstaller==6.22.0
 pyserial==3.5
 pytest==9.1.1
 pytokens==0.4.1
