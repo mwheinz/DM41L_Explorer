@@ -1,13 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# PyInstaller spec for DM41L Explorer -- modeled on the same build process
-# used by the AtomDataExtractor project's src/adv.spec: a macOS .app bundle
-# via BUNDLE(), a version string stamped from `git describe` at build time
-# (see build.sh, which regenerates dm41version.py -- gui/app.py already
-# imports it with a graceful ImportError fallback to "unknown"), and an
-# optional custom icon that's picked up automatically once one exists at
-# ../resources/MyIcon.icns (see resources/makeicon.sh).
-#
 # Run via `./build.sh` from this directory (src/), not `pyinstaller`
 # directly -- build.sh is what regenerates dm41version.py before pyinstaller
 # runs, and it also clears out any previous build/dist first.
@@ -46,7 +38,7 @@ exe = EXE(
     a.scripts,
     [("O", None, "OPTION"), ("O", None, "OPTION")],
     exclude_binaries=True,
-    name="dm41explorer",
+    name="dm41lexplorer",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -66,7 +58,7 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="dm41explorer",
+    name="dm41lexplorer",
 )
 app = BUNDLE(
     coll,
