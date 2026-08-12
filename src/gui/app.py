@@ -381,18 +381,15 @@ class DM41LExplorerApp(ctk.CTk):
                 "cancel to work offline."
             )
 
-    def _prompt_for_port(self, message: str):
-        dialog = PortSelectionDialog(
-            self,
-            self.serial,
-            default_port=self.config_store.serial_port,
-            message=message,
-        )
-        self.wait_window(dialog)
-        if dialog.result:
-            self._connect_and_verify(dialog.result)
-        else:
-            self._set_status("Not connected")
+    def _prompt_for_port(self, message: str): dialog = PortSelectionDialog(
+            self, self.serial, default_port=self.config_store.serial_port,
+            message=message,) self.wait_window(dialog) if dialog.result:
+        self._connect_and_verify(dialog.result) elif self.serial.is_connected:
+            # Cancelling out of Reconnect leaves the existing connection
+            # untouched -- don't overwrite the status bar with "Not
+            # connected".
+            self._set_status(f"Connected to {self.serial.serial_inst.port}")
+        else: self._set_status("Not connected")
 
     def show_connect_dialog(self):
         self._prompt_for_port(None)
