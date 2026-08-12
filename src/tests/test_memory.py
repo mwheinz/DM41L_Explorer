@@ -1,5 +1,5 @@
 """
-Unit tests for DM41 emulator memory system.
+Unit tests for DM41L emulator memory system.
 Covers Register class (BCD, ASCII, hex) and Memory class (parsing, access).
 """
 

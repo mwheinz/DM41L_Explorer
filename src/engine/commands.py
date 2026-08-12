@@ -158,7 +158,7 @@ class LoadMemoryCommand(BaseCommand):
                 Memory.from_string(data)
             except ValueError as e:
                 raise ValueError(
-                    f"'{self.source_file}' does not look like a valid DM41 "
+                    f"'{self.source_file}' does not look like a valid DM41L "
                     f"dump: {e}"
                 ) from e
 

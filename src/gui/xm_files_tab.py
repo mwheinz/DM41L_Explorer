@@ -5,7 +5,7 @@ XM Files tab: view, add, edit, and remove extended-memory files.
 from tkinter import messagebox
 import customtkinter as ctk
 
-from memory import Memory, ExtendedMemory, MemoryError as DM41MemoryError
+from memory import Memory, ExtendedMemory, MemoryError as DM41LMemoryError
 from gui.xm_file_dialog import XMFileDialog
 from gui.scroll_support import bind_touchpad_scroll
 
@@ -53,7 +53,7 @@ class XMFilesTab(ctk.CTkFrame):
 
         try:
             files = self._xm().list_files()
-        except DM41MemoryError as e:
+        except DM41LMemoryError as e:
             self._header_label.configure(text=f"Could not list XM files: {e}")
             return
 
@@ -144,7 +144,7 @@ class XMFilesTab(ctk.CTkFrame):
         def save(name, file_type, kwargs):
             try:
                 self._xm().add_file(name, file_type, **kwargs)
-            except (ValueError, DM41MemoryError) as e:
+            except (ValueError, DM41LMemoryError) as e:
                 messagebox.showerror("Could Not Add File", str(e))
                 return
             self._notify_change()
@@ -171,7 +171,7 @@ class XMFilesTab(ctk.CTkFrame):
                 xm2 = self._xm()
                 xm2.remove_file(header_addr)
                 xm2.add_file(name, file_type, **kwargs)
-            except (ValueError, DM41MemoryError) as e:
+            except (ValueError, DM41LMemoryError) as e:
                 messagebox.showerror("Could Not Save File", str(e))
                 return
             self._notify_change()
@@ -186,7 +186,7 @@ class XMFilesTab(ctk.CTkFrame):
             return
         try:
             self._xm().remove_file(header_addr)
-        except DM41MemoryError as e:
+        except DM41LMemoryError as e:
             messagebox.showerror("Could Not Remove File", str(e))
             return
         self._notify_change()

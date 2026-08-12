@@ -6,7 +6,7 @@ how memory is divided up. Flags live in their own tab (gui/flags_tab.py).
 from tkinter import messagebox
 import customtkinter as ctk
 
-from memory import Memory, StatusRegisters, ExtendedMemory, MemoryError as DM41MemoryError
+from memory import Memory, StatusRegisters, ExtendedMemory, MemoryError as DM41LMemoryError
 from gui.memory_ranges import MIN_SANE_R00
 from gui.scroll_support import bind_touchpad_scroll
 
@@ -294,7 +294,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             xm = ExtendedMemory(self._memory, address_range=[0x40, 0x3FF])
             xm_count = len(xm.list_files())
             xm_text = str(xm_count)
-        except DM41MemoryError as e:
+        except DM41LMemoryError as e:
             xm_text = f"could not be listed ({e})"
 
         rows = []

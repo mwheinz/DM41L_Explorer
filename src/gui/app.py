@@ -1,5 +1,5 @@
 """
-DM41 Explorer: a CustomTkinter GUI for DM41L_Explorer.
+DM41L Explorer: a CustomTkinter GUI for DM41L_Explorer.
 
 Design, per the 2026-08-12 rebuild request: menu items instead of toolbar
 buttons for every basic function, a status bar pinned to the bottom of the
@@ -58,7 +58,7 @@ ENGINE_POLL_MS = 50
 
 PLATFORM_SYSTEM = platform.system()
 
-logger = logging.getLogger("DM41 Explorer")
+logger = logging.getLogger("DM41L Explorer")
 
 
 def _setup_logging(config_store):
@@ -69,7 +69,7 @@ def _setup_logging(config_store):
         log_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
         log_dir = Path.home()
-    log_file = log_dir / "dm41_explorer.log"
+    log_file = log_dir / "dm41l_explorer.log"
 
     file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
     file_handler.setFormatter(
@@ -84,7 +84,7 @@ def _setup_logging(config_store):
     root_logger.addHandler(file_handler)
 
 
-class DM41ExplorerApp(ctk.CTk):
+class DM41LExplorerApp(ctk.CTk):
     """Main application window."""
 
     def __init__(self):
@@ -96,7 +96,7 @@ class DM41ExplorerApp(ctk.CTk):
         ctk.set_appearance_mode(self.config_store.appearance_mode)
         ctk.set_default_color_theme(self.config_store.color_theme)
 
-        self.title("DM41 Explorer")
+        self.title("DM41L Explorer")
         self.geometry("1080x768")
 
         self.serial = SerialManager(error_callback=self._handle_serial_error)
@@ -264,10 +264,10 @@ class DM41ExplorerApp(ctk.CTk):
         )
         connect_menu.add_separator()
         connect_menu.add_command(
-            label="Get Dump from DM41", command=self.get_dump_from_calculator, underline=0
+            label="Get Dump from DM41L", command=self.get_dump_from_calculator, underline=0
         )
         connect_menu.add_command(
-            label="Send Dump to DM41", command=self.send_dump_to_calculator, underline=0
+            label="Send Dump to DM41L", command=self.send_dump_to_calculator, underline=0
         )
         menubar.add_cascade(label="Connect", menu=connect_menu)
 
@@ -281,7 +281,7 @@ class DM41ExplorerApp(ctk.CTk):
         # Help Menu
         help_menu = Menu(menubar, tearoff=0)
         if PLATFORM_SYSTEM != "Darwin":
-            help_menu.add_command(label="About DM41 Explorer", command=self._show_about)
+            help_menu.add_command(label="About DM41L Explorer", command=self._show_about)
         else:
             help_menu.add_command(label="Read Me", state="disabled")
         menubar.add_cascade(label="Help", menu=help_menu)
@@ -300,8 +300,8 @@ class DM41ExplorerApp(ctk.CTk):
 
     def _show_about(self):
         messagebox.showinfo(
-            "About DM41 Explorer",
-            f"Read and Write DM41 memory files\n\n"
+            "About DM41L Explorer",
+            f"Read and Write DM41L memory files\n\n"
             f"Version:\n{_version}\n\n"
             "Written by Michael Heinz.\n",
         )
@@ -377,7 +377,7 @@ class DM41ExplorerApp(ctk.CTk):
         else:
             self._prompt_for_port(
                 f"Could not find the configured port '{default_port}'. "
-                "Please select a serial port to connect to the DM41, or "
+                "Please select a serial port to connect to the DM41L, or "
                 "cancel to work offline."
             )
 
@@ -436,7 +436,7 @@ class DM41ExplorerApp(ctk.CTk):
         self.after(
             0,
             lambda: self._prompt_for_port(
-                f"Connected to the port, but the DM41 did not respond ({message}). "
+                f"Connected to the port, but the DM41L did not respond ({message}). "
                 "Please select a different serial port."
             ),
         )
@@ -525,7 +525,7 @@ class DM41ExplorerApp(ctk.CTk):
 
     def set_calculator_time(self):
         if not self.serial.is_connected:
-            messagebox.showwarning("Not Connected", "Connect to the DM41 first.")
+            messagebox.showwarning("Not Connected", "Connect to the DM41L first.")
             return
         now = datetime.now()
         args = [now.strftime("%Y%m%d"), now.strftime("%H%M%S")]
@@ -558,7 +558,7 @@ class DM41ExplorerApp(ctk.CTk):
     def save_dump_as(self):
         path = filedialog.asksaveasfilename(
             defaultextension=".dm41",
-            filetypes=[("DM41 dump", "*.dm41"), ("All files", "*.*")],
+            filetypes=[("DM41L dump", "*.dm41"), ("All files", "*.*")],
         )
         if not path:
             return
@@ -578,7 +578,7 @@ class DM41ExplorerApp(ctk.CTk):
         ):
             return
         path = filedialog.askopenfilename(
-            filetypes=[("DM41 dump", "*.dm41"), ("All files", "*.*")]
+            filetypes=[("DM41L dump", "*.dm41"), ("All files", "*.*")]
         )
         if not path:
             return
@@ -597,7 +597,7 @@ class DM41ExplorerApp(ctk.CTk):
 
     def send_dump_to_calculator(self):
         if not self.serial.is_connected:
-            messagebox.showwarning("Not Connected", "Connect to the DM41 first.")
+            messagebox.showwarning("Not Connected", "Connect to the DM41L first.")
             return
         if not messagebox.askyesno(
             "Send Dump to Calculator",
@@ -634,7 +634,7 @@ class DM41ExplorerApp(ctk.CTk):
 
     def get_dump_from_calculator(self):
         if not self.serial.is_connected:
-            messagebox.showwarning("Not Connected", "Connect to the DM41 first.")
+            messagebox.showwarning("Not Connected", "Connect to the DM41L first.")
             return
         if self.dirty and not messagebox.askyesno(
             "Unsaved Changes", "Discard unsaved changes and read the calculator's memory?"
@@ -672,7 +672,7 @@ class DM41ExplorerApp(ctk.CTk):
 
 
 def main():
-    app = DM41ExplorerApp()
+    app = DM41LExplorerApp()
     logger.debug(main.__name__)
     app.protocol("WM_DELETE_WINDOW", app.on_close)
     app.mainloop()

@@ -1,7 +1,7 @@
 """
-A representation of the memory of a DM41 emulator.
+A representation of the memory of a DM41L emulator.
 
-The dump consists of three parts: the header ("DM41"), the dump of main
+The dump consists of three parts: the header ("DM41") the dump of main
 memory, and the "special registers" which I believe represent the emulated
 HP41 CPU registers.
 
@@ -273,7 +273,7 @@ class Register:
         return f"Register({self.get_hex()})"
 
 class AlphaRegister(Register):
-    """Represents the HP41/DM41 alpha register."""
+    """Represents the HP41/DM41L alpha register."""
     def __str__(self):
         skip_nulls = True
         text=""
@@ -1284,7 +1284,7 @@ REGION_NAMES = {cls.key: cls.label for cls in REGION_CLASSES}
 
 
 class Memory:
-    """A complete DM41 memory dump."""
+    """A complete DM41L memory dump."""
 
     # Pattern to capture 'A:' followed by any hex string of 1 or more chars
     SPECIAL_PATTERN = re.compile(r"([A-Z]:\s*)([0-9a-fA-F]+)")

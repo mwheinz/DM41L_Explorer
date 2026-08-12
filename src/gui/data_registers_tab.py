@@ -61,7 +61,7 @@ class DataRegistersTab(ctk.CTkFrame):
 
         vsb = ttk.Scrollbar(
             table_frame, orient="vertical", command=self._tree.yview,
-            style="DM41.Vertical.TScrollbar",
+            style="DM41L.Vertical.TScrollbar",
         )
         self._tree.configure(yscrollcommand=vsb.set)
         self._tree.pack(side="left", fill="both", expand=True)
@@ -104,7 +104,7 @@ class DataRegistersTab(ctk.CTkFrame):
         thumb = "#565b5e" if dark else "#c0c0c0"
         thumb_active = "#6e7173" if dark else "#a6a6a6"
         style.layout(
-            "DM41.Vertical.TScrollbar",
+            "DM41L.Vertical.TScrollbar",
             [(
                 "Vertical.Scrollbar.trough",
                 {
@@ -117,12 +117,12 @@ class DataRegistersTab(ctk.CTkFrame):
             )],
         )
         style.configure(
-            "DM41.Vertical.TScrollbar",
+            "DM41L.Vertical.TScrollbar",
             background=thumb, troughcolor=trough, bordercolor=trough,
             relief="flat", borderwidth=0,
         )
         style.map(
-            "DM41.Vertical.TScrollbar",
+            "DM41L.Vertical.TScrollbar",
             background=[("active", thumb_active), ("pressed", thumb_active)],
         )
 

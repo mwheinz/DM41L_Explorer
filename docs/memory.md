@@ -1,9 +1,9 @@
-Title: DM41 Memory Architecture Reference
-Tags: Active, DM41 Explorer
+Title: DM41L Memory Architecture Reference
+Tags: Active, DM41L Explorer
 ----------------------------------------
-# DM41 Explorer: Hardware Memory Architecture Reference
+# DM41L Explorer: Hardware Memory Architecture Reference
 
-The purpose of the DM41 Explorer project is to design a python application that
+The purpose of the DM41L Explorer project is to design a python application that
 can read, write, and edit the memory of the DM41L emulator via the DM41L's
 serial port. This document outlines the memory architecture of the original
 HP41C calculator hardware and it's implementation in the DM41L. 
@@ -33,7 +33,7 @@ internet in PDF format.
 - **Target Model:** DM41L which emulates the HP41CX (part of the HP41C series:
   basic C, expanded memory CV, and extended capabilities CX).
 - **Memory Hardware:** The HP41 organized its memory into 7-byte (56-bit)
-  registers. The DM41 emulator mimics this organization.
+  registers. The DM41L emulator mimics this organization.
 - **Instruction Set:** Operates on a variable-length instruction set where
   opcodes are between **1 and 3 bytes** long. This requires careful alignment
   for disassembly as code fragments may not align with register boundaries.
@@ -85,7 +85,7 @@ are interpreted differently:
 
 | Region | Description | Start | End |
 | ----------- | ----------- | ----------- | ----------- | 
-| Status Registers | Operational registers for the HP41/DM41, including the math stack, Alpha Register and system pointers | 0x00 | 0x0F |
+| Status Registers | Operational registers for the HP41/DM41L, including the math stack, Alpha Register and system pointers | 0x00 | 0x0F |
 | Void Region | Registers do not exist / not used. | 0x10 | 0x3F |
 | Extended Memory #0 | File-oriented memory region | 0x40 | 0xBF |
 | Main Memory | Main memory consists of 319 registers that are subdivided into variable length sub-regions. | 0xC0 | 0x1FF |

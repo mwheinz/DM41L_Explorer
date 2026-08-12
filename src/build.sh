@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds DM41 Explorer.app via PyInstaller. Run from src/ (or just
+# Builds DM41L Explorer.app via PyInstaller. Run from src/ (or just
 # ./build.sh from anywhere, it cd's there itself), with the project's venv
 # active and its build requirements installed:
 #
@@ -10,7 +10,7 @@
 #   cd src
 #   ./build.sh
 #
-# Output lands in src/dist/DM41 Explorer.app.
+# Output lands in src/dist/DM41L Explorer.app.
 
 set -e
 cd "$(dirname "$0")"

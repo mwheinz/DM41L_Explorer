@@ -1,5 +1,5 @@
 """
-Manage communications with a DM41 serial console.
+Manage communications with a DM41L serial console.
 """
 
 import threading

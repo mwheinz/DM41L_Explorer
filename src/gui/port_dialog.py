@@ -1,5 +1,5 @@
 """
-Modal dialog for choosing a serial port to connect to the DM41.
+Modal dialog for choosing a serial port to connect to the DM41L.
 """
 
 import platform
@@ -19,7 +19,7 @@ class PortSelectionDialog(ctk.CTkToplevel):
         self, master, serial_manager, default_port: str = None, message: str = None
     ):
         super().__init__(master)
-        self.title("Connect to DM41")
+        self.title("Connect to DM41L")
         self.resizable(False, False)
         self.transient(master)
         self.grab_set()

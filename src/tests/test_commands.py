@@ -156,7 +156,7 @@ def test_load_memory_command_trigger_transfer_invalid_never_sends(tmp_path):
     mock_serial = MagicMock()
     cmd = LoadMemoryCommand(args=[str(source)], serial=mock_serial)
 
-    with pytest.raises(ValueError, match="does not look like a valid DM41 dump"):
+    with pytest.raises(ValueError, match="does not look like a valid DM41L dump"):
         cmd.trigger_transfer()
 
     mock_serial.send_data.assert_not_called()
