@@ -101,6 +101,7 @@ class SerialManager:
 
     def _run_loop(self):
         """The main loop running in the background thread."""
+        error_msg = None
         try:
             while not self._stop_event.is_set():
                 try:
@@ -131,8 +132,23 @@ class SerialManager:
         except Exception as e:
             error_msg = f"Serial communications failure: {str(e)}"
             logger.critical(error_msg)
-            if self._error_callback:
-                self._error_callback(error_msg)
         finally:
+            # Always release the OS-level port handle here, in this same
+            # thread, rather than counting on a caller to call disconnect()
+            # -- the error callback below runs on this very background
+            # thread, and disconnect() joins self._thread, which raises
+            # RuntimeError if a thread tries to join itself. Closing
+            # directly avoids that trap and guarantees the handle is never
+            # leaked after a comms failure (previously nothing closed it on
+            # this path -- see gui/app.py's error handlers, which used to be
+            # the only thing that *tried* to clean this up, and did so with
+            # an inverted condition that never actually ran).
+            if self.serial_inst and self.serial_inst.is_open:
+                try:
+                    self.serial_inst.close()
+                except Exception:
+                    logger.exception("Failed to close serial port during cleanup.")
             self.is_connected = False
             logger.error("Serial connection terminated.")
+            if error_msg and self._error_callback:
+                self._error_callback(error_msg)

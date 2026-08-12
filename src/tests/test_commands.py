@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
+from unittest.mock import MagicMock
 import pytest
 from engine.commands import MemoryDumpCommand, LoadMemoryCommand
+from memory import Memory
 
 # chmod-based permission restrictions have no effect when running as root
 # (uid 0 bypasses the permission bits), so these tests are meaningless in
@@ -97,3 +99,64 @@ def test_load_memory_command_success_validation(tmp_path):
     file_path.write_text("some data")
     cmd = LoadMemoryCommand(args=[str(file_path)])
     assert cmd.source_file == str(file_path)
+
+
+# --- parse_response()/trigger_transfer() -- the memory.Memory integration ---
+#
+# These exercise the redesign called for when parse_response/trigger_transfer
+# were first ported (and temporarily stubbed) from Project Voyager: dump data
+# now passes through memory.Memory for validation before it's trusted, in
+# either direction.
+
+VALID_DUMP = Memory().to_string()
+
+
+def test_memory_dump_command_parse_response_valid(tmp_path):
+    """A well-formed dump is parsed, returned as a Memory, and written to
+    disk in its canonical (re-serialized) form."""
+    target = tmp_path / "out.dm41"
+    cmd = MemoryDumpCommand(args=[str(target)])
+
+    result = cmd.parse_response(VALID_DUMP)
+
+    assert result == Memory.from_string(VALID_DUMP)
+    assert target.read_text() == result.to_string()
+
+
+def test_memory_dump_command_parse_response_invalid_does_not_touch_disk(tmp_path):
+    """A malformed dump raises before anything is written -- an existing
+    file at the target path must be left untouched."""
+    target = tmp_path / "out.dm41"
+    target.write_text("previous good dump\n")
+    cmd = MemoryDumpCommand(args=[str(target)])
+
+    with pytest.raises(ValueError, match="failed to parse"):
+        cmd.parse_response("this is not a DM41 dump")
+
+    assert target.read_text() == "previous good dump\n"
+
+
+def test_load_memory_command_trigger_transfer_valid_sends_file(tmp_path):
+    """A well-formed dump file is validated and then streamed as-is."""
+    source = tmp_path / "in.dm41"
+    source.write_text(VALID_DUMP)
+    mock_serial = MagicMock()
+    cmd = LoadMemoryCommand(args=[str(source)], serial=mock_serial)
+
+    cmd.trigger_transfer()
+
+    mock_serial.send_data.assert_called_once_with(VALID_DUMP)
+
+
+def test_load_memory_command_trigger_transfer_invalid_never_sends(tmp_path):
+    """A malformed dump file is rejected before anything reaches the
+    serial manager -- send_data() must never be called."""
+    source = tmp_path / "in.dm41"
+    source.write_text("this is not a DM41 dump")
+    mock_serial = MagicMock()
+    cmd = LoadMemoryCommand(args=[str(source)], serial=mock_serial)
+
+    with pytest.raises(ValueError, match="does not look like a valid DM41 dump"):
+        cmd.trigger_transfer()
+
+    mock_serial.send_data.assert_not_called()

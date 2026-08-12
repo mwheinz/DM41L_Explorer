@@ -315,7 +315,7 @@ def test_status_registers_invalid_address(status_memory):
 # --- Extended Memory / XMFile Tests ---
 
 from pathlib import Path
-from memory import ExtendedMemory, MemoryError, XM_REGIONS
+from memory import ExtendedMemory, MemoryError, XM_REGIONS, ZERO_REGISTER
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -641,3 +641,189 @@ def test_xm_add_file_ascii_matches_real_device_encoding():
 
     assert [r.get_hex() for r in added.data_registers()] == real_register_hex
     assert added.get_records() == ["HELLO", "WORLD"]
+
+
+# ---- R00 / .END. / Flags (register c / register d) ----
+#
+# Expected R00/.END. values below were read directly off register c
+# (address 0x0d) in each sample dump and cross-checked two ways: against
+# the old (pre-rewrite) Project Voyager memory.py, which had independently
+# arrived at the same nibble math for R00/.END., and against the filename
+# of empty-128.dm41 (0x200 - 0x180 = 128 data registers).
+
+
+def test_r00_and_dotend_match_known_sample_dumps():
+    cases = {
+        "empty.dm41": (0x19C, 0x19B),
+        "empty-128.dm41": (0x180, 0x17F),
+        "helloworld.dm41": (0x19C, 0x19B),
+        "alpha.dm41": (0x19C, 0x19B),
+        "3x-xm.dm41": (0x19C, 0x187),
+        "6x-xm.dm41": (0x19C, 0x182),
+    }
+    for filename, (expected_r00, expected_dotend) in cases.items():
+        memory = Memory.from_file(DATA_DIR / filename)
+        assert memory.R00() == expected_r00, filename
+        assert memory.DotEnd() == expected_dotend, filename
+
+
+def test_cold_start_signature_is_0x169_in_every_sample():
+    """The 3-nibble field between 'printer use' and R00 in register c is
+    documented as a fixed cold-start signature; every real sample dump
+    should show the same value (0x169) there. There's no public accessor
+    for this (it's not user-actionable), so read it via the same nibble
+    math R00()/DotEnd() use."""
+    for path in DATA_DIR.glob("*.dm41"):
+        memory = Memory.from_file(path)
+        nibbles = memory._reg_c_nibbles()
+        cold_start = memory._nibbles_to_int(nibbles[5:8])
+        assert cold_start == 0x169, path.name
+
+
+def test_set_r00_rewrites_only_the_r00_field():
+    memory = Memory.from_file(DATA_DIR / "empty.dm41")
+    sigma_before = memory.SigmaReg()
+    dotend_before = memory.DotEnd()
+
+    memory.set_R00(0x150)
+
+    assert memory.R00() == 0x150
+    assert memory.SigmaReg() == sigma_before
+    assert memory.DotEnd() == dotend_before
+
+
+def test_set_r00_rejects_out_of_range_values():
+    memory = Memory()
+    with pytest.raises(ValueError):
+        memory.set_R00(-1)
+    with pytest.raises(ValueError):
+        memory.set_R00(0x1000)
+
+
+def test_flags_get_set_bit_mapping():
+    """Flag N is bit N of the 56-bit register, MSB first: flag 0 is the
+    top bit of byte 0, flag 55 is the bottom bit of byte 6."""
+    memory = Memory()
+    memory.set_register(Memory.REG_D_ADDR, Register.from_hex("80000000000001"))
+
+    assert memory.get_flag(0) is True
+    assert memory.get_flag(55) is True
+    for n in range(1, 55):
+        assert memory.get_flag(n) is False, n
+
+    all_flags = memory.get_all_flags()
+    assert len(all_flags) == 56
+    assert all_flags[0] is True
+    assert all_flags[55] is True
+    assert all_flags.count(True) == 2
+
+
+def test_flags_set_flag_roundtrip():
+    # Memory() now ships with realistic ("Memory Lost" state) defaults for
+    # register d, not an all-zero one -- start from an explicitly zeroed
+    # flag register so this test is about set_flag()/get_flag() mechanics,
+    # not whatever flags happen to be on by default.
+    memory = Memory()
+    memory.set_register(Memory.REG_D_ADDR, Register(size=7))
+
+    memory.set_flag(11, True)  # "auto execute" per docs/flags.md
+    memory.set_flag(48, True)  # "ALPHA"
+    assert memory.get_flag(11) is True
+    assert memory.get_flag(48) is True
+    assert memory.get_all_flags().count(True) == 2
+
+    memory.set_flag(11, False)
+    assert memory.get_flag(11) is False
+    assert memory.get_flag(48) is True
+
+
+def test_flags_reject_out_of_range_numbers():
+    memory = Memory()
+    with pytest.raises(ValueError):
+        memory.get_flag(56)
+    with pytest.raises(ValueError):
+        memory.set_flag(-1, True)
+
+
+def test_status_registers_flags_agrees_with_memory_get_flag(status_memory):
+    """status_memory's fixture fills register d (0x0e) with 0xFF bytes --
+    every flag should read True through both the low-level Memory API and
+    the StatusRegisters.Flags() register accessor."""
+    assert status_memory.get_all_flags() == [True] * 56
+    sr = StatusRegisters(status_memory)
+    assert sr.Flags() == status_memory.get_register(14)
+
+
+# ---- ExtendedMemory.remove_file() ----
+
+
+def _snapshot_content(f):
+    """Eagerly materializes an XMFile's content as a plain value. Needed
+    whenever a snapshot must survive a later mutation of the underlying
+    Memory -- XMFile reads its registers lazily, so holding onto the
+    XMFile object itself (instead of calling this right away) would read
+    back whatever ends up at those addresses *after* the mutation, not
+    the content that was really there when the snapshot was taken."""
+    if f.file_type == ExtendedMemory.TYPE_DATA:
+        return (f.file_type, f.get_numbers())
+    if f.file_type == ExtendedMemory.TYPE_ASCII:
+        return (f.file_type, f.get_records())
+    if f.file_type == ExtendedMemory.TYPE_PROGRAM:
+        return (f.file_type, f.get_instruction_bytes())
+    raise AssertionError(f"unexpected file type: {f.file_type}")
+
+
+def test_xm_remove_file_from_middle_preserves_the_rest():
+    xm = _load_xm("6x-xm.dm41")
+    before_files = xm.list_files()
+    assert len(before_files) == 6
+    before = {f.name: _snapshot_content(f) for f in before_files}
+
+    target = next(f for f in before_files if f.name == "XMALPHA")
+    xm.remove_file(target.header_addr)
+
+    after_files = xm.list_files()
+    after = {f.name: _snapshot_content(f) for f in after_files}
+
+    assert "XMALPHA" not in after
+    assert set(after) == set(before) - {"XMALPHA"}
+    for name, old_content in before.items():
+        if name == "XMALPHA":
+            continue
+        assert after[name] == old_content, name
+    for f in after_files:
+        if f.file_type == ExtendedMemory.TYPE_PROGRAM:
+            assert f.checksum_valid is True
+
+
+def test_xm_remove_last_file_leaves_extended_memory_empty():
+    xm = _load_xm("empty.dm41")
+    xm.add_file("ONLYONE", xm.TYPE_DATA, numbers=[1, 2, 3])
+    added = xm.list_files()[0]
+
+    xm.remove_file(added.header_addr)
+
+    assert xm.list_files() == []
+    # Region 0's pointer register should be back to "never used".
+    assert xm.get_register(0x40) == ZERO_REGISTER
+
+
+def test_xm_remove_file_unknown_header_raises():
+    xm = _load_xm("empty.dm41")
+    with pytest.raises(MemoryError):
+        xm.remove_file(0x99)
+
+
+def test_xm_remove_file_then_add_new_file_still_works():
+    """Removing a file frees up its space for reuse via a subsequent
+    add_file() call (even though remove_file() doesn't reuse the space
+    itself -- see its docstring), since the rebuild always leaves
+    extended memory in a normal, valid state."""
+    xm = _load_xm("3x-xm.dm41")
+    files = xm.list_files()
+    xm.remove_file(files[0].header_addr)
+
+    added = xm.add_file("NEWFILE", xm.TYPE_ASCII, records=["hi"])
+    assert added.get_records() == ["hi"]
+    names = {f.name for f in xm.list_files()}
+    assert "NEWFILE" in names

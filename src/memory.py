@@ -1207,6 +1207,59 @@ class ExtendedMemory(MemoryRegion):
             byte_length=byte_length,
         )
 
+    def remove_file(self, header_addr: int) -> None:
+        """
+        Removes the file whose header is at header_addr.
+
+        There's no support (yet -- same caveat as add_file()) for reusing
+        space in place, so this works by removing the target from
+        list_files()'s result, wiping every register either XM region can
+        touch (plus both region pointer registers) back to the "extended
+        memory has never been used" state, and re-adding every surviving
+        file from scratch, in its original address order, via add_file().
+        This reuses add_file()'s already-tested packing/pointer logic
+        instead of re-deriving the rules for an in-place delete, at the
+        cost of rewriting every file that comes after the one being
+        removed (their register addresses will change).
+
+        Raises MemoryError if no file has a header at header_addr.
+        """
+        files = self.list_files()
+        if not any(f.header_addr == header_addr for f in files):
+            raise MemoryError(f"No XM file with a header at 0x{header_addr:03x}")
+
+        # Snapshot each surviving file's content *before* clearing anything
+        # -- get_numbers()/get_records()/get_instruction_bytes() all read
+        # live from self._memory, so this has to happen while the original
+        # layout is still intact.
+        rebuild = []
+        for f in files:
+            if f.header_addr == header_addr:
+                continue
+            if f.file_type == self.TYPE_DATA:
+                rebuild.append((f.name, f.file_type, {"numbers": f.get_numbers()}))
+            elif f.file_type == self.TYPE_ASCII:
+                rebuild.append((f.name, f.file_type, {"records": f.get_records()}))
+            elif f.file_type == self.TYPE_PROGRAM:
+                rebuild.append(
+                    (
+                        f.name,
+                        f.file_type,
+                        {"instruction_bytes": f.get_instruction_bytes()},
+                    )
+                )
+            else:
+                raise MemoryError(
+                    f"Unknown file type for {f.name!r}: {f.file_type}"
+                )
+
+        for lo, hi in XM_REGIONS:
+            for addr in range(lo, hi + 1):
+                self.set_register(addr, Register(size=7))
+
+        for name, file_type, kwargs in rebuild:
+            self.add_file(name, file_type, **kwargs)
+
 class UnusedRegion(MemoryRegion):
     key = "unused"
     label = "Unused / Free"
@@ -1236,6 +1289,11 @@ class Memory:
     # Pattern to capture 'A:' followed by any hex string of 1 or more chars
     SPECIAL_PATTERN = re.compile(r"([A-Z]:\s*)([0-9a-fA-F]+)")
 
+    # Status register addresses used by the R00/.END./Flags accessors below.
+    REG_C_ADDR = 0x0D  # SREG / printer-use / cold-start / R00 / .END.
+    REG_D_ADDR = 0x0E  # Flags
+    FLAG_COUNT = 56
+
     def __init__(self, header: str = "DM41"):
         self._header = header
         self._core_memory: Dict[int, Register] = {}  # Keyed by register index
@@ -1243,8 +1301,16 @@ class Memory:
             {}
         )  # Keyed by label order preservation
 
+        # Default values for some status registers. Taken from a memory
+        # dump in the "Memory Lost" state. Registers not initialized
+        # are all zeroes.
+        self._core_memory[8] = Register.from_hex("4b000000000000")
+        self._core_memory[12] = Register.from_hex("1000000000019c")
+        self._core_memory[13] = Register.from_hex("1a70016919c19b")
+        self._core_memory[14] = Register.from_hex("0000002c048000")
+
         # Default values for special registers. Taken from a
-        # memory dump in "Memory Lost" state.
+        # memory dump in the "Memory Lost" state.
         self._special_registers["A"] = Register.from_hex("00000000c00020")
         self._special_registers["B"] = Register.from_hex("f000002c0480fd")
         self._special_registers["C"] = Register.from_hex("f000002c0480fd")
@@ -1257,11 +1323,26 @@ class Memory:
         if not isinstance(other, Memory):
             return False
 
-        return (
-            self._header == other._header
-            and self._core_memory == other._core_memory
-            and self._special_registers == other._special_registers
-        )
+        if self._header != other._header:
+            return False
+        if self._special_registers != other._special_registers:
+            return False
+
+        # Compare *effective* register values via get_register() rather
+        # than the raw _core_memory dicts: get_register() already treats
+        # an address with no explicit entry as an implicit zero register,
+        # so two Memory objects that agree on every address's effective
+        # value are equal even if one of them happens to have an explicit
+        # zero-valued entry (e.g. written out as part of a 4-register-
+        # aligned page in to_string()/from_string(), see the page-grouping
+        # note there) where the other has none at all. Comparing the raw
+        # dicts directly used to make a dump fail to equal itself after a
+        # to_string()/from_string() round trip whenever a page mixed
+        # explicitly-set and implicitly-zero registers -- e.g. Memory()'s
+        # own defaults, which set registers 8, 12, 13, and 14 but leave
+        # 9, 10, 11, and 15 (in the same two pages) implicit.
+        addrs = set(self._core_memory) | set(other._core_memory)
+        return all(self.get_register(a) == other.get_register(a) for a in addrs)
 
     @classmethod
     def from_string(cls, buffer: str) -> "Memory":
@@ -1341,6 +1422,108 @@ class Memory:
             self._core_memory[key] = register
         else:
             self._special_registers[key] = register
+
+    # -- Register c (0x0D): SREG / printer-use / cold-start / R00 / .END. --
+    #
+    # Reverse-engineered from "A programmers handbook v.2.07.pdf" (its
+    # "Status registers" diagram) and cross-checked against the R00/.END.
+    # values implied by every src/tests/data/*.dm41 sample (e.g. R00 works
+    # out to 0x19c -- 0x200-0x19c = 100 data registers, the default HP41
+    # "SIZE 100" -- in most samples, and 0x180 -- 128 registers -- in
+    # empty-128.dm41, matching its filename). All three address fields are
+    # plain 3-nibble hex integers (not BCD), packed back-to-back with no
+    # byte alignment across register c's 14 nibbles (nibble 0 = MSB,
+    # matching Register._get_nibbles()):
+    #   nibbles[0:3]   SREG  (ΣREG) absolute address
+    #   nibbles[3:5]   printer use (undecoded)
+    #   nibbles[5:8]   cold-start signature -- always 0x169 in real dumps,
+    #                  usable as a sanity check
+    #   nibbles[8:11]  R00   absolute address of data register 00
+    #   nibbles[11:14] .END. absolute address of the end of program memory
+
+    @staticmethod
+    def _nibbles_to_int(nibbles) -> int:
+        value = 0
+        for n in nibbles:
+            value = (value << 4) | n
+        return value
+
+    def _reg_c_nibbles(self) -> list:
+        return self.get_register(self.REG_C_ADDR)._get_nibbles()
+
+    def SigmaReg(self) -> int:
+        """Absolute address of ΣREG, decoded from register c."""
+        return self._nibbles_to_int(self._reg_c_nibbles()[0:3])
+
+    def DotEnd(self) -> int:
+        """Absolute address of the end of loaded program memory (".END.")."""
+        return self._nibbles_to_int(self._reg_c_nibbles()[11:14])
+
+    def R00(self) -> int:
+        """
+        Absolute address of data register 00 -- the boundary between
+        program memory (below R00) and main data memory (R00 up to
+        PRIMARY_DATA_END, inclusive).
+        """
+        return self._nibbles_to_int(self._reg_c_nibbles()[8:11])
+
+    def set_R00(self, addr: int):
+        """
+        Directly rewrites the R00 pointer in register c.
+
+        This only moves the partition marker -- it does NOT move, clear, or
+        resize any actual register contents on either side of the new
+        boundary, so moving it can expose stale program bytes as "data" (or
+        hide real data registers behind the program-memory boundary).
+        Callers that want a safe move should reconcile the affected
+        registers themselves first.
+        """
+        if not (0 <= addr <= 0xFFF):
+            raise ValueError(
+                f"R00 must fit in a 3-nibble address (0-0xFFF), got 0x{addr:x}"
+            )
+        nibbles = self._reg_c_nibbles()
+        nibbles[8] = (addr >> 8) & 0xF
+        nibbles[9] = (addr >> 4) & 0xF
+        nibbles[10] = addr & 0xF
+        new_bytes = bytes(
+            (nibbles[i] << 4) | nibbles[i + 1] for i in range(0, 14, 2)
+        )
+        self.set_register(self.REG_C_ADDR, Register(data=new_bytes))
+
+    # -- Register d (0x0E): the 56 user/system flags --
+    #
+    # Direct 1:1 mapping (confirmed against "A programmers handbook
+    # v.2.07.pdf"'s "Flag register d" diagram): flag N is bit N of the
+    # 56-bit register, counting from the MSB (flag 00) to the LSB (flag
+    # 55). See docs/flags.md for each flag's name.
+
+    def get_flag(self, n: int) -> bool:
+        if not (0 <= n < self.FLAG_COUNT):
+            raise ValueError(f"Flag number must be 0-{self.FLAG_COUNT - 1}, got {n}")
+        d = self.get_register(self.REG_D_ADDR)
+        byte_index, bit_in_byte = divmod(n, 8)
+        return bool((d._data[byte_index] >> (7 - bit_in_byte)) & 1)
+
+    def set_flag(self, n: int, value: bool):
+        if not (0 <= n < self.FLAG_COUNT):
+            raise ValueError(f"Flag number must be 0-{self.FLAG_COUNT - 1}, got {n}")
+        d = self.get_register(self.REG_D_ADDR)
+        data = bytearray(d._data)
+        byte_index, bit_in_byte = divmod(n, 8)
+        mask = 1 << (7 - bit_in_byte)
+        if value:
+            data[byte_index] |= mask
+        else:
+            data[byte_index] &= ~mask & 0xFF
+        self.set_register(self.REG_D_ADDR, Register(data=bytes(data)))
+
+    def get_all_flags(self) -> list:
+        """Returns a list of FLAG_COUNT bools, flag 0 first."""
+        d = self.get_register(self.REG_D_ADDR)
+        bits = int.from_bytes(bytes(d._data), "big")
+        binary = format(bits, f"0{self.FLAG_COUNT}b")
+        return [c == "1" for c in binary]
 
     def to_string(self) -> str:
         lines = [self._header]

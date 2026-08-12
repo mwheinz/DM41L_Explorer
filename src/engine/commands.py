@@ -9,6 +9,13 @@ from typing import Any
 from pathlib import Path
 from .base_command import BaseCommand
 
+# This is the one deliberate coupling point between the engine/serial layer
+# and memory.py: MemoryDumpCommand and LoadMemoryCommand move dump data to
+# and from disk/the device, so they're the natural place to validate that
+# data is a well-formed dump before trusting it (see the docstrings below).
+# Nothing else in this module touches memory.py.
+from memory import Memory
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,18 +67,28 @@ class MemoryDumpCommand(BaseCommand):
         return "s"
 
     def parse_response(self, raw_data: str) -> Any:
-        # TODO(redesign): ported from Project Voyager, where this wrote the
-        # raw ASCII dump straight to disk with no validation. Now that
-        # memory.Memory has a real parser (Memory.from_string()) with
-        # MemoryError reporting, this should build a Memory from raw_data
-        # first -- so a corrupt/truncated dump raises a clear error here
-        # instead of silently overwriting a good file on disk -- and only
-        # write to self.target_file (e.g. via memory.to_string()) once that
-        # succeeds.
-        raise NotImplementedError(
-            "MemoryDumpCommand.parse_response needs to be redesigned to "
-            "validate the dump via memory.Memory before writing it to disk."
-        )
+        """
+        Parses the device's raw dump text into a Memory (raising a clear
+        error if it's malformed) before writing anything to disk, then
+        writes the *canonical* re-serialization (Memory.to_string()) rather
+        than the raw device bytes -- so what's on disk always matches what
+        this tool's own parser understood, and a round-trip failure surfaces
+        immediately instead of silently saving a dump nothing can re-read.
+
+        Returns the parsed Memory so callers (e.g. the CLI) can load it
+        straight into an in-memory buffer without a second file read.
+        """
+        try:
+            memory = Memory.from_string(raw_data)
+        except ValueError as e:
+            raise ValueError(
+                f"Device returned a dump that failed to parse: {e}"
+            ) from e
+
+        with open(self.target_file, "w", encoding="utf-8") as file:
+            file.write(memory.to_string())
+
+        return memory
 
 
 class MemoryStringCommand(BaseCommand):
@@ -114,20 +131,43 @@ class LoadMemoryCommand(BaseCommand):
         return "l"  # send_command will handle adding the newline
 
     def trigger_transfer(self):
-        """Queues the file contents to the serial buffer immediately after 'l'."""
-        # TODO(redesign): ported from Project Voyager, where this streamed
-        # the file's raw text to the device with no validation. It should
-        # instead parse self.source_file via memory.Memory.from_file() (or
-        # from_string()) first, so a malformed file is rejected here with a
-        # clear MemoryError-based message instead of being streamed at the
-        # DM41L over serial. Once validated, re-serialize with
-        # memory.to_string() (or send the original text, if validation
-        # alone is judged sufficient) via self.serial.send_data().
-        raise NotImplementedError(
-            "LoadMemoryCommand.trigger_transfer needs to be redesigned to "
-            "validate the file via memory.Memory before streaming it to "
-            "the device."
-        )
+        """
+        Queues the file contents to the serial buffer immediately after 'l'.
+
+        Validates self.source_file as a well-formed dump via
+        Memory.from_string() *before* anything is sent to the device --
+        catching a malformed file here, instead of streaming it at the
+        DM41L and finding out from a garbled device response. Note that by
+        this point the engine has already sent the "l" command itself (see
+        CommandEngine.execute()'s docstring); if validation fails here, the
+        device is left waiting for a payload that never arrives, and the
+        engine's own per-command timeout is what recovers that state --
+        callers that can validate earlier (e.g. the CLI, before it even
+        calls engine.execute()) should still do so, to avoid sending "l" at
+        all for a file that's already known to be bad.
+        """
+        logger.info("Beginning file transfer.")
+        if not self.serial:
+            logger.error("No serial manager available for LoadMemoryCommand.")
+            return
+        try:
+            with open(self.source_file, "r", encoding="utf-8") as f:
+                data = f.read()
+
+            try:
+                Memory.from_string(data)
+            except ValueError as e:
+                raise ValueError(
+                    f"'{self.source_file}' does not look like a valid DM41 "
+                    f"dump: {e}"
+                ) from e
+
+            # Send raw data without an extra newline added by send_command
+            self.serial.send_data(data)
+            logger.info("File contents queued for transmission.")
+        except Exception as e:
+            logger.error("Failed to read file for transfer: %s", e)
+            raise
 
     def parse_response(self, raw_data: str) -> Any:
         # Search for success/failure indicators within the accumulated buffer
