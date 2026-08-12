@@ -17,6 +17,7 @@ import customtkinter as ctk
 from memory import Memory, Register, PRIMARY_DATA_END
 from gui.register_edit_dialog import RegisterEditDialog
 from gui.memory_ranges import MIN_SANE_R00
+from gui.tab_common import build_tab_header
 
 
 class DataRegistersTab(ctk.CTkFrame):
@@ -28,17 +29,13 @@ class DataRegistersTab(ctk.CTkFrame):
         self._memory: Memory = None
         self._on_change = on_change
 
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=8, pady=8)
-        self._header_label = ctk.CTkLabel(
-            header, text="(no memory dump loaded)", font=ctk.CTkFont(weight="bold")
-        )
-        self._header_label.pack(side="left")
-        ctk.CTkButton(
-            header, text="Edit Selected...", width=130, command=self._edit_selected
-        ).pack(side="right")
-        ctk.CTkButton(header, text="Refresh", width=80, command=self._refresh).pack(
-            side="right", padx=(0, 8)
+        _, self._header_label = build_tab_header(
+            self,
+            button_kwargs={
+                "text": "Edit Selected...",
+                "width": 130,
+                "command": self._edit_selected,
+            },
         )
 
         table_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -46,28 +43,54 @@ class DataRegistersTab(ctk.CTkFrame):
 
         self._style_treeview()
 
+        # The register list is split across two side-by-side tables (the
+        # first half of registers on the left, the rest on the right)
+        # instead of one long single-column list. A single "Value" column
+        # doesn't need anywhere near the width a Treeview gives it by
+        # default, so one long column wastes horizontal space and forces
+        # far more scrolling than necessary; two columns use that leftover
+        # width to roughly halve the amount of scrolling instead.
+        left_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
+        left_frame.pack(side="left", fill="both", expand=True)
+        right_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
+        right_frame.pack(side="left", fill="both", expand=True, padx=(8, 0))
+
+        self._tree_left = self._build_register_tree(left_frame)
+        self._tree_right = self._build_register_tree(right_frame)
+        self._trees = (self._tree_left, self._tree_right)
+
+        for tree in self._trees:
+            tree.bind("<Double-1>", lambda e: self._edit_selected())
+            # Keep selection exclusive across both tables -- selecting a
+            # row in one should clear whatever was selected in the other,
+            # so "Edit Selected" always has exactly one unambiguous target.
+            tree.bind(
+                "<<TreeviewSelect>>",
+                lambda e, t=tree: self._on_tree_selected(t),
+            )
+
+    def _build_register_tree(self, parent) -> ttk.Treeview:
         columns = ("reg", "addr", "hex", "value")
-        self._tree = ttk.Treeview(
-            table_frame, columns=columns, show="headings", selectmode="browse"
+        tree = ttk.Treeview(
+            parent, columns=columns, show="headings", selectmode="browse"
         )
         for col, text, width, stretch in [
-            ("reg", "Reg", 60, False),
-            ("addr", "Addr", 70, False),
-            ("hex", "Hex", 160, False),
-            ("value", "Value", 300, True),
+            ("reg", "Reg", 55, False),
+            ("addr", "Addr", 65, False),
+            ("hex", "Hex", 150, False),
+            ("value", "Value", 170, True),
         ]:
-            self._tree.heading(col, text=text)
-            self._tree.column(col, width=width, anchor="w", stretch=stretch)
+            tree.heading(col, text=text)
+            tree.column(col, width=width, anchor="w", stretch=stretch)
 
         vsb = ttk.Scrollbar(
-            table_frame, orient="vertical", command=self._tree.yview,
+            parent, orient="vertical", command=tree.yview,
             style="DM41L.Vertical.TScrollbar",
         )
-        self._tree.configure(yscrollcommand=vsb.set)
-        self._tree.pack(side="left", fill="both", expand=True)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="left", fill="y")
-
-        self._tree.bind("<Double-1>", lambda e: self._edit_selected())
+        return tree
 
     @staticmethod
     def _style_treeview():
@@ -130,13 +153,17 @@ class DataRegistersTab(ctk.CTkFrame):
         if self._on_change:
             self._on_change()
 
-    def _refresh(self):
-        if self._memory is not None:
-            self.render(self._memory)
+    def _on_tree_selected(self, selected_tree: ttk.Treeview):
+        if not selected_tree.selection():
+            return
+        for tree in self._trees:
+            if tree is not selected_tree:
+                tree.selection_remove(*tree.selection())
 
     def render(self, memory: Memory):
         self._memory = memory
-        self._tree.delete(*self._tree.get_children())
+        for tree in self._trees:
+            tree.delete(*tree.get_children())
 
         if memory is None:
             self._header_label.configure(text="(no memory dump loaded)")
@@ -162,23 +189,35 @@ class DataRegistersTab(ctk.CTkFrame):
             )
         )
 
+        # First half of the registers goes in the left table, the rest in
+        # the right one; the left table gets the extra register when the
+        # count is odd.
+        split = -(-count // 2)  # ceil(count / 2)
+
         for i, addr in enumerate(range(r00, PRIMARY_DATA_END + 1)):
+            tree = self._tree_left if i < split else self._tree_right
             register = memory.get_register(addr)
-            self._tree.insert(
+            tree.insert(
                 "",
                 "end",
                 iid=str(addr),
                 values=(f"R{i:02d}", f"0x{addr:03x}", register.get_hex(), str(register)),
             )
 
+    def _selected_addr(self):
+        for tree in self._trees:
+            selection = tree.selection()
+            if selection:
+                return int(selection[0]), tree
+        return None, None
+
     def _edit_selected(self):
         if self._memory is None:
             return
-        selection = self._tree.selection()
-        if not selection:
+        addr, _ = self._selected_addr()
+        if addr is None:
             messagebox.showinfo("No Selection", "Select a register row first.")
             return
-        addr = int(selection[0])
         self._edit_register(addr)
 
     def _edit_register(self, addr: int):
@@ -188,7 +227,8 @@ class DataRegistersTab(ctk.CTkFrame):
             self._memory.set_register(addr, new_register)
             self._notify_change()
             self.render(self._memory)
-            self._tree.selection_set(str(addr))
-            self._tree.see(str(addr))
+            tree = self._tree_left if str(addr) in self._tree_left.get_children() else self._tree_right
+            tree.selection_set(str(addr))
+            tree.see(str(addr))
 
         RegisterEditDialog(self, addr, register, save)

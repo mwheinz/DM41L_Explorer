@@ -7,6 +7,8 @@ import customtkinter as ctk
 
 PLATFORM_SYSTEM = platform.system()
 
+DIALOG_WIDTH = 420
+
 
 class PortSelectionDialog(ctk.CTkToplevel):
     """
@@ -32,7 +34,11 @@ class PortSelectionDialog(ctk.CTkToplevel):
 
         if message:
             ctk.CTkLabel(
-                self, text=message, wraplength=380, justify="left", text_color="#d9822b"
+                self,
+                text=message,
+                wraplength=DIALOG_WIDTH - 40,
+                justify="left",
+                text_color="#d9822b",
             ).pack(padx=16, pady=(16, 8), anchor="w")
 
         ctk.CTkLabel(self, text="Available serial ports:").pack(
@@ -60,6 +66,13 @@ class PortSelectionDialog(ctk.CTkToplevel):
         self._connect_button.pack(side="right")
 
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
+
+        # Fix the dialog to a constant width so short status messages don't
+        # leave the buttons jammed together; height still adapts to whether
+        # a message is shown.
+        self.update_idletasks()
+        self.geometry(f"{DIALOG_WIDTH}x{self.winfo_reqheight()}")
+        self.minsize(DIALOG_WIDTH, self.winfo_reqheight())
 
     def _populate_ports(self):
         """Refreshes the dropdown options with current available ports."""

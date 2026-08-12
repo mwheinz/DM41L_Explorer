@@ -171,7 +171,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
 
         rows = [
             ("Q (scratch)", sr.Q().get_hex()),
-            ("F (flags?)", sr.F().get_hex()),
+            ("F (Append)", sr.F().get_hex()),
             ("Ret. stack a", sr.a().get_hex()),
             ("Ret. stack b", sr.b().get_hex()),
             ("c (partition)", sr.c().get_hex()),

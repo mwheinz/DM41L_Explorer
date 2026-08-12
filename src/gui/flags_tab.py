@@ -8,9 +8,12 @@ import customtkinter as ctk
 from memory import Memory
 from gui.flags_doc import load_flag_names
 from gui.scroll_support import bind_touchpad_scroll
+from gui.tab_common import build_tab_header
+
+FLAG_COUNT = 56
 
 
-class FlagsTab(ctk.CTkScrollableFrame):
+class FlagsTab(ctk.CTkFrame):
     """Renders the 56 flags as checkboxes. Call `render(memory)` whenever
     the buffer changes."""
 
@@ -22,14 +25,11 @@ class FlagsTab(ctk.CTkScrollableFrame):
         self._flag_vars = {}
         self._suspend_flag_callbacks = False
 
-        bind_touchpad_scroll(self)
+        _, self._header_label = build_tab_header(self)
 
-        ctk.CTkLabel(
-            self, text="Flags", font=ctk.CTkFont(weight="bold")
-        ).grid(row=0, column=0, columnspan=4, sticky="w", padx=8, pady=(8, 4))
-
-        self._body = ctk.CTkFrame(self, fg_color="transparent")
-        self._body.grid(row=1, column=0, columnspan=4, sticky="w")
+        self._body = ctk.CTkScrollableFrame(self)
+        self._body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        bind_touchpad_scroll(self._body)
 
     def _notify_change(self):
         if self._on_change:
@@ -42,22 +42,27 @@ class FlagsTab(ctk.CTkScrollableFrame):
         self._flag_vars = {}
 
         if memory is None:
-            ctk.CTkLabel(self._body, text="(no memory dump loaded)").grid(
-                row=0, column=0, padx=8, pady=8, sticky="w"
-            )
+            self._header_label.configure(text="(no memory dump loaded)")
             return
 
         try:
             current = memory.get_all_flags()
         except Exception as e:
-            ctk.CTkLabel(self._body, text=f"Could not decode flags: {e}").grid(
-                row=0, column=0, padx=8, pady=4, sticky="w"
-            )
+            self._header_label.configure(text=f"Could not decode flags: {e}")
             return
+
+        self._header_label.configure(text="HP41 Flags: Note that some flags" \
+                                     " will change value on calculator" \
+                                     " restart. Others have no effect on" \
+                                     " the emulator.")
 
         self._suspend_flag_callbacks = True
         columns = 4
-        for n in range(56):
+        # Fill down each column before starting the next (0-13 in column 0,
+        # 14-27 in column 1, ...) rather than filling across each row, so
+        # flag numbers read top-to-bottom in a column like a list.
+        rows = -(-FLAG_COUNT // columns)  # ceil division
+        for n in range(FLAG_COUNT):
             var = ctk.BooleanVar(value=current[n])
             self._flag_vars[n] = var
             label = f"{n:02d} {self._flag_names.get(n, '')}"
@@ -67,7 +72,7 @@ class FlagsTab(ctk.CTkScrollableFrame):
                 variable=var,
                 command=lambda n=n: self._on_flag_toggled(n),
             )
-            r, c = divmod(n, columns)
+            c, r = divmod(n, rows)
             cb.grid(row=r, column=c, sticky="w", padx=8, pady=2)
         self._suspend_flag_callbacks = False
 

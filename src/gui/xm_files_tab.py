@@ -8,6 +8,7 @@ import customtkinter as ctk
 from memory import Memory, ExtendedMemory, MemoryError as DM41LMemoryError
 from gui.xm_file_dialog import XMFileDialog
 from gui.scroll_support import bind_touchpad_scroll
+from gui.tab_common import build_tab_header
 
 
 class XMFilesTab(ctk.CTkFrame):
@@ -19,14 +20,9 @@ class XMFilesTab(ctk.CTkFrame):
         self._memory: Memory = None
         self._on_change = on_change
 
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=8, pady=8)
-        self._header_label = ctk.CTkLabel(
-            header, text="(no memory dump loaded)", font=ctk.CTkFont(weight="bold")
-        )
-        self._header_label.pack(side="left")
-        ctk.CTkButton(header, text="Add File...", width=100, command=self._add_file).pack(
-            side="right"
+        _, self._header_label = build_tab_header(
+            self,
+            button_kwargs={"text": "Add File...", "width": 100, "command": self._add_file},
         )
 
         self._table = ctk.CTkScrollableFrame(self)
