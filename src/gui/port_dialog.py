@@ -1,0 +1,88 @@
+"""
+Modal dialog for choosing a serial port to connect to the DM41.
+"""
+
+import platform
+import customtkinter as ctk
+
+PLATFORM_SYSTEM = platform.system()
+
+
+class PortSelectionDialog(ctk.CTkToplevel):
+    """
+    Blocking modal dialog that uses a dropdown menu to let the user pick
+    a serial port (or rescan, or cancel). The result is available via
+    `.result` after the dialog is closed (None if cancelled).
+    """
+
+    def __init__(
+        self, master, serial_manager, default_port: str = None, message: str = None
+    ):
+        super().__init__(master)
+        self.title("Connect to DM41")
+        self.resizable(False, False)
+        self.transient(master)
+        self.grab_set()
+        if PLATFORM_SYSTEM == "Darwin" and hasattr(master, "_menubar"):
+            self.config(menu=master._menubar)
+
+        self._serial_manager = serial_manager
+        self.result = None
+        self._default_port = default_port
+
+        if message:
+            ctk.CTkLabel(
+                self, text=message, wraplength=380, justify="left", text_color="#d9822b"
+            ).pack(padx=16, pady=(16, 8), anchor="w")
+
+        ctk.CTkLabel(self, text="Available serial ports:").pack(
+            padx=16, pady=(4, 4), anchor="w"
+        )
+
+        self._selected_port = ctk.StringVar(value="")
+        self._port_menu = ctk.CTkOptionMenu(self, variable=self._selected_port)
+        self._port_menu.pack(padx=16, pady=(0, 20), fill="x")
+
+        self._populate_ports()
+
+        button_row = ctk.CTkFrame(self, fg_color="transparent")
+        button_row.pack(padx=16, pady=(0, 16), fill="x")
+
+        ctk.CTkButton(
+            button_row, text="Rescan", width=90, command=self._populate_ports
+        ).pack(side="left")
+        ctk.CTkButton(
+            button_row, text="Cancel", width=90, command=self._on_cancel
+        ).pack(side="right", padx=(8, 0))
+        self._connect_button = ctk.CTkButton(
+            button_row, text="Connect", width=90, command=self._on_connect
+        )
+        self._connect_button.pack(side="right")
+
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel)
+
+    def _populate_ports(self):
+        """Refreshes the dropdown options with current available ports."""
+        ports = self._serial_manager.get_available_ports()
+
+        if not ports:
+            self._port_menu.configure(values=["No ports found"], state="disabled")
+            self._selected_port.set("")
+            return
+
+        self._port_menu.configure(values=ports, state="normal")
+
+        preselect = self._default_port if self._default_port in ports else ports[0]
+        self._selected_port.set(preselect)
+
+    def _on_connect(self):
+        port = self._selected_port.get()
+        if port:
+            self.result = port
+            self.grab_release()
+            self.destroy()
+
+    def _on_cancel(self):
+        self.result = None
+        self.grab_release()
+        self.destroy()
