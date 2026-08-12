@@ -50,7 +50,7 @@ from gui.data_registers_tab import DataRegistersTab
 from gui.xm_files_tab import XMFilesTab
 
 try:
-    from dm41version import _version
+    from dm41lversion import _version
 except ImportError:
     _version = "unknown"
 
