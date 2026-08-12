@@ -84,6 +84,27 @@ def _setup_logging(config_store):
     root_logger.addHandler(file_handler)
 
 
+def _apply_font_prefs(config_store):
+    """Overrides CustomTkinter's default UI font family/size, if configured.
+
+    CTkFont() instances read `ThemeManager.theme["CTkFont"]` at construction
+    time for whichever of family/size/weight isn't explicitly passed in, so
+    this has to run before any widget with a default (unset) font is built
+    -- in practice, right after `set_default_color_theme()` and before
+    `_build_layout()`. There's no supported way to retroactively change the
+    font of widgets that already exist, which is why a font change made in
+    Preferences only takes effect after a restart (see
+    gui/preferences_dialog.py).
+
+    Leaves CTk's own per-platform default (set by `set_default_color_theme`
+    above) alone for whichever of family/size the user hasn't overridden.
+    """
+    if config_store.font_family:
+        ctk.ThemeManager.theme["CTkFont"]["family"] = config_store.font_family
+    if config_store.font_size:
+        ctk.ThemeManager.theme["CTkFont"]["size"] = config_store.font_size
+
+
 class DM41LExplorerApp(ctk.CTk):
     """Main application window."""
 
@@ -95,6 +116,7 @@ class DM41LExplorerApp(ctk.CTk):
 
         ctk.set_appearance_mode(self.config_store.appearance_mode)
         ctk.set_default_color_theme(self.config_store.color_theme)
+        _apply_font_prefs(self.config_store)
 
         self.title("DM41L Explorer")
         self.geometry("1080x768")
@@ -381,10 +403,15 @@ class DM41LExplorerApp(ctk.CTk):
                 "cancel to work offline."
             )
 
-    def _prompt_for_port(self, message: str): dialog = PortSelectionDialog(
-            self, self.serial, default_port=self.config_store.serial_port,
-            message=message,) self.wait_window(dialog) if dialog.result:
-        self._connect_and_verify(dialog.result) elif self.serial.is_connected:
+    def _prompt_for_port(self, message: str):
+        dialog = PortSelectionDialog(
+                    self, self.serial,
+                    default_port=self.config_store.serial_port,
+                    message=message,)
+        self.wait_window(dialog)
+        if dialog.result:
+            self._connect_and_verify(dialog.result)
+        elif self.serial.is_connected:
             # Cancelling out of Reconnect leaves the existing connection
             # untouched -- don't overwrite the status bar with "Not
             # connected".

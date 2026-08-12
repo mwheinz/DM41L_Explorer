@@ -6,6 +6,14 @@ visually over time.
 
 import customtkinter as ctk
 
+# Font family used for any field that displays or edits raw register/file
+# *content* (hex bytes, addresses, decoded numbers, alpha text) -- as
+# opposed to labels, names, or descriptive prose. A fixed-width font keeps
+# these fields' columns aligned and makes it easy to eyeball hex digit
+# counts. Centralized here so every tab/dialog that shows register content
+# uses the same family instead of each hard-coding "Courier" separately.
+MONOSPACE_FONT_FAMILY = "Courier"
+
 
 def build_tab_header(master, button_kwargs: dict = None):
     """Builds the standard fixed tab header: a bold status label on the

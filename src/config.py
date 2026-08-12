@@ -22,6 +22,8 @@ class ProjectConfig:
         "log_directory": str(Path.home()),
         "appearance_mode": "System",  # "System", "Light", "Dark"
         "color_theme": "blue",  # CustomTkinter built-in theme name
+        "font_family": "",  # "" = use CustomTkinter's built-in per-platform default
+        "font_size": 0,  # 0 = use CustomTkinter's built-in default size
     }
 
     def __init__(self):
@@ -114,6 +116,22 @@ class ProjectConfig:
     @color_theme.setter
     def color_theme(self, value):
         self._prefs["color_theme"] = value
+
+    @property
+    def font_family(self) -> str:
+        return self._prefs["font_family"]
+
+    @font_family.setter
+    def font_family(self, value):
+        self._prefs["font_family"] = value
+
+    @property
+    def font_size(self) -> int:
+        return self._prefs["font_size"]
+
+    @font_size.setter
+    def font_size(self, value):
+        self._prefs["font_size"] = value
 
     def get_all(self) -> dict:
         return self._prefs

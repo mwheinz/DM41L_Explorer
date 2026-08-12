@@ -11,6 +11,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from memory import ExtendedMemory
+from gui.tab_common import MONOSPACE_FONT_FAMILY
 
 PLATFORM_SYSTEM = platform.system()
 
@@ -71,12 +72,17 @@ class XMFileDialog(ctk.CTkToplevel):
         if existing and existing.file_type == ExtendedMemory.TYPE_DATA:
             data_default = ", ".join(f"{n:g}" for n in existing.get_numbers())
         self._data_var = ctk.StringVar(value=data_default)
-        self._data_entry = ctk.CTkEntry(self, textvariable=self._data_var, width=320)
+        self._data_entry = ctk.CTkEntry(
+            self, textvariable=self._data_var, width=320,
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+        )
 
         ascii_default = ""
         if existing and existing.file_type == ExtendedMemory.TYPE_ASCII:
             ascii_default = "\n".join(existing.get_records())
-        self._ascii_box = ctk.CTkTextbox(self, width=320, height=140)
+        self._ascii_box = ctk.CTkTextbox(
+            self, width=320, height=140, font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY)
+        )
         if ascii_default:
             self._ascii_box.insert("1.0", ascii_default)
 

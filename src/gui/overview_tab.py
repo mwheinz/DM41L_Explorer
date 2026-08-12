@@ -9,6 +9,7 @@ import customtkinter as ctk
 from memory import Memory, StatusRegisters, ExtendedMemory, MemoryError as DM41LMemoryError
 from gui.memory_ranges import MIN_SANE_R00
 from gui.scroll_support import bind_touchpad_scroll
+from gui.tab_common import MONOSPACE_FONT_FAMILY
 
 # Registers 0x0c1-0x1ff are the addressable main-memory range (0x0c0 is Key
 # Assignments); PRIMARY_DATA_END (0x1ff) is main memory's top boundary, so
@@ -110,7 +111,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             cell.grid(row=start_row + r, column=c, sticky="w", padx=10, pady=2)
             ctk.CTkLabel(cell, text=f"{label}:", width=90, anchor="w").pack(side="left")
             ctk.CTkLabel(
-                cell, text=value, font=ctk.CTkFont(family="Courier"), anchor="w"
+                cell, text=value, font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY), anchor="w"
             ).pack(side="left")
         return start_row + (-(-len(rows) // columns) if rows else 0)  # ceil div
 
@@ -140,7 +141,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         ctk.CTkLabel(
             self._stack_frame,
             text=repr(str(sr.alpha)),
-            font=ctk.CTkFont(family="Courier"),
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             anchor="w",
         ).grid(row=next_row + 1, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 4))
 
@@ -222,7 +223,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         ctk.CTkLabel(
             self._partition_frame,
             text=f"0x{dot_end:03x}",
-            font=ctk.CTkFont(family="Courier"),
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).grid(row=1, column=1, sticky="w", padx=10, pady=2)
 
         ctk.CTkLabel(self._partition_frame, text="ΣREG address:").grid(
@@ -231,7 +232,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         ctk.CTkLabel(
             self._partition_frame,
             text=f"0x{sigma_reg:03x}",
-            font=ctk.CTkFont(family="Courier"),
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).grid(row=2, column=1, sticky="w", padx=10, pady=2)
 
         ctk.CTkLabel(self._partition_frame, text="R00 (data register 00):").grid(
@@ -239,7 +240,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
         )
         self._r00_var = ctk.StringVar(value=f"0x{r00:03x}")
         entry = ctk.CTkEntry(
-            self._partition_frame, textvariable=self._r00_var, width=100
+            self._partition_frame, textvariable=self._r00_var, width=100,
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         )
         entry.grid(row=3, column=1, sticky="w", padx=10, pady=(2, 10))
         ctk.CTkButton(

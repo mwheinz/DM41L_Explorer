@@ -17,7 +17,7 @@ import customtkinter as ctk
 from memory import Memory, Register, PRIMARY_DATA_END
 from gui.register_edit_dialog import RegisterEditDialog
 from gui.memory_ranges import MIN_SANE_R00
-from gui.tab_common import build_tab_header
+from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY
 
 
 class DataRegistersTab(ctk.CTkFrame):
@@ -58,6 +58,8 @@ class DataRegistersTab(ctk.CTkFrame):
         self._tree_left = self._build_register_tree(left_frame)
         self._tree_right = self._build_register_tree(right_frame)
         self._trees = (self._tree_left, self._tree_right)
+        for tree in self._trees:
+            tree.tag_configure("oddrow", background=self._stripe_bg)
 
         for tree in self._trees:
             tree.bind("<Double-1>", lambda e: self._edit_selected())
@@ -92,15 +94,31 @@ class DataRegistersTab(ctk.CTkFrame):
         vsb.pack(side="left", fill="y")
         return tree
 
-    @staticmethod
-    def _style_treeview():
+    def _style_treeview(self):
         """Rough dark/light theming so the native table (and its native
         scrollbar) don't clash too badly with CustomTkinter's look. This
         table uses ttk.Treeview/ttk.Scrollbar instead of CTk widgets purely
         for performance (see module docstring) -- CTk has no theme hook
-        into ttk, so without this the scrollbar would default to the
-        stock OS theme, which looks noticeably different from the
-        CTkScrollableFrame scrollbars used on the Flags/XM Files tabs."""
+        into ttk, so without this the scrollbar (and font) would default to
+        the stock OS theme, which looks noticeably different from the
+        CTkScrollableFrame scrollbars used on the Flags/XM Files tabs.
+
+        Row/cell text uses the app's shared monospace font (see
+        gui/tab_common.py) since every column here is register content
+        (address, hex bytes, decoded value) rather than a label -- fixed
+        width keeps those columns aligned. The heading row stays in the
+        regular UI font (read from CTk's own theme dict, so it automatically
+        follows whatever font preference gui/app.py applied at startup --
+        see `_apply_font_prefs`), matching the bold-labeled column headers
+        used elsewhere (e.g. the XM Files tab).
+
+        Also stashes `self._stripe_bg` for alternating row colors -- reuses
+        the same subtle shade already used for the heading/scrollbar trough
+        rather than inventing a third color, so odd rows read as a gentle
+        tint instead of a jarring stripe. Row tags are applied per-item in
+        render(), once the tree widgets exist (an instance method, not
+        @staticmethod like this used to be, purely so it has a `self` to
+        stash that color on for `_build_register_tree` to pick up)."""
         style = ttk.Style()
         try:
             style.theme_use("clam")
@@ -110,11 +128,15 @@ class DataRegistersTab(ctk.CTkFrame):
         bg = "#2b2b2b" if dark else "#f4f4f4"
         field_bg = "#242424" if dark else "#ffffff"
         fg = "#e6e6e6" if dark else "#1a1a1a"
+        self._stripe_bg = bg
+        ui_font = ctk.ThemeManager.theme["CTkFont"]
+        font = (MONOSPACE_FONT_FAMILY, ui_font["size"])
+        heading_font = (ui_font["family"], ui_font["size"], "bold")
         style.configure(
             "Treeview", background=field_bg, fieldbackground=field_bg,
-            foreground=fg, rowheight=22, borderwidth=0,
+            foreground=fg, rowheight=22, borderwidth=0, font=font,
         )
-        style.configure("Treeview.Heading", background=bg, foreground=fg)
+        style.configure("Treeview.Heading", background=bg, foreground=fg, font=heading_font)
         style.map("Treeview", background=[("selected", "#1f6aa5")])
 
         # Approximate CTkScrollableFrame's own scrollbar look (a slim,
@@ -194,14 +216,22 @@ class DataRegistersTab(ctk.CTkFrame):
         # count is odd.
         split = -(-count // 2)  # ceil(count / 2)
 
+        # Alternating-row shading is tracked per table (not by the global
+        # register index `i`) so both tables' top rows start on the same
+        # shade regardless of whether `split` happens to be odd or even.
+        row_pos = {id(self._tree_left): 0, id(self._tree_right): 0}
+
         for i, addr in enumerate(range(r00, PRIMARY_DATA_END + 1)):
             tree = self._tree_left if i < split else self._tree_right
+            pos = row_pos[id(tree)]
+            row_pos[id(tree)] = pos + 1
             register = memory.get_register(addr)
             tree.insert(
                 "",
                 "end",
                 iid=str(addr),
                 values=(f"R{i:02d}", f"0x{addr:03x}", register.get_hex(), str(register)),
+                tags=("oddrow",) if pos % 2 else (),
             )
 
     def _selected_addr(self):

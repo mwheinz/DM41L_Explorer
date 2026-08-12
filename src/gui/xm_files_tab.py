@@ -8,7 +8,7 @@ import customtkinter as ctk
 from memory import Memory, ExtendedMemory, MemoryError as DM41LMemoryError
 from gui.xm_file_dialog import XMFileDialog
 from gui.scroll_support import bind_touchpad_scroll
-from gui.tab_common import build_tab_header
+from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY
 
 
 class XMFilesTab(ctk.CTkFrame):
@@ -76,16 +76,17 @@ class XMFilesTab(ctk.CTkFrame):
         ctk.CTkLabel(
             self._table,
             text=f"0x{f.header_addr:03x}",
-            font=ctk.CTkFont(family="Courier"),
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             anchor="w",
         ).grid(row=row, column=2, sticky="w", padx=6, pady=1)
         span_note = " (spans regions)" if f.spans_regions else ""
         ctk.CTkLabel(
             self._table, text=f"{f.num_registers}{span_note}", anchor="w"
         ).grid(row=row, column=3, sticky="w", padx=6, pady=1)
-        ctk.CTkLabel(self._table, text=preview, anchor="w").grid(
-            row=row, column=4, sticky="w", padx=6, pady=1
-        )
+        ctk.CTkLabel(
+            self._table, text=preview, font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+            anchor="w",
+        ).grid(row=row, column=4, sticky="w", padx=6, pady=1)
 
         can_edit = f.file_type in (ExtendedMemory.TYPE_DATA, ExtendedMemory.TYPE_ASCII)
         edit_button = ctk.CTkButton(

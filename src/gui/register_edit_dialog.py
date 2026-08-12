@@ -8,6 +8,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from memory import Register
+from gui.tab_common import MONOSPACE_FONT_FAMILY
 
 PLATFORM_SYSTEM = platform.system()
 
@@ -70,26 +71,29 @@ class RegisterEditDialog(ctk.CTkToplevel):
         ctk.CTkLabel(tabs.tab("Number"), text="BCD number:").pack(
             anchor="w", padx=8, pady=(12, 4)
         )
-        ctk.CTkEntry(tabs.tab("Number"), textvariable=self._number_var).pack(
-            anchor="w", padx=8, fill="x"
-        )
+        ctk.CTkEntry(
+            tabs.tab("Number"), textvariable=self._number_var,
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+        ).pack(anchor="w", padx=8, fill="x")
 
         text_default = _decode_text_register(register)
         self._text_var = ctk.StringVar(value=text_default)
         ctk.CTkLabel(tabs.tab("Text"), text="Alpha text (max 6 characters):").pack(
             anchor="w", padx=8, pady=(12, 4)
         )
-        ctk.CTkEntry(tabs.tab("Text"), textvariable=self._text_var).pack(
-            anchor="w", padx=8, fill="x"
-        )
+        ctk.CTkEntry(
+            tabs.tab("Text"), textvariable=self._text_var,
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+        ).pack(anchor="w", padx=8, fill="x")
 
         self._hex_var = ctk.StringVar(value=register.get_hex())
         ctk.CTkLabel(tabs.tab("Hex"), text="Raw hex (14 characters):").pack(
             anchor="w", padx=8, pady=(12, 4)
         )
-        ctk.CTkEntry(tabs.tab("Hex"), textvariable=self._hex_var).pack(
-            anchor="w", padx=8, fill="x"
-        )
+        ctk.CTkEntry(
+            tabs.tab("Hex"), textvariable=self._hex_var,
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+        ).pack(anchor="w", padx=8, fill="x")
 
         self._tabs = tabs
 

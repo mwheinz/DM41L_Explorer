@@ -1,16 +1,21 @@
 """
-Preferences dialog: default serial port/baud/timeout, logging, and
-appearance.
+Preferences dialog: default serial port/baud/timeout, logging, appearance,
+and font.
 """
 
 import platform
 from pathlib import Path
 from tkinter import filedialog, messagebox
+import tkinter.font as tkfont
 import customtkinter as ctk
 
 PLATFORM_SYSTEM = platform.system()
 
 LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+FONT_DEFAULT_LABEL = "System Default"
+FONT_SIZE_DEFAULT_LABEL = "Default"
+FONT_SIZES = ["9", "10", "11", "12", "13", "14", "16", "18", "20"]
 
 
 class PreferencesDialog(ctk.CTkToplevel):
@@ -120,6 +125,42 @@ class PreferencesDialog(ctk.CTkToplevel):
             tab, values=["System", "Light", "Dark"], variable=self._appearance_var
         ).pack(anchor="w", padx=8, fill="x")
 
+        font_row = ctk.CTkFrame(tab, fg_color="transparent")
+        font_row.pack(anchor="w", padx=8, pady=(16, 0), fill="x")
+        font_row.grid_columnconfigure(0, weight=1)
+        font_row.grid_columnconfigure(1, weight=0)
+
+        family_col = ctk.CTkFrame(font_row, fg_color="transparent")
+        family_col.grid(row=0, column=0, sticky="ew")
+        ctk.CTkLabel(family_col, text="Application font:").pack(anchor="w")
+        families = [FONT_DEFAULT_LABEL] + self._get_font_families()
+        current_family = self._config.font_family or FONT_DEFAULT_LABEL
+        if current_family not in families:
+            families.append(current_family)
+        self._font_family_var = ctk.StringVar(value=current_family)
+        ctk.CTkOptionMenu(
+            family_col, values=families, variable=self._font_family_var
+        ).pack(anchor="w", pady=(4, 0), fill="x")
+
+        size_col = ctk.CTkFrame(font_row, fg_color="transparent")
+        size_col.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        ctk.CTkLabel(size_col, text="Size:").pack(anchor="w")
+        sizes = [FONT_SIZE_DEFAULT_LABEL] + FONT_SIZES
+        current_size = str(self._config.font_size) if self._config.font_size else FONT_SIZE_DEFAULT_LABEL
+        if current_size not in sizes:
+            sizes.append(current_size)
+        self._font_size_var = ctk.StringVar(value=current_size)
+        ctk.CTkOptionMenu(size_col, values=sizes, variable=self._font_size_var, width=90).pack(
+            anchor="w", pady=(4, 0)
+        )
+
+        ctk.CTkLabel(
+            tab,
+            text="Font changes take effect after restarting DM41L Explorer.",
+            text_color="#d9822b",
+            font=ctk.CTkFont(size=11),
+        ).pack(anchor="w", padx=8, pady=(4, 0))
+
         ctk.CTkLabel(tab, text="Log file directory:").pack(
             anchor="w", padx=8, pady=(16, 4)
         )
@@ -142,6 +183,16 @@ class PreferencesDialog(ctk.CTkToplevel):
         if chosen:
             self._log_dir_var.set(chosen)
 
+    @staticmethod
+    def _get_font_families() -> list:
+        """Returns the system's installed font family names, sorted and
+        de-duplicated (font backends commonly report the same family
+        multiple times across styles/weights). Vertical-writing CJK
+        families (Tk lists these with a "@" prefix) are dropped since
+        they're not meant for horizontal UI text."""
+        families = {f for f in tkfont.families() if not f.startswith("@")}
+        return sorted(families, key=str.casefold)
+
     # -- Save -------------------------------------------------------------
 
     def _on_save(self):
@@ -163,6 +214,15 @@ class PreferencesDialog(ctk.CTkToplevel):
             pass
         self._config.logging_level = self._log_level_var.get()
         self._config.appearance_mode = self._appearance_var.get()
+        family_choice = self._font_family_var.get()
+        self._config.font_family = "" if family_choice == FONT_DEFAULT_LABEL else family_choice
+        size_choice = self._font_size_var.get()
+        try:
+            self._config.font_size = (
+                0 if size_choice == FONT_SIZE_DEFAULT_LABEL else int(size_choice)
+            )
+        except ValueError:
+            pass
         self._config.log_directory = log_dir_str
 
         self._config.save()
