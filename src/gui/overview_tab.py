@@ -6,7 +6,7 @@ how memory is divided up. Flags live in their own tab (gui/flags_tab.py).
 from tkinter import messagebox
 import customtkinter as ctk
 
-from memory import Memory, StatusRegisters, ExtendedMemory, MemoryError as DM41LMemoryError
+from memory import Memory, StatusRegisters, ExtendedMemory, DM41LMemoryError
 from gui.memory_ranges import MIN_SANE_R00
 from gui.scroll_support import bind_touchpad_scroll
 from gui.tab_common import MONOSPACE_FONT_FAMILY

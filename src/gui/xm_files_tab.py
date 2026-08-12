@@ -5,7 +5,7 @@ XM Files tab: view, add, edit, and remove extended-memory files.
 from tkinter import messagebox
 import customtkinter as ctk
 
-from memory import Memory, ExtendedMemory, MemoryError as DM41LMemoryError
+from memory import Memory, ExtendedMemory, DM41LMemoryError
 from gui.xm_file_dialog import XMFileDialog
 from gui.scroll_support import bind_touchpad_scroll
 from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY

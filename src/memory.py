@@ -21,10 +21,12 @@ from decimal import Decimal, Context, ROUND_HALF_EVEN
 
 logger = logging.getLogger(__name__)
 
-class MemoryError(ValueError):
+
+class DM41LMemoryError(ValueError):
     """
     Raised when a register in the data dump contains an illegal value.
     """
+
 
 class Register:
     """
@@ -272,11 +274,13 @@ class Register:
     def __repr__(self):
         return f"Register({self.get_hex()})"
 
+
 class AlphaRegister(Register):
     """Represents the HP41/DM41L alpha register."""
+
     def __str__(self):
         skip_nulls = True
-        text=""
+        text = ""
         for b in self._data:
             if b != 0x00 and skip_nulls:
                 skip_nulls = False
@@ -288,15 +292,17 @@ class AlphaRegister(Register):
                 text = text + c
         return text
 
+
 STATUS_REGISTERS_RANGE = (0x00, 0x0F)
 VOID_RANGE = (0x10, 0x3F)
 KEY_ASSIGNMENTS_RANGE = (0xC0, 0xC0)  # Key assignments are variable length.
 PRIMARY_DATA_END = 0x1FF
 
 ZERO_REGISTER_HEX = "00000000000000"
-ZERO_REGISTER = Register(size = 7)
+ZERO_REGISTER = Register(size=7)
 EOM_REGISTER_HEX = "ffffffffffffff"
 EOM_REGISTER = Register.from_hex(EOM_REGISTER_HEX)
+
 
 class MemoryRegion:
     """
@@ -325,8 +331,10 @@ class MemoryRegion:
         return self.address_range[1] - self.address_range[0] + 1
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}(0x{self.address_range[0]:03X}-" \
-               f"0x{self.address_range[1]:03X})"
+        return (
+            f"{type(self).__name__}(0x{self.address_range[0]:03X}-"
+            f"0x{self.address_range[1]:03X})"
+        )
 
     def _check_addr(self, addr: int):
         if addr not in self:
@@ -352,11 +360,24 @@ class MemoryRegion:
 
 # Labels for the 16 status registers, in address order.
 STATUS_REGISTER_LABELS = [
-    "T", "Z", "Y", "X",
-    "LastX", "M", "N", "O",
-    "P", "Q", "F", "a",
-    "b", "c", "d / Flags", "e",
+    "T",
+    "Z",
+    "Y",
+    "X",
+    "LastX",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "F",
+    "a",
+    "b",
+    "c",
+    "d / Flags",
+    "e",
 ]
+
 
 class StatusRegisters(MemoryRegion):
     """The 16 named CPU/system registers, T through e."""
@@ -366,8 +387,12 @@ class StatusRegisters(MemoryRegion):
 
     def __init__(self, memory: "Memory"):
         super().__init__(memory, STATUS_REGISTERS_RANGE)
-        bd = self.get_register(8)._data[4:7] + self.get_register(7)._data + \
-                self.get_register(6)._data + self.get_register(5)._data
+        bd = (
+            self.get_register(8)._data[4:7]
+            + self.get_register(7)._data
+            + self.get_register(6)._data
+            + self.get_register(5)._data
+        )
         self.alpha = AlphaRegister(data=bd, ascii_only=True, read_only=True)
 
     def T(self) -> Register:
@@ -424,14 +449,20 @@ class StatusRegisters(MemoryRegion):
     def label_for(self, addr: int) -> str:
         """The system-register name (e.g. 'X') for an address in this region."""
         if 0x00 <= addr <= 0x04:
-            return f"{STATUS_REGISTER_LABELS[addr]}: " \
-                   f"{self.get_register(addr).get_bcd_number()}"
+            return (
+                f"{STATUS_REGISTER_LABELS[addr]}: "
+                f"{self.get_register(addr).get_bcd_number()}"
+            )
         if 0x05 <= addr <= 0x08:
-            return f"{STATUS_REGISTER_LABELS[addr]}: " \
-                   f"{self.get_register(addr).get_ascii()}"
-        if 0x09 <= addr <= 0x0f:
-            return f"{STATUS_REGISTER_LABELS[addr]}: " \
-                   f"{self.get_register(addr).get_hex()}"
+            return (
+                f"{STATUS_REGISTER_LABELS[addr]}: "
+                f"{self.get_register(addr).get_ascii()}"
+            )
+        if 0x09 <= addr <= 0x0F:
+            return (
+                f"{STATUS_REGISTER_LABELS[addr]}: "
+                f"{self.get_register(addr).get_hex()}"
+            )
         return None
 
 
@@ -486,6 +517,7 @@ class XMFile:
     Reverse-engineered from sample dumps rather than documented spec, so
     treat the field meanings as well-tested hypotheses, not certainties.
     """
+
     TYPE_PROGRAM = 1
     TYPE_DATA = 2
     TYPE_ASCII = 3
@@ -781,7 +813,11 @@ class ExtendedMemory(MemoryRegion):
             if raw[2] != 0x00:
                 return None
 
-        return {"file_type": file_type, "register_length": register_length, "byte_length": None}
+        return {
+            "file_type": file_type,
+            "register_length": register_length,
+            "byte_length": None,
+        }
 
     def list_files(self) -> list[XMFile]:
         """
@@ -803,7 +839,7 @@ class ExtendedMemory(MemoryRegion):
         # We can use this as a simple check for whether extended memory is
         # empty or not.
 
-        # If the last 3 nibbles of the region header 
+        # If the last 3 nibbles of the region header
         # equal 0, there are no XM files.
         current_region = 0
         region_header_addr = XM_REGIONS[current_region][0]
@@ -813,44 +849,49 @@ class ExtendedMemory(MemoryRegion):
 
         # Compare what the memory dump says should be the top of the first
         # XM region with what we know it should be...
-        addr = (region_header[1] & 0x0f) * 256 + region_header[0] 
+        addr = (region_header[1] & 0x0F) * 256 + region_header[0]
         if addr != XM_REGIONS[current_region][1]:
-            raise MemoryError(f"Invalid XM header: {addr:x} != 0x" \
-                              f"{XM_REGIONS[current_region][1]}")
+            raise DM41LMemoryError(
+                f"Invalid XM header: {addr:x} != 0x" f"{XM_REGIONS[current_region][1]}"
+            )
 
         while self.get_register(addr) != EOM_REGISTER:
             name = self.get_register(addr).get_ascii()
             addr -= 1
-            segments=[]
+            segments = []
             header_addr = addr
             header_register = self.get_register(addr)
             header = ExtendedMemory._parse_header(addr, header_register._data)
             if header is None:
-                raise MemoryError("Detected invalid XM file header. "\
-                                f"0x{addr:x}: {header_register.get_hex()}")
+                raise DM41LMemoryError(
+                    "Detected invalid XM file header. "
+                    f"0x{addr:x}: {header_register.get_hex()}"
+                )
 
-            addr -= header["register_length"]+1
+            addr -= header["register_length"] + 1
             if addr <= XM_REGIONS[current_region][0]:
                 # File spans regions.
-                segments = [[ XM_REGIONS[current_region][0]+1, header_addr-1 ]]
+                segments = [[XM_REGIONS[current_region][0] + 1, header_addr - 1]]
 
                 s = XM_REGIONS[current_region][0] - addr
                 current_region += 1
                 addr = XM_REGIONS[current_region][1] - s
-                
-                segments.append([ addr+1, XM_REGIONS[current_region][1] ])
+
+                segments.append([addr + 1, XM_REGIONS[current_region][1]])
 
             else:
                 # File only has 1 segment.
-                segments = [[ addr+1, header_addr-1 ]]
-        
-            file = XMFile(memory = self._memory,
-                          name = name,
-                          header_addr = header_addr,
-                          file_type = header["file_type"],
-                          declared_length = header["register_length"],
-                          byte_length = header.get("byte_length", None),
-                          segments = segments)
+                segments = [[addr + 1, header_addr - 1]]
+
+            file = XMFile(
+                memory=self._memory,
+                name=name,
+                header_addr=header_addr,
+                file_type=header["file_type"],
+                declared_length=header["register_length"],
+                byte_length=header.get("byte_length", None),
+                segments=segments,
+            )
             files.append(file)
         return files
 
@@ -861,7 +902,7 @@ class ExtendedMemory(MemoryRegion):
         for i, (lo, hi) in enumerate(XM_REGIONS):
             if lo < addr <= hi:
                 return i
-        raise MemoryError(f"Address 0x{addr:x} is not within any writable XM region")
+        raise DM41LMemoryError(f"Address 0x{addr:x} is not within any writable XM region")
 
     def _next_slot(self) -> tuple:
         """
@@ -918,7 +959,7 @@ class ExtendedMemory(MemoryRegion):
             s = XM_REGIONS[region_index][0] - cursor
             next_region = region_index + 1
             if next_region >= len(XM_REGIONS):
-                raise MemoryError(
+                raise DM41LMemoryError(
                     "Not enough free space in extended memory for this "
                     "file -- no further XM region is available to spill "
                     "into."
@@ -926,7 +967,7 @@ class ExtendedMemory(MemoryRegion):
             ceiling = XM_REGIONS[next_region][1]
             cursor = ceiling - s
             if cursor + 1 <= XM_REGIONS[next_region][0]:
-                raise MemoryError(
+                raise DM41LMemoryError(
                     "Not enough free space in extended memory for this "
                     "file -- it would need to spill into a third region, "
                     "which isn't supported (or confirmed to work on real "
@@ -940,7 +981,9 @@ class ExtendedMemory(MemoryRegion):
 
     @staticmethod
     def _build_header(
-        file_type: int, header_addr: int, register_length: int,
+        file_type: int,
+        header_addr: int,
+        register_length: int,
         byte_length: Optional[int] = None,
     ) -> Register:
         """Builds a header register per the formats in docs/memory.md sec.
@@ -1032,7 +1075,7 @@ class ExtendedMemory(MemoryRegion):
         behavior documented in docs/memory.md sec. 4.2/4.5. There's no
         support (yet) for reusing space freed by a deleted file.
 
-        Raises MemoryError if there isn't enough contiguous XM space left
+        Raises DM41LMemoryError if there isn't enough contiguous XM space left
         (see _allocate_segments()).
         """
         if not name or len(name) > 7:
@@ -1222,11 +1265,11 @@ class ExtendedMemory(MemoryRegion):
         cost of rewriting every file that comes after the one being
         removed (their register addresses will change).
 
-        Raises MemoryError if no file has a header at header_addr.
+        Raises DM41LMemoryError if no file has a header at header_addr.
         """
         files = self.list_files()
         if not any(f.header_addr == header_addr for f in files):
-            raise MemoryError(f"No XM file with a header at 0x{header_addr:03x}")
+            raise DM41LMemoryError(f"No XM file with a header at 0x{header_addr:03x}")
 
         # Snapshot each surviving file's content *before* clearing anything
         # -- get_numbers()/get_records()/get_instruction_bytes() all read
@@ -1249,9 +1292,7 @@ class ExtendedMemory(MemoryRegion):
                     )
                 )
             else:
-                raise MemoryError(
-                    f"Unknown file type for {f.name!r}: {f.file_type}"
-                )
+                raise DM41LMemoryError(f"Unknown file type for {f.name!r}: {f.file_type}")
 
         for lo, hi in XM_REGIONS:
             for addr in range(lo, hi + 1):
@@ -1259,6 +1300,7 @@ class ExtendedMemory(MemoryRegion):
 
         for name, file_type, kwargs in rebuild:
             self.add_file(name, file_type, **kwargs)
+
 
 class UnusedRegion(MemoryRegion):
     key = "unused"
@@ -1486,9 +1528,7 @@ class Memory:
         nibbles[8] = (addr >> 8) & 0xF
         nibbles[9] = (addr >> 4) & 0xF
         nibbles[10] = addr & 0xF
-        new_bytes = bytes(
-            (nibbles[i] << 4) | nibbles[i + 1] for i in range(0, 14, 2)
-        )
+        new_bytes = bytes((nibbles[i] << 4) | nibbles[i + 1] for i in range(0, 14, 2))
         self.set_register(self.REG_C_ADDR, Register(data=new_bytes))
 
     # -- Register d (0x0E): the 56 user/system flags --

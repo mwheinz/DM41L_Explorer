@@ -315,7 +315,7 @@ def test_status_registers_invalid_address(status_memory):
 # --- Extended Memory / XMFile Tests ---
 
 from pathlib import Path
-from memory import ExtendedMemory, MemoryError, XM_REGIONS, ZERO_REGISTER
+from memory import ExtendedMemory, DM41LMemoryError, XM_REGIONS, ZERO_REGISTER
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -580,7 +580,7 @@ def test_xm_add_file_updates_region0_nnn_when_a_later_file_first_spans():
 
 def test_xm_add_file_no_room_raises():
     xm = _load_xm("empty.dm41")
-    with pytest.raises(MemoryError):
+    with pytest.raises(DM41LMemoryError):
         xm.add_file("HUGE", xm.TYPE_DATA, numbers=[float(i) for i in range(4000)])
 
 
@@ -810,7 +810,7 @@ def test_xm_remove_last_file_leaves_extended_memory_empty():
 
 def test_xm_remove_file_unknown_header_raises():
     xm = _load_xm("empty.dm41")
-    with pytest.raises(MemoryError):
+    with pytest.raises(DM41LMemoryError):
         xm.remove_file(0x99)
 
 

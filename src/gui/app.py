@@ -22,6 +22,7 @@ tab was additionally moved off CustomTkinter widgets entirely.
 """
 
 import logging
+import sys
 from pathlib import Path
 from datetime import datetime
 import platform
@@ -131,6 +132,16 @@ class DM41LExplorerApp(ctk.CTk):
         self._build_layout()
         self._menubar = self._build_menus()
         self._bind_keys()
+
+        if PLATFORM_SYSTEM == "Darwin":
+            # macOS delivers "double-click a .dm41 file" as an "Open
+            # Document" AppleEvent rather than a sys.argv entry -- both for
+            # a cold launch (Finder launches the app, then sends this) and
+            # for double-clicking a file while the app is already running.
+            # Tk exposes it as a registered command rather than a normal
+            # event binding; see main()/_handle_startup_file_arg below for
+            # the non-macOS (sys.argv-based) half of double-click support.
+            self.createcommand("::tk::mac::OpenDocument", self._on_mac_open_document)
 
         self._start_engine_pump()
         self._render_tabs()
@@ -606,6 +617,16 @@ class DM41LExplorerApp(ctk.CTk):
         )
         if not path:
             return
+        self._load_dump_into_buffer(path)
+
+    def _load_dump_into_buffer(self, path):
+        """Reads `path` into self.memory and refreshes the UI to match.
+        This is the actual load step shared by every way of opening a dump
+        (File > Open..., a startup file argument, and double-clicking a
+        .dm41 file) -- callers are responsible for checking `self.dirty`
+        and confirming with the user first, since the right prompt (or
+        whether to prompt at all) differs by caller. This always
+        overwrites the current buffer unconditionally."""
         try:
             self.memory = Memory.from_file(path)
             self.memory_source = Path(path)
@@ -616,6 +637,41 @@ class DM41LExplorerApp(ctk.CTk):
             self._set_status(f"Loaded dump from {path}")
         except Exception as e:
             messagebox.showerror("Error", f"Could not load dump: {e}")
+
+    def open_dump_file(self, path):
+        """Opens `path` as the app's current dump, prompting to discard
+        unsaved changes first if needed (same prompt File > Open... uses).
+
+        Public entry point for anything that hands the app a file path
+        directly, bypassing the File > Open... dialog: a startup file
+        argument (double-clicking a .dm41 file on Windows/Linux, or
+        launching fresh via double-click on macOS -- see
+        `_handle_startup_file_arg`/main() below) and the macOS "Open
+        Document" AppleEvent for double-clicking a .dm41 file while the
+        app is already running (see `_on_mac_open_document` below)."""
+        if not Path(path).exists():
+            messagebox.showerror("Error", f"Could not find file: {path}")
+            return
+        if self.dirty and not messagebox.askyesno(
+            "Unsaved Changes", "Discard unsaved changes and load a different dump?"
+        ):
+            return
+        self._load_dump_into_buffer(path)
+
+    def _on_mac_open_document(self, *paths):
+        """Handles macOS's "Open Document" AppleEvent -- what Finder sends
+        for double-clicking a .dm41 file, whether that launches the app
+        fresh or the app is already running. Tk surfaces this as a
+        registered command (wired in __init__) rather than a normal
+        widget-level event or sys.argv, per
+        https://www.tcl.tk/man/tcl/TkCmd/tk_mac.html."""
+        if not paths:
+            return
+        # Finder can in principle hand over more than one path at once
+        # (e.g. multi-selecting files and choosing Open); this app only
+        # has one buffer, so just open the last one -- "last one wins" is
+        # the least surprising choice for a single-document app.
+        self.open_dump_file(paths[-1])
 
     # -- Connect menu actions -----------------------------------------------
 
@@ -695,10 +751,28 @@ class DM41LExplorerApp(ctk.CTk):
         self.destroy()
 
 
+def _handle_startup_file_arg(app):
+    """Opens a dump file passed on the command line at launch, if any --
+    the Windows/Linux half of "double-click a .dm41 file to open it": file
+    associations on those platforms launch the app with the file's path as
+    an argument. macOS instead delivers this via an "Open Document"
+    AppleEvent (see `DM41LExplorerApp._on_mac_open_document`), which
+    doesn't go through sys.argv at all, but this also covers running the
+    app directly from a shell with a file argument on any platform.
+
+    Ignores anything that looks like a flag (starts with "-") rather than
+    a path, since this app has no other command-line options of its own to
+    parse -- a stray flag shouldn't be treated as a file to open.
+    """
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        app.open_dump_file(sys.argv[1])
+
+
 def main():
     app = DM41LExplorerApp()
     logger.debug(main.__name__)
     app.protocol("WM_DELETE_WINDOW", app.on_close)
+    _handle_startup_file_arg(app)
     app.mainloop()
 
 
