@@ -6,3 +6,4 @@ src/engine/__pycache__/**
 src/gui/__pycache__/**
 data/*
 src/dm41version.py
+docs/pdfs
