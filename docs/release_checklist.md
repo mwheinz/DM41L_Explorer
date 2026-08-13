@@ -8,43 +8,51 @@ LICENSE are the highest-leverage starting point.
 
 ## 1. Repo hygiene
 
-- [ ] Add `src/dm41-venv/` (or a generic `*venv*/`) to `.gitignore`. It's
-      not currently tracked, but it's also not ignored — a future
-      `git add -A` would sweep the whole venv into the repo.
-- [ ] Split `requirements.txt` into:
+- [X] Add `src/dm41-venv/` (or a generic `*venv*/`) to `.gitignore`. It's not
+  currently tracked, but it's also not ignored — a future `git add -A` would
+  sweep the whole venv into the repo. (Done. dm41-venv already exists at the
+  root level and is in .gitignore.
+- [X] Split `requirements.txt` into:
   - `requirements.txt` — runtime only: `customtkinter`, `darkdetect`,
     `pyserial`
-  - `requirements-dev.txt` — `black`, `pytest`, `pyinstaller`, and
-    black's own transitive deps (`click`, `mypy_extensions`, `packaging`,
-    `pathspec`, `platformdirs`, `Pygments`, `pytokens`, `iniconfig`,
-    `pluggy`)
-- [ ] Generate `resources/MyIcon.ico` (multi-resolution, same Pillow
-      approach `resources/makeicon.sh` already uses for `.icns`).
-      `src/dm41l.spec` currently points `EXE(icon=...)` at the `.icns`
-      file unconditionally — Windows needs `.ico` there. Branch the icon
-      path on `platform.system()` in the spec.
+  - `requirements-dev.txt` — `black`, `pytest`, `pyinstaller`, and black's own
+    transitive deps (`click`, `mypy_extensions`, `packaging`, `pathspec`,
+    `platformdirs`, `Pygments`, `pytokens`, `iniconfig`, `pluggy`)
+    (Done 2026-08-13. `requirements-dev.txt` starts with `-r requirements.txt`
+    so a dev install pulls in both.)
+- [ ] Generate `resources/MyIcon.ico` (multi-resolution, same Pillow approach
+  `resources/makeicon.sh` already uses for `.icns`). `src/dm41l.spec` currently
+  points `EXE(icon=...)` at the `.icns` file unconditionally — Windows needs
+  `.ico` there. Branch the icon path on `platform.system()` in the spec.
 
 ## 2. Documentation
 
-- [ ] `README.md` — what the tool is/does, a screenshot or two, and
+- [X] `README.md` — what the tool is/does, a screenshot or two, and
       per-OS build/install instructions (the existing `src/build.sh`
       header comment has the bones of this already — pull it up to a
       real README).
-- [ ] Link out to `docs/memory.md`, `docs/flags.md`, `docs/program.md`
+      (Done 2026-08-13, including three real screenshots rendered from the
+      app itself under Xvfb, in `resources/screenshots/`.)
+- [X] Link out to `docs/memory.md`, `docs/flags.md`, `docs/program.md`
       from the README so they're discoverable.
-- [ ] `LICENSE` — **needs your decision.** MIT is the common default for
+      (Done 2026-08-13, part of the README above.)
+- [X] `LICENSE` — **needs your decision.** MIT is the common default for
       a permissive hobby/utility project; something copyleft (GPL/AGPL)
       is the alternative if you want downstream changes to stay open.
       Not decided yet.
+      (Decided 2026-08-13: Simplified/2-clause BSD ("NetBSD license").
+      LICENSE file added.)
 - [ ] Optional: `CONTRIBUTING.md` if you want outside PRs, issue
       templates if you want structured bug reports.
 
 ## 3. Code organization
 
-- [ ] Split `src/memory.py` (78KB, single file) into a `memory/` package.
+- [X] Split `src/memory.py` (78KB, single file) into a `memory/` package.
       Class boundaries are already clean (confirmed via
       `grep '^class '`), so this should be a mechanical move, not a
-      redesign:
+      redesign. (Done 2026-08-13, verified against the full test suite
+      before and after the split — identical results, 100 passed/4
+      skipped.)
   - `memory/registers.py` — `Register`, `AlphaRegister`,
     `DM41LMemoryError`
   - `memory/regions.py` — `MemoryRegion` + `StatusRegisters`,
@@ -68,6 +76,7 @@ LICENSE are the highest-leverage starting point.
       three OSes (reuses `src/build.sh` / `dm41l.spec`), zips each
       platform's output, computes SHA256 checksums, and attaches both to
       a GitHub Release.
+- [ ] Set up issues and test with the github workflow.
 
 ## 5. Cross-platform build/test environment
 
@@ -110,6 +119,13 @@ LICENSE are the highest-leverage starting point.
 - [ ] Decide whether to keep `dm41l.spec`/`build.sh` as the single
       source of truth for local + CI builds (recommended — CI should
       just invoke `build.sh`, not duplicate its steps in YAML).
+
+## 8. Post release enhancements
+
+- [ ] Improve dark/light modes so that the content inside frames respond to the
+  current mode. Right now the use of alternating rows prevents dark/light mode
+  changes from working properly.
+- [ ] LoadMemoryStringCommand doesn't validate the string before sending it.
 
 ---
 *Generated 2026-08-13 from a DM41L_Explorer planning session. See project
