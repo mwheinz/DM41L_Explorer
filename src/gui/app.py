@@ -1,24 +1,6 @@
 """
 DM41L Explorer: a CustomTkinter GUI for DM41L_Explorer.
 
-Design, per the 2026-08-12 rebuild request: menu items instead of toolbar
-buttons for every basic function, a status bar pinned to the bottom of the
-window, and a tabbed main view (Overview / Flags / Data Registers / Hex
-View / Programs / XM Files, with more tabs planned as other memory regions
-get reverse-engineered).
-
-Tabs render lazily -- only the tab currently on screen is (re)built; the
-others are marked dirty and build themselves the next time they're
-selected. This matters a lot for Data Registers in particular: earlier,
-all tabs rendered eagerly at startup, every render rebuilt every widget
-from scratch, and CustomTkinter widgets are individually much more
-expensive to construct than plain Tk ones -- profiling a plain startup
-(an empty, never-loaded Memory(), which decodes R00 as 0x000) showed it
-trying to build 512 register rows x ~5 widgets each (~7700 widgets) for a
-tab nobody was even looking at yet, which alone took several seconds. See
-gui/memory_ranges.py for the R00 sanity check that also stops that
-specific pathological case, and gui/data_registers_tab.py for why that
-tab was additionally moved off CustomTkinter widgets entirely.
 """
 
 import logging
@@ -200,10 +182,10 @@ class DM41LExplorerApp(ctk.CTk):
         self.tabview.pack(side="top", fill="both", expand=True, padx=8, pady=8)
         self.tabview.add("Overview")
         self.tabview.add("Flags")
-        self.tabview.add("Data Registers")
-        self.tabview.add("Hex View")
         self.tabview.add("Programs")
+        self.tabview.add("Data Registers")
         self.tabview.add("XM Files")
+        self.tabview.add("Hex View")
 
         self.overview_tab = OverviewTab(
             self.tabview.tab("Overview"), on_change=self._on_memory_changed
