@@ -23,12 +23,12 @@ PRIMARY_DATA_END = 0x1FF
 # field ".END.". If key assignments exist, they start at LOW_MEMORY_START and
 # extend towards ".END.". If alarms exist, the will occupy space between the
 # end of the key assignment and ".END.". Note that key assignments, alarms,
-# and programs are all optional - they may not exist. 
+# and programs are all optional - they may not exist.
 LOW_MEMORY_START = 0xC0
 
 FUTURE_STATS = (
-    "Coming soon: user key assignment count and alarm count. "
-    "(see docs/memory.md)."
+    "Does not include key assignments or alarms. These will be included"
+    " in a future release."
 )
 
 CARD_FG = ("gray92", "gray17")
@@ -44,6 +44,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         super().__init__(master, **kwargs)
         self._memory: Memory = None
         self._on_change = on_change
+        self._r00_var = None
 
         bind_touchpad_scroll(self)
 
@@ -57,7 +58,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self._system_frame = self._make_card(0, 1, "System & Pointer Registers")
 
         # Row 1: partition editor + usage summary, also side by side.
-        self._partition_frame = self._make_card(1, 0, "Program / Data Partition")
+        self._partition_frame = self._make_card(1, 0, "Memory Partitions")
         self._summary_frame = self._make_card(1, 1, "Memory Summary")
 
         # Row 2: placeholder for future stats, full width.
@@ -221,36 +222,36 @@ class OverviewTab(ctk.CTkScrollableFrame):
             ).grid(row=1, column=0, columnspan=3, padx=10, pady=(0, 10), sticky="w")
             return
 
-        ctk.CTkLabel(self._partition_frame, text=".END. (end of program):").grid(
-            row=1, column=0, sticky="w", padx=10, pady=2
-        )
-        ctk.CTkLabel(
-            self._partition_frame,
-            text=f"0x{dot_end:03x}",
-            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
-        ).grid(row=1, column=1, sticky="w", padx=10, pady=2)
-
-        ctk.CTkLabel(self._partition_frame, text="ΣREG address:").grid(
-            row=2, column=0, sticky="w", padx=10, pady=2
-        )
-        ctk.CTkLabel(
-            self._partition_frame,
-            text=f"0x{sigma_reg:03x}",
-            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
-        ).grid(row=2, column=1, sticky="w", padx=10, pady=2)
-
         ctk.CTkLabel(self._partition_frame, text="R00 (data register 00):").grid(
-            row=3, column=0, sticky="w", padx=10, pady=(2, 10)
+            row=1, column=0, sticky="w", padx=10, pady=(2, 10)
         )
         self._r00_var = ctk.StringVar(value=f"0x{r00:03x}")
         entry = ctk.CTkEntry(
             self._partition_frame, textvariable=self._r00_var, width=100,
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         )
-        entry.grid(row=3, column=1, sticky="w", padx=10, pady=(2, 10))
+        entry.grid(row=1, column=1, sticky="w", padx=10, pady=(2, 10))
         ctk.CTkButton(
             self._partition_frame, text="Apply", width=70, command=self._apply_r00
-        ).grid(row=3, column=2, sticky="w", padx=(0, 10), pady=(2, 10))
+        ).grid(row=1, column=2, sticky="w", padx=(0, 10), pady=(2, 10))
+
+        ctk.CTkLabel(self._partition_frame, text=".END.:").grid(
+            row=2, column=0, sticky="w", padx=10, pady=2
+        )
+        ctk.CTkLabel(
+            self._partition_frame,
+            text=f"0x{dot_end:03x}",
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+        ).grid(row=2, column=1, columnspan=2, sticky="w", padx=10, pady=2)
+
+        ctk.CTkLabel(self._partition_frame, text="ΣREG address:").grid(
+            row=3, column=0, sticky="w", padx=10, pady=2
+        )
+        ctk.CTkLabel(
+            self._partition_frame,
+            text=f"0x{sigma_reg:03x}",
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+        ).grid(row=3, column=1, sticky="w", padx=10, pady=2)
 
     def _apply_r00(self):
         text = self._r00_var.get().strip()
@@ -309,7 +310,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             consumed = r00 - dot_end
             available = dot_end - LOW_MEMORY_START
             rows.append(
-                ("Main data registers reserved", f"{reserved} (R00-0x{PRIMARY_DATA_END:03x})")
+                ("User memory locations", f"00-{reserved-1} (R00-0x{PRIMARY_DATA_END:03x})")
             )
             rows.append(("Program storage consumed", f"{consumed} registers"))
             rows.append(
