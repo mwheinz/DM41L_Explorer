@@ -12,6 +12,7 @@ import serial.tools.list_ports
 
 logger = logging.getLogger(__name__)
 
+
 class SerialManager:
     """
     Manages serial communication and hardware discovery in a dedicated background thread.
@@ -43,11 +44,6 @@ class SerialManager:
         """Establishes connection and starts the communication thread."""
         try:
             if self.is_connected or (self._thread and self._thread.is_alive()):
-                # A previous connection (or its reader thread) is still
-                # live -- tear it down first. Without this, opening a new
-                # serial.Serial() here would leave the old thread running
-                # against the now-overwritten self.serial_inst, with both
-                # threads racing on read/write against the same handle.
                 logger.info("Already connected -- disconnecting before reconnecting.")
                 self.disconnect()
 
@@ -133,16 +129,6 @@ class SerialManager:
             error_msg = f"Serial communications failure: {str(e)}"
             logger.critical(error_msg)
         finally:
-            # Always release the OS-level port handle here, in this same
-            # thread, rather than counting on a caller to call disconnect()
-            # -- the error callback below runs on this very background
-            # thread, and disconnect() joins self._thread, which raises
-            # RuntimeError if a thread tries to join itself. Closing
-            # directly avoids that trap and guarantees the handle is never
-            # leaked after a comms failure (previously nothing closed it on
-            # this path -- see gui/app.py's error handlers, which used to be
-            # the only thing that *tried* to clean this up, and did so with
-            # an inverted condition that never actually ran).
             if self.serial_inst and self.serial_inst.is_open:
                 try:
                     self.serial_inst.close()
