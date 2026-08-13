@@ -7,20 +7,17 @@ import logging
 import os
 from typing import Any
 from pathlib import Path
-from .base_command import BaseCommand
-
-# This is the one deliberate coupling point between the engine/serial layer
-# and memory.py: MemoryDumpCommand and LoadMemoryCommand move dump data to
-# and from disk/the device, so they're the natural place to validate that
-# data is a well-formed dump before trusting it (see the docstrings below).
-# Nothing else in this module touches memory.py.
 from memory import Memory
+from .base_command import BaseCommand
 
 logger = logging.getLogger(__name__)
 
 
 class PingCommand(BaseCommand):
-    """Dummy command. Used to verify the calculator console is running."""
+    """
+    Dummy command. Used to verify the calculator's serial console
+    is running.
+    """
 
     def __init__(self, timeout: float):
         super().__init__(timeout=timeout)
@@ -68,12 +65,11 @@ class MemoryDumpCommand(BaseCommand):
 
     def parse_response(self, raw_data: str) -> Any:
         """
-        Parses the device's raw dump text into a Memory (raising a clear
-        error if it's malformed) before writing anything to disk, then
-        writes the *canonical* re-serialization (Memory.to_string()) rather
-        than the raw device bytes -- so what's on disk always matches what
-        this tool's own parser understood, and a round-trip failure surfaces
-        immediately instead of silently saving a dump nothing can re-read.
+        Parses the device's raw dump text into a Memory error if it's malformed)
+        before writing anything to disk, then
+        writes the re-serialization (Memory.to_string()) rather
+        than the raw device bytes -- this ensures the received data was a
+        valid memory dump.
 
         Returns the parsed Memory so callers (e.g. the CLI) can load it
         straight into an in-memory buffer without a second file read.
@@ -110,7 +106,11 @@ class MemoryStringCommand(BaseCommand):
 
 
 class LoadMemoryCommand(BaseCommand):
-    """'l' command - Streams file contents to hardware."""
+
+    """
+    'l' command - Streams file contents to hardware. Validates the file
+    by trying to parse it into a Memory object before sending it.
+    """
 
     def __init__(self, args: list, timeout: float = 5.0, serial=None):
         super().__init__(args=args, timeout=timeout, serial=serial)
@@ -135,16 +135,7 @@ class LoadMemoryCommand(BaseCommand):
         Queues the file contents to the serial buffer immediately after 'l'.
 
         Validates self.source_file as a well-formed dump via
-        Memory.from_string() *before* anything is sent to the device --
-        catching a malformed file here, instead of streaming it at the
-        DM41L and finding out from a garbled device response. Note that by
-        this point the engine has already sent the "l" command itself (see
-        CommandEngine.execute()'s docstring); if validation fails here, the
-        device is left waiting for a payload that never arrives, and the
-        engine's own per-command timeout is what recovers that state --
-        callers that can validate earlier (e.g. the CLI, before it even
-        calls engine.execute()) should still do so, to avoid sending "l" at
-        all for a file that's already known to be bad.
+        Memory.from_string() *before* anything is sent to the device.
         """
         logger.info("Beginning file transfer.")
         if not self.serial:
@@ -193,7 +184,7 @@ class LoadMemoryStringCommand(BaseCommand):
         return "l"  # send_command will handle adding the newline
 
     def trigger_transfer(self):
-        """Queues the file contents to the serial buffer immediately after 'l'."""
+        """Queues the string to the serial buffer immediately after 'l'."""
         logger.info("Beginning file transfer.")
         if not self.serial:
             logger.error("No serial manager available for LoadMemoryStringCommand.")

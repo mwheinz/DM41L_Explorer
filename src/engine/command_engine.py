@@ -2,7 +2,6 @@
 Manages sending commands to the serial console and retrieving the responses.
 """
 
-import sys
 import logging
 import re
 import time
@@ -54,7 +53,6 @@ class CommandEngine:
                     self._handle_timeout()
             return False
 
-        # logger.debug(new_data)
         if self.state == EngineState.IDLE:
             # Calculator has sent a status message of some kind.
             logger.debug("Calculator sent: '%s'", new_data)
@@ -93,9 +91,7 @@ class CommandEngine:
         False if it was rejected because another command is already in
         progress. Callers that need to follow up an execute() call with
         something command-specific (e.g. LoadMemoryCommand.trigger_transfer())
-        must check this return value first -- doing that follow-up action
-        unconditionally would send it even when the command itself was
-        never sent, corrupting the wire protocol.
+        must check this return value first.
         """
         logger.info("execute (%s)", type(command).__name__)
 
