@@ -12,6 +12,8 @@ from gui.tab_common import build_tab_header
 
 FLAG_COUNT = 56
 
+CARD_FG = ("gray92", "gray17")
+CARD_BORDER = ("gray80", "gray28")
 
 class FlagsTab(ctk.CTkFrame):
     """Renders the 56 flags as checkboxes. Call `render(memory)` whenever
@@ -27,7 +29,12 @@ class FlagsTab(ctk.CTkFrame):
 
         _, self._header_label = build_tab_header(self)
 
-        self._body = ctk.CTkScrollableFrame(self)
+        self._body = ctk.CTkScrollableFrame(self,
+                                            fg_color=CARD_FG,
+                                            border_width=1,
+                                            border_color=CARD_BORDER,
+                                            corner_radius=10,
+                                            )
         self._body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         bind_touchpad_scroll(self._body)
 
