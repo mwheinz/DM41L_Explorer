@@ -67,15 +67,21 @@ LICENSE are the highest-leverage starting point.
 
 ## 4. CI/CD (`.github/workflows/`)
 
-- [ ] **Test workflow** — run on push/PR across
+- [X] **Test workflow** — run on push/PR across
       `ubuntu-latest` / `macos-latest` / `windows-latest`.
       Linux runner needs `sudo apt-get install python3-tk` explicitly
       (not bundled by default — same lesson this project already hit
       when testing under Xvfb).
-- [ ] **Release workflow** — triggered on a version tag, builds on all
+      (Done 2026-08-13: `.github/workflows/test.yml`. Note: workflow files
+      under `.github/` can't be written via the device bridge for security
+      reasons — delivered as a download instead; you'll need to drop it
+      into place yourself.)
+- [X] **Release workflow** — triggered on a version tag, builds on all
       three OSes (reuses `src/build.sh` / `dm41l.spec`), zips each
       platform's output, computes SHA256 checksums, and attaches both to
       a GitHub Release.
+      (Done 2026-08-13: `.github/workflows/release.yml`, same manual-drop
+      caveat as above.)
 - [ ] Set up issues and test with the github workflow.
 
 ## 5. Cross-platform build/test environment
@@ -94,9 +100,11 @@ LICENSE are the highest-leverage starting point.
 
 ## 6. Distribution trust / code signing (no paid dev accounts)
 
-- [ ] **macOS**: add ad-hoc signing to `build.sh` — required on Apple
+- [X] **macOS**: add ad-hoc signing to `build.sh` — required on Apple
       Silicon just to run at all, and it's free:
       `codesign --force --deep --sign - "dist/DM41L Explorer.app"`
+      (Done 2026-08-13: added to `src/build.sh`, guarded by
+      `[ "$(uname)" = "Darwin" ]` so it's a no-op elsewhere.)
 - [ ] Document the Gatekeeper workaround in the README (right-click the
       app → Open, confirm once) for anyone downloading a release
       binary — ad-hoc signing doesn't satisfy Gatekeeper's quarantine
@@ -113,6 +121,11 @@ LICENSE are the highest-leverage starting point.
 
 ## 7. Release process
 
+- [ ] One-time repo setting: Settings → Actions → General → Workflow
+      permissions → "Read and write permissions". Required for
+      `release.yml`'s `gh release create` step to be allowed to publish —
+      the default is read-only and would make that step fail with a
+      permissions error.
 - [ ] Tag a version (e.g. `v0.1.0`), let the release workflow build and
       publish artifacts.
 - [ ] Write release notes summarizing what's in the first public build.
