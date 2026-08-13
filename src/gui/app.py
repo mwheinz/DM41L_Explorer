@@ -677,7 +677,8 @@ class DM41LExplorerApp(ctk.CTk):
             self._modified_label.configure(text="")
             self._update_source_label()
             self._render_tabs()
-            self._set_status(f"Loaded dump from {path}")
+            name = Path(path).name
+            self._set_status(f"Loaded dump from {name}")
         except Exception as e:
             messagebox.showerror("Error", f"Could not load dump: {e}")
 
