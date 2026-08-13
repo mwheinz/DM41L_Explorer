@@ -49,6 +49,7 @@ from gui.overview_tab import OverviewTab
 from gui.flags_tab import FlagsTab
 from gui.data_registers_tab import DataRegistersTab
 from gui.xm_files_tab import XMFilesTab
+from gui.hex_view_tab import HexViewTab
 
 try:
     from dm41lversion import _version
@@ -199,6 +200,7 @@ class DM41LExplorerApp(ctk.CTk):
         self.tabview.add("Overview")
         self.tabview.add("Flags")
         self.tabview.add("Data Registers")
+        self.tabview.add("Hex View")
         self.tabview.add("XM Files")
 
         self.overview_tab = OverviewTab(
@@ -216,6 +218,9 @@ class DM41LExplorerApp(ctk.CTk):
         )
         self.data_registers_tab.pack(fill="both", expand=True)
 
+        self.hex_view_tab = HexViewTab(self.tabview.tab("Hex View"))
+        self.hex_view_tab.pack(fill="both", expand=True)
+
         self.xm_files_tab = XMFilesTab(
             self.tabview.tab("XM Files"), on_change=self._on_memory_changed
         )
@@ -226,6 +231,7 @@ class DM41LExplorerApp(ctk.CTk):
             "Overview": self.overview_tab,
             "Flags": self.flags_tab,
             "Data Registers": self.data_registers_tab,
+            "Hex View": self.hex_view_tab,
             "XM Files": self.xm_files_tab,
         }
         self._tabs_dirty = {name: True for name in self._tabs}
@@ -506,13 +512,44 @@ class DM41LExplorerApp(ctk.CTk):
         self.after(10, self._fetch_memory_dump)
 
     def _fetch_memory_dump(self):
+        if self.memory_source is not None:
+            # A dump file was already opened (e.g. via double-clicking a
+            # .dm41 file, or a startup file argument) before this
+            # auto-connect sequence got here -- don't clobber it with the
+            # calculator's own memory. This races with double-click-to-open
+            # on every platform: the auto-connect timer is scheduled in
+            # __init__ before a startup file argument is processed in
+            # main(), and the macOS "Open Document" AppleEvent can arrive
+            # at any point relative to this multi-step (battery -> timeout
+            # -> time -> dump) sequence. The user can still pull the live
+            # dump explicitly via Connect > Get Dump from DM41L.
+            self._set_status(f"Connected to {self.serial.serial_inst.port}")
+            return
         self._set_status("Reading memory dump...")
         self.after(
             10,
             lambda: self.engine.execute(
-                MemoryStringCommand(), self._on_dump_received, self._on_command_error
+                MemoryStringCommand(), self._on_auto_dump_received, self._on_command_error
             ),
         )
+
+    def _on_auto_dump_received(self, dump):
+        # Re-check right at the moment the fetched dump is about to be
+        # applied, not just before the fetch started in _fetch_memory_dump:
+        # a double-click can still land while the MemoryStringCommand
+        # round-trip is in flight. This callback is only used for the
+        # auto-connect sequence -- the explicit "Get Dump from DM41L" menu
+        # action (get_dump_from_calculator) always overwrites, since that's
+        # an explicit user request and it already confirms over unsaved
+        # changes before firing.
+        if self.memory_source is not None:
+            logger.info(
+                "Discarding auto-connect's fetched dump: a file was opened "
+                "in the meantime."
+            )
+            self._set_status(f"Connected to {self.serial.serial_inst.port}")
+            return
+        self._on_dump_received(dump)
 
     def _on_dump_received(self, dump):
         logger.info("Dump received.")
