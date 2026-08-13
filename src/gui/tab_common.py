@@ -14,6 +14,20 @@ import customtkinter as ctk
 # uses the same family instead of each hard-coding "Courier" separately.
 MONOSPACE_FONT_FAMILY = "Courier"
 
+# Alternating-row background shade, shared by every tab with a table (Data
+# Registers' ttk.Treeview, and the XM Files/Programs tabs' CTkScrollableFrame
+# grids) so odd rows get the exact same subtle tint everywhere instead of
+# each tab inventing its own slightly different color. Values match what
+# data_registers_tab.py used before this was centralized here.
+STRIPE_BG_DARK = "#2b2b2b"
+STRIPE_BG_LIGHT = "#f4f4f4"
+
+
+def stripe_bg_color() -> str:
+    """The alternating-row background color for the current appearance
+    mode (dark vs. light)."""
+    return STRIPE_BG_DARK if ctk.get_appearance_mode() == "Dark" else STRIPE_BG_LIGHT
+
 
 def build_tab_header(master, button_kwargs: dict = None):
     """Builds the standard fixed tab header: a bold status label on the

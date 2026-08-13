@@ -17,7 +17,7 @@ import customtkinter as ctk
 from memory import Memory, Register, PRIMARY_DATA_END
 from gui.register_edit_dialog import RegisterEditDialog
 from gui.memory_ranges import MIN_SANE_R00
-from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY
+from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
 
 
 class DataRegistersTab(ctk.CTkFrame):
@@ -114,18 +114,20 @@ class DataRegistersTab(ctk.CTkFrame):
 
         Also stashes `self._stripe_bg` for alternating row colors -- reuses
         the same subtle shade already used for the heading/scrollbar trough
-        rather than inventing a third color, so odd rows read as a gentle
-        tint instead of a jarring stripe. Row tags are applied per-item in
-        render(), once the tree widgets exist (an instance method, not
-        @staticmethod like this used to be, purely so it has a `self` to
-        stash that color on for `_build_register_tree` to pick up)."""
+        (now centralized in gui/tab_common.py's `stripe_bg_color()`, shared
+        with the XM Files/Programs tabs' own zebra striping) rather than
+        inventing a third color, so odd rows read as a gentle tint instead
+        of a jarring stripe. Row tags are applied per-item in render(),
+        once the tree widgets exist (an instance method, not @staticmethod
+        like this used to be, purely so it has a `self` to stash that
+        color on for `_build_register_tree` to pick up)."""
         style = ttk.Style()
         try:
             style.theme_use("clam")
         except Exception:
             pass
         dark = ctk.get_appearance_mode() == "Dark"
-        bg = "#2b2b2b" if dark else "#f4f4f4"
+        bg = stripe_bg_color()
         field_bg = "#242424" if dark else "#ffffff"
         fg = "#e6e6e6" if dark else "#1a1a1a"
         self._stripe_bg = bg

@@ -28,7 +28,7 @@ import customtkinter as ctk
 
 from memory import Memory
 from gui.scroll_support import bind_touchpad_scroll
-from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY
+from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
 
 
 class ProgramTab(ctk.CTkFrame):
@@ -86,6 +86,7 @@ class ProgramTab(ctk.CTkFrame):
             return
 
         self._header_label.configure(text=f"Program memory entries: {len(programs)}")
+        self._stripe_bg = stripe_bg_color()
 
         headers = ["Type", "Name", "Header Address", "Distance", "Key Assignment"]
         for col, text in enumerate(headers):
@@ -97,7 +98,15 @@ class ProgramTab(ctk.CTkFrame):
             self._render_row(program, row=i)
 
     def _render_row(self, program, row: int):
-        row_color = None if program.is_named else "gray60"
+        # Alternating row shading, applied directly as each label's own
+        # fg_color (see xm_files_tab.py's _render_row for why -- an earlier
+        # version tried a separate full-row background frame instead, which
+        # both grew every striped row to an oversized default height and
+        # left each label showing its own mismatched "transparent" patch on
+        # top of it).
+        row_bg = self._stripe_bg if (row - 1) % 2 == 1 else "transparent"
+
+        row_color = None #if program.is_named else "gray60"
 
         ctk.CTkLabel(
             self._table,
@@ -105,32 +114,37 @@ class ProgramTab(ctk.CTkFrame):
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             anchor="w",
             text_color=row_color,
-        ).grid(row=row, column=0, sticky="w", padx=6, pady=1)
+            fg_color=row_bg,
+        ).grid(row=row, column=0, sticky="nsew", padx=6, pady=1)
 
         ctk.CTkLabel(
-            self._table, text=program.display_name, anchor="w", text_color=row_color
-        ).grid(row=row, column=1, sticky="w", padx=6, pady=1)
+            self._table, text=program.display_name, anchor="w", text_color=row_color,
+            fg_color=row_bg,
+        ).grid(row=row, column=1, sticky="nsew", padx=6, pady=1)
 
         ctk.CTkLabel(
             self._table,
             text=program.address_label,
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             anchor="w",
-        ).grid(row=row, column=2, sticky="w", padx=6, pady=1)
+            fg_color=row_bg,
+        ).grid(row=row, column=2, sticky="nsew", padx=6, pady=1)
 
         ctk.CTkLabel(
             self._table,
             text=program.distance_label,
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             anchor="w",
-        ).grid(row=row, column=3, sticky="w", padx=6, pady=1)
+            fg_color=row_bg,
+        ).grid(row=row, column=3, sticky="nsew", padx=6, pady=1)
 
         ctk.CTkLabel(
             self._table,
             text=self._key_assignment_text(program),
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             anchor="w",
-        ).grid(row=row, column=4, sticky="w", padx=6, pady=1)
+            fg_color=row_bg,
+        ).grid(row=row, column=4, sticky="nsew", padx=6, pady=1)
 
     @staticmethod
     def _key_assignment_text(program) -> str:

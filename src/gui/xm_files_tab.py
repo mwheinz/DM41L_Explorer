@@ -8,7 +8,7 @@ import customtkinter as ctk
 from memory import Memory, ExtendedMemory, DM41LMemoryError
 from gui.xm_file_dialog import XMFileDialog
 from gui.scroll_support import bind_touchpad_scroll
-from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY
+from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
 
 
 class XMFilesTab(ctk.CTkFrame):
@@ -54,6 +54,7 @@ class XMFilesTab(ctk.CTkFrame):
             return
 
         self._header_label.configure(text=f"Extended-memory files: {len(files)}")
+        self._stripe_bg = stripe_bg_color()
 
         headers = ["Name", "Type", "Header", "Registers", "Preview", "", ""]
         for col, text in enumerate(headers):
@@ -65,28 +66,49 @@ class XMFilesTab(ctk.CTkFrame):
             self._render_row(f, row=i)
 
     def _render_row(self, f, row: int):
+        # Alternating row shading: the same shared shade as Data Registers'
+        # ttk.Treeview striping (see stripe_bg_color()), applied directly as
+        # each label's own fg_color rather than as a separate background
+        # widget behind them.
+        #
+        # An earlier version gridded one full-row CTkFrame *behind* the
+        # row's labels instead. That doesn't work with CustomTkinter:
+        # CTkLabel's "transparent" isn't real canvas alpha -- it just paints
+        # itself to match its own master's declared color at construction
+        # time -- so each label still showed its own (wrong-colored) opaque
+        # patch on top of the frame instead of blending with it. Worse, an
+        # unconstrained CTkFrame defaults to a 200x200 minimum size, and
+        # with nothing else in that row tall enough to out-rank it, the
+        # whole row grew to match -- exactly the "rows are much taller"
+        # symptom the user reported. Coloring each label directly (with
+        # `sticky="nsew"` so it fills its whole cell, not just its text)
+        # avoids both problems: no extra oversized widget, and no
+        # mismatched "transparent" patches.
+        row_bg = self._stripe_bg if (row - 1) % 2 == 1 else "transparent"
+
         preview = self._preview_for(f)
 
-        ctk.CTkLabel(self._table, text=f.name.rstrip(), anchor="w").grid(
-            row=row, column=0, sticky="w", padx=6, pady=1
+        ctk.CTkLabel(self._table, text=f.name.rstrip(), anchor="w", fg_color=row_bg).grid(
+            row=row, column=0, sticky="nsew", padx=6, pady=1
         )
-        ctk.CTkLabel(self._table, text=f.type_label, anchor="w").grid(
-            row=row, column=1, sticky="w", padx=6, pady=1
+        ctk.CTkLabel(self._table, text=f.type_label, anchor="w", fg_color=row_bg).grid(
+            row=row, column=1, sticky="nsew", padx=6, pady=1
         )
         ctk.CTkLabel(
             self._table,
             text=f"0x{f.header_addr:03x}",
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             anchor="w",
-        ).grid(row=row, column=2, sticky="w", padx=6, pady=1)
+            fg_color=row_bg,
+        ).grid(row=row, column=2, sticky="nsew", padx=6, pady=1)
         span_note = " (spans regions)" if f.spans_regions else ""
         ctk.CTkLabel(
-            self._table, text=f"{f.num_registers}{span_note}", anchor="w"
-        ).grid(row=row, column=3, sticky="w", padx=6, pady=1)
+            self._table, text=f"{f.num_registers}{span_note}", anchor="w", fg_color=row_bg
+        ).grid(row=row, column=3, sticky="nsew", padx=6, pady=1)
         ctk.CTkLabel(
             self._table, text=preview, font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
-            anchor="w",
-        ).grid(row=row, column=4, sticky="w", padx=6, pady=1)
+            anchor="w", fg_color=row_bg,
+        ).grid(row=row, column=4, sticky="nsew", padx=6, pady=1)
 
         can_edit = f.file_type in (ExtendedMemory.TYPE_DATA, ExtendedMemory.TYPE_ASCII)
         edit_button = ctk.CTkButton(

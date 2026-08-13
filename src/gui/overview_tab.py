@@ -15,15 +15,19 @@ from gui.tab_common import MONOSPACE_FONT_FAMILY
 # Assignments); PRIMARY_DATA_END (0x1ff) is main memory's top boundary, so
 # main data storage always runs from R00 up to and including this address.
 PRIMARY_DATA_END = 0x1FF
-# Program/key-assignment/alarm storage all live at/above this address; see
-# docs/memory.md. The tool doesn't yet know how to tell program bytes apart
-# from key assignments/alarms within this span -- see FUTURE_STATS below.
+
+# Data registers, programs, key-assignments, and alarm storage all live
+# at/above this address; see docs/memory.md. Data registers occupy the space
+# between the register addressed by the status register field R00. Program
+# storage exists between R00-1 and the register pointed to by status register
+# field ".END.". If key assignments exist, they start at LOW_MEMORY_START and
+# extend towards ".END.". If alarms exist, the will occupy space between the
+# end of the key assignment and ".END.". Note that key assignments, alarms,
+# and programs are all optional - they may not exist. 
 LOW_MEMORY_START = 0xC0
 
 FUTURE_STATS = (
-    "Coming soon: user key assignment count, alarm count, and program "
-    "count. These all live below ‘.END.’ in the same region and "
-    "need more reverse-engineering before this tool can tell them apart "
+    "Coming soon: user key assignment count and alarm count. "
     "(see docs/memory.md)."
 )
 
