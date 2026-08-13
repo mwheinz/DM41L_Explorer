@@ -117,7 +117,7 @@ class HexViewTab(ctk.CTkFrame):
         legend = ctk.CTkFrame(self, fg_color="transparent")
         legend.pack(fill="x", padx=8, pady=(0, 6))
         dark = ctk.get_appearance_mode() == "Dark"
-        for key, label, light, dark_color in REGIONS:
+        for _, label, light, dark_color in REGIONS:
             color = dark_color if dark else light
             chip = ctk.CTkFrame(legend, fg_color="transparent")
             chip.pack(side="left", padx=(0, 14), pady=2)
@@ -214,7 +214,7 @@ class HexViewTab(ctk.CTkFrame):
     @staticmethod
     def _ascii_preview(register) -> str:
         return "".join(
-            chr(b) if 32 <= b < 127 else "." for b in register._data
+            chr(b) if 32 <= b < 127 else "." for b in register.get_bytes()
         )
 
     @staticmethod

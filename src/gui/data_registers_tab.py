@@ -259,7 +259,8 @@ class DataRegistersTab(ctk.CTkFrame):
             self._memory.set_register(addr, new_register)
             self._notify_change()
             self.render(self._memory)
-            tree = self._tree_left if str(addr) in self._tree_left.get_children() else self._tree_right
+            tree = self._tree_left if str(addr) in \
+                    self._tree_left.get_children() else self._tree_right
             tree.selection_set(str(addr))
             tree.see(str(addr))
 

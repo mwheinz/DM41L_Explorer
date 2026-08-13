@@ -27,7 +27,7 @@ def _decode_text_register(register: Register) -> str:
     real periods. Decoding straight from the raw bytes -- skipping only
     actual zero bytes, matching Register.__str__ -- avoids that.
     """
-    raw = bytes.fromhex(register.get_hex())
+    raw = register.get_bytes()
     if not raw or raw[0] != 0x10:
         return ""
     return "".join(chr(b) for b in raw[1:] if b != 0)
