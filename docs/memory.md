@@ -41,7 +41,7 @@ internet in PDF format.
   architecture conventions had not yet stablized. In particular, the HP41
   employs a **Reverse Execution Model** where the instruction pointer moves
   from higher memory addresses to lower memory addresses ($N \rightarrow 0$).
-  This explains why program termination sequences (like "...END...") appear at
+  This explains why program termination sequences (like ".END.") appear at
   relatively low register indices in dumps, while the entry point resides in
   high memory. This same high-to-low convention governs saved files in Extended
   Memory (see §4), but not user data stored in main memory.
@@ -147,6 +147,18 @@ comprised of 7-byte registers.
   programs. The registers between ".END." and the last Alarm,
   Key Assignment, or address 0x0C0 are available for use by
   additional programs, alarms, or key assignments.
+
+### Program Memory
+
+HP41 programs begin at the register pointed to by R00-1 and proceed down
+through memory. The lowest register used by programs will be pointed to by
+.END. and will contain a 3-byte instruction that is also called ".END.".
+
+This is explained further in `docs/program.md`, a separate document
+(currently its own actively-researched doc rather than a section of this
+one — its internal numbering starts at "5." only because it's written as a
+continuation of this document's numbering, not because it's physically
+part of this file).
 
 ### Extended Memory
 

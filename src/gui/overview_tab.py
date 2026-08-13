@@ -310,9 +310,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
             rows.append(("Program storage consumed", f"{consumed} registers"))
             rows.append(
                 (
-                    "Free below program memory",
-                    f"{available} registers (approx. -- may still include "
-                    "key assignments/alarms, see note below)",
+                    "Unused program memory",
+                    f"{available} registers (approx.)",
                 )
             )
         rows.append(("Extended-memory files", xm_text))
@@ -324,6 +323,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             ctk.CTkLabel(
                 self._summary_frame, text=value, anchor="w", justify="left",
                 wraplength=280,
+                font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             ).grid(row=i, column=1, sticky="w", padx=10, pady=2)
         ctk.CTkFrame(self._summary_frame, fg_color="transparent", height=6).grid(
             row=len(rows) + 1, column=0

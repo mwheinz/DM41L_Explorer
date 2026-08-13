@@ -481,10 +481,108 @@ class Alarms(MemoryRegion):
 
 
 class ProgramMemory(MemoryRegion):
-    """Need more research."""
+    """
+    Still needs more research for anything beyond listing what's here --
+    decoding actual instruction bytes isn't implemented. See
+    docs/program.md sec 5 for the global-label/END chain format, and
+    Memory.list_programs() below for what that lets us report today.
+    """
 
     key = "program_memory"
     label = "Program Memory"
+
+
+class ProgramInfo:
+    """
+    One entry found while walking the "global chain" -- the backward-
+    linked list of every global alpha label and END marker in program
+    memory, described in docs/program.md sec 5 (reverse-engineered from
+    sample dumps and Wickes' "Synthetic Programming on the HP-41C",
+    section 2C).
+
+    `name` is set for a global alpha label -- what CAT 1 shows as a
+    program's name -- and is None for a plain END marker. Do NOT assume
+    these pair up one-to-one with "programs": per the user's own testing
+    against a modified copy of 6x-xm.dm41, a single END can have zero,
+    one, or several global labels chained to it. Each ProgramInfo is just
+    one independent chain link (a label header or an END marker), not "a
+    program's boundary" -- `kind` says which it is.
+
+    `distance_bytes` (built from the raw `bbb`/`distance_registers` marker
+    fields, plus `end_type` for END entries -- see docs/program.md sec 5.1)
+    is the byte distance *this* entry's own marker reports onward to the
+    next chain link the backward walk visits from here. It is NOT a
+    program's size -- it's the only per-entry number the chain format
+    actually encodes, exposed as-is (rather than interpreted) so it can be
+    weighed against CAT 1's reported program byte lengths while that
+    reconciliation is still being researched (see docs/program.md's open
+    TODOs). Showing an interpreted "size" here, before that's resolved,
+    was the mistake an earlier attempt at a Program tab made (see project
+    notes) -- this deliberately shows the raw marker data instead.
+
+    One entry can be the permanent `.END.` itself (`end_type == 2`) -- the
+    newest thing in program memory, sitting right where the most-recently-
+    created chain link's own "next END" would otherwise be. An earlier
+    version of `list_programs()` always discarded this one, on the theory
+    it was bookkeeping rather than a real chain link; the user's own
+    byte-count comparison against a real CAT 1 listing showed that was
+    wrong to assume -- the newest program's reported byte count can extend
+    into exactly the bytes this entry's distance covers. It's now included
+    like any other entry, distinguished via `kind` (`".END."` rather than
+    `"END"`) so it reads clearly as the top-of-memory marker, not a
+    duplicate of a normal END.
+    """
+
+    def __init__(
+        self,
+        header_addr: int,
+        header_offset: int,
+        name: Optional[str],
+        key_assignment: Optional[int],
+        distance_bytes: int,
+        bbb: int,
+        distance_registers: int,
+        end_type: Optional[int],
+    ):
+        self.header_addr = header_addr
+        self.header_offset = header_offset
+        self.name = name
+        self.key_assignment = key_assignment
+        self.distance_bytes = distance_bytes
+        self.bbb = bbb
+        self.distance_registers = distance_registers
+        self.end_type = end_type
+
+    @property
+    def is_named(self) -> bool:
+        return self.name is not None
+
+    @property
+    def kind(self) -> str:
+        """"LBL" for a global-label header, "END" for a plain END marker,
+        or ".END." for the one permanent end-of-program-memory marker
+        (end_type == 2) -- the newest entry in the chain, when present."""
+        if self.is_named:
+            return "LBL"
+        return ".END." if self.end_type == 2 else "END"
+
+    @property
+    def display_name(self) -> str:
+        return self.name if self.name is not None else "END"
+
+    @property
+    def address_label(self) -> str:
+        return f"0x{self.header_addr:03x}:{self.header_offset}"
+
+    @property
+    def distance_label(self) -> str:
+        return f"{self.distance_bytes} byte{'s' if self.distance_bytes != 1 else ''}"
+
+    def __repr__(self):
+        return (
+            f"ProgramInfo({self.kind} {self.display_name!r} "
+            f"@ {self.address_label}, distance={self.distance_bytes})"
+        )
 
 
 class PrimaryData(MemoryRegion):
@@ -1564,6 +1662,193 @@ class Memory:
         bits = int.from_bytes(bytes(d._data), "big")
         binary = format(bits, f"0{self.FLAG_COUNT}b")
         return [c == "1" for c in binary]
+
+    # -- Program memory: the "global chain" of END lines and global alpha
+    # labels, see docs/program.md sec 5 for the full derivation ----------
+    #
+    # Register offset and absolute address run in *opposite* directions
+    # within a register (offset 0 = the first/leftmost printed byte = the
+    # *highest* address in that register; offset 6 = the last/rightmost
+    # byte = the *lowest*) -- see docs/program.md's "Addressing within
+    # program memory". _addr_for/_pos_for convert between the two; every
+    # chain-distance calculation below goes through them.
+
+    @staticmethod
+    def _addr_for(reg: int, offset: int) -> int:
+        return 7 * reg + (6 - offset)
+
+    @staticmethod
+    def _pos_for(addr: int) -> tuple:
+        reg, remainder = divmod(addr, 7)
+        return reg, 6 - remainder
+
+    def _read_bytes_forward(self, reg: int, offset: int, count: int) -> bytes:
+        """Reads `count` bytes starting at (reg, offset) in the direction
+        chain markers and global-label names read correctly in (increasing
+        program line number / decreasing address -- see docs/program.md).
+        Running past offset 6 continues at offset 0 of the next LOWER
+        register, matching how program memory actually continues across a
+        register boundary."""
+        out = bytearray()
+        r, o = reg, offset
+        for _ in range(count):
+            out.append(self.get_register(r)._data[o])
+            o += 1
+            if o > 6:
+                o = 0
+                r -= 1
+        return bytes(out)
+
+    def _decode_chain_marker(self, reg: int, offset: int) -> Optional[dict]:
+        """Decodes the 3-byte '1100 bbb rrrrrrrrr eeeeffff' marker at
+        (reg, offset) -- docs/program.md sec 5.1. Returns None if the byte
+        at (reg, offset) doesn't start with the 0xC0-0xCD marker nibble."""
+        raw = self._read_bytes_forward(reg, offset, 3)
+        if (raw[0] >> 4) != 0xC:
+            return None
+        val = (raw[0] << 16) | (raw[1] << 8) | raw[2]
+        is_label = (raw[2] >> 4) == 0xF
+        return {
+            "bbb": (val >> 17) & 0x7,
+            "distance_registers": (val >> 8) & 0x1FF,
+            "is_label": is_label,
+            # High nibble of the third byte, when this isn't a label: 0 =
+            # normal END, 2 = the permanent `.END.` itself (docs/program.md
+            # sec 5.1). None for a label, where that nibble is always F.
+            "end_type": None if is_label else (raw[2] >> 4),
+            "label_length": (raw[2] & 0x0F) - 1 if is_label else None,
+        }
+
+    def _decode_label_name(self, reg: int, offset: int, length: int) -> tuple:
+        """Decodes a global label's key-assignment byte and name, given
+        where its 4-byte header starts -- docs/program.md sec 5.2. Reading
+        the header and name in one continuous forward pass (rather than as
+        two separate reads) is what makes a name longer than 3 characters
+        correctly spill into the preceding register: `_read_bytes_forward`
+        only wraps registers within a single call. Returns
+        (name, key_assignment)."""
+        combined = self._read_bytes_forward(reg, offset, 4 + max(length, 0))
+        key_assignment = combined[3]
+        name = "".join(
+            chr(b) if 0x20 <= b <= 0x7E else "?" for b in combined[4:]
+        )
+        return name, key_assignment
+
+    def list_programs(self) -> list:
+        """
+        Walks the global chain backward from `.END.` toward R00 and
+        returns every global alpha label and plain END marker found along
+        the way, oldest first -- the register nearest R00 is the first
+        chain link ever created, matching the order CAT 1 shows on a real
+        calculator. See docs/program.md sec 5 for the derivation and the
+        worked examples this was checked against (every
+        `src/tests/data/*.dm41` sample that has any programs in it).
+
+        Each entry is one independent chain link (see ProgramInfo) -- do
+        NOT assume labels and END markers pair up one-to-one. The user's
+        own testing (against a modified copy of 6x-xm.dm41) found a single
+        END can have zero, one, or several global labels chained to it, so
+        this makes no attempt to group entries into "programs"; it just
+        reports the raw chain in the order it's found, same as CAT 1 would
+        list it.
+
+        Returns [] if program memory is empty, or if R00/.END. don't look
+        like a real partition (e.g. a fresh, never-loaded Memory()). The
+        permanent `.END.` marker itself is otherwise included as the last
+        (newest) entry -- see ProgramInfo's docstring -- unless it truly
+        has nothing chained to it yet (see docs/program.md's first worked
+        example), in which case there's nothing to report at all.
+
+        Stops -- without raising -- the moment a byte that should start a
+        marker doesn't have the 0xC0-0xCD high nibble, since that means
+        either this model doesn't fit this dump or the data is corrupt;
+        better to show whatever was found up to that point than to crash
+        the caller. Also bounded to a generous iteration cap, and guards
+        against revisiting the same position, as a backstop against an
+        accidentally circular chain.
+        """
+        r00 = self.R00()
+        dend = self.DotEnd()
+        # 0xC1 matches gui/memory_ranges.py's MIN_SANE_R00 -- a fresh,
+        # never-loaded Memory() decodes R00 as 0, which isn't a real
+        # partition boundary.
+        if not (0xC1 <= r00 <= PRIMARY_DATA_END) or not (0xC0 <= dend < r00):
+            return []
+
+        entries = []
+        reg, offset = dend, 4
+        visited = set()
+        for _ in range(512):
+            if (reg, offset) in visited:
+                break
+            visited.add((reg, offset))
+
+            marker = self._decode_chain_marker(reg, offset)
+            if marker is None:
+                break
+
+            # The byte distance THIS entry's own marker reports onward to
+            # the next chain link the walk visits from here -- see
+            # ProgramInfo's docstring for why this is exposed raw rather
+            # than interpreted as a program size.
+            distance_bytes = marker["distance_registers"] * 7 + marker["bbb"]
+
+            if marker["is_label"]:
+                name, key = self._decode_label_name(
+                    reg, offset, marker["label_length"]
+                )
+                entries.append((
+                    reg, offset, name, key,
+                    distance_bytes, marker["bbb"], marker["distance_registers"],
+                    None,
+                ))
+            else:
+                # The very first marker examined is always this partition's
+                # permanent `.END.` (it's where the walk starts). Only skip
+                # recording it when program memory is genuinely empty --
+                # i.e. it has no predecessor of its own (bbb/distance_regs
+                # both 0) -- since then it's not really a chain link, just
+                # an empty partition's bookkeeping. Whenever it DOES have a
+                # predecessor, it's a real, informative entry: it's the
+                # newest thing in memory, and its own distance can account
+                # for bytes CAT 1 counts as part of the newest program that
+                # a plain-END-only view would otherwise miss entirely (see
+                # ProgramInfo's docstring -- this was found by the user
+                # comparing this tab's output against a real CAT 1 listing).
+                is_empty_partition_marker = (
+                    len(entries) == 0
+                    and marker["end_type"] == 2
+                    and marker["bbb"] == 0
+                    and marker["distance_registers"] == 0
+                )
+                if not is_empty_partition_marker:
+                    entries.append((
+                        reg, offset, None, None,
+                        distance_bytes, marker["bbb"], marker["distance_registers"],
+                        marker["end_type"],
+                    ))
+
+            if marker["bbb"] == 0 and marker["distance_registers"] == 0:
+                break  # no predecessor -- first global line in memory
+
+            addr = self._addr_for(reg, offset)
+            target_addr = addr + distance_bytes
+            if target_addr <= addr:
+                break  # defensive: distance should never be non-positive
+            next_reg, next_offset = self._pos_for(target_addr)
+            if next_reg >= r00 or next_reg < 0xC0:
+                break  # defensive: shouldn't walk past R00 or below 0xC0
+            reg, offset = next_reg, next_offset
+
+        programs = [
+            ProgramInfo(
+                header_addr=r, header_offset=o, name=n, key_assignment=k,
+                distance_bytes=d, bbb=b, distance_registers=dr, end_type=et,
+            )
+            for r, o, n, k, d, b, dr, et in entries
+        ]
+        programs.reverse()
+        return programs
 
     def to_string(self) -> str:
         lines = [self._header]

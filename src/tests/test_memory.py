@@ -659,7 +659,15 @@ def test_r00_and_dotend_match_known_sample_dumps():
         "helloworld.dm41": (0x19C, 0x19B),
         "alpha.dm41": (0x19C, 0x19B),
         "3x-xm.dm41": (0x19C, 0x187),
-        "6x-xm.dm41": (0x19C, 0x182),
+        # 0x188, not 0x182 -- 6x-xm.dm41 was regenerated after this
+        # expectation was written (it briefly had an extra unnamed/empty
+        # program, just an END instruction, while its author was testing
+        # program-memory research; that shifted .END. and confused the
+        # chain walk in list_programs() until the fixture was fixed).
+        # 0x188 matches the file as it exists now and is what
+        # test_list_programs_6x_finds_xmbcd_xmalpha_purxm_in_creation_order
+        # already relies on below.
+        "6x-xm.dm41": (0x19C, 0x188),
     }
     for filename, (expected_r00, expected_dotend) in cases.items():
         memory = Memory.from_file(DATA_DIR / filename)
@@ -827,3 +835,137 @@ def test_xm_remove_file_then_add_new_file_still_works():
     assert added.get_records() == ["hi"]
     names = {f.name for f in xm.list_files()}
     assert "NEWFILE" in names
+
+
+# ---- Program memory: the global chain (docs/program.md sec 5) ----
+#
+# Expected names/counts below were derived by walking the chain by hand
+# against the raw hex in each sample dump (see docs/program.md sec 5.1 for
+# simple.dm41 and 6x-xm.dm41 specifically) and cross-checked against the
+# real device's CAT 1 listing for XMBCD/XMALPHA/PURXM, already recorded in
+# project notes from an earlier session.
+#
+# Entries are NOT grouped into "programs" -- the user's own testing (against
+# a modified copy of 6x-xm.dm41) found a single END can have zero, one, or
+# several LBLs chained to it, so each entry is just one independent chain
+# link (a LBL header or an END marker). `distance_bytes` below is that
+# entry's own raw marker distance to the next chain link the walk visits
+# from it -- confirmed against the exact address arithmetic in
+# docs/program.md's worked examples, not a program size.
+#
+# The permanent `.END.` itself (kind == ".END.") is included as the newest
+# (last-listed) entry whenever program memory has any real content -- the
+# user found comparing this tab's output against a real CAT 1 listing that
+# omitting it (an earlier version of list_programs() silently dropped it)
+# was hiding bytes CAT 1 counts as part of the newest program.
+
+
+def test_list_programs_empty_memory_returns_nothing():
+    for filename in ("empty.dm41", "empty-128.dm41", "helloworld.dm41", "alpha.dm41"):
+        memory = Memory.from_file(DATA_DIR / filename)
+        assert memory.list_programs() == [], filename
+
+
+def test_list_programs_fresh_memory_returns_nothing():
+    """A brand new, never-loaded Memory() has R00 decoded as 0 -- not a
+    real partition -- so list_programs() should bail out to [] rather than
+    trying to walk a nonsensical chain."""
+    assert Memory().list_programs() == []
+
+
+def test_list_programs_simple_finds_apptest_lbl_its_end_and_the_global_end():
+    """simple.dm41 (docs/program.md's second worked example) has one LBL
+    header (APPTEST), one plain END marker, and -- since this program is
+    also the newest thing in memory -- the permanent `.END.` itself as a
+    third, distinct chain link. Oldest (nearest R00, i.e. created first)
+    is listed first, matching CAT 1's display order."""
+    memory = Memory.from_file(DATA_DIR / "simple.dm41")
+    programs = memory.list_programs()
+
+    assert len(programs) == 3
+
+    assert programs[0].name == "APPTEST"
+    assert programs[0].kind == "LBL"
+    assert programs[0].header_addr == 0x19B
+    assert programs[0].header_offset == 0
+    assert programs[0].key_assignment == 0x00
+    assert programs[0].is_named is True
+    # The oldest/first-ever chain link has no predecessor to point to.
+    assert programs[0].distance_bytes == 0
+
+    assert programs[1].name is None
+    assert programs[1].kind == "END"
+    assert programs[1].is_named is False
+    assert programs[1].display_name == "END"
+    # This END's own marker points 23 bytes onward to APPTEST's header.
+    assert programs[1].distance_bytes == 23
+    assert programs[1].distance_label == "23 bytes"
+    assert programs[1].end_type == 0x0
+
+    assert programs[2].name is None
+    assert programs[2].kind == ".END."
+    assert programs[2].is_named is False
+    assert programs[2].end_type == 0x2
+    assert programs[2].distance_bytes == 9
+
+
+def test_list_programs_6x_finds_xmbcd_xmalpha_purxm_their_ends_and_the_global_end():
+    """6x-xm.dm41 (docs/program.md's third worked example) has three LBL
+    headers, each followed in the chain by its own separate END marker,
+    plus the permanent `.END.` itself as the seventh and newest entry --
+    but the LBL/END pairing is NOT guaranteed in general (see module-level
+    note above), just what this specific fixture happens to contain."""
+    memory = Memory.from_file(DATA_DIR / "6x-xm.dm41")
+    programs = memory.list_programs()
+
+    names_in_order = [p.name for p in programs]
+    assert names_in_order == ["XMBCD", None, "XMALPHA", None, "PURXM", None, None]
+
+    kinds_in_order = [p.kind for p in programs]
+    assert kinds_in_order == ["LBL", "END", "LBL", "END", "LBL", "END", ".END."]
+
+    # Each entry's raw distance, confirmed against the address arithmetic
+    # worked out by hand for this exact fixture.
+    distances_in_order = [p.distance_bytes for p in programs]
+    assert distances_in_order == [0, 58, 3, 48, 3, 17, 8]
+
+    by_name = {p.name: p for p in programs if p.is_named}
+    assert by_name["XMBCD"].header_addr == 0x19B
+    assert by_name["XMALPHA"].header_addr == 0x193
+    assert by_name["PURXM"].header_addr == 0x18B
+    # Key-assignment byte (0x00 = unassigned) -- decoded but not otherwise
+    # asserted elsewhere in this file.
+    assert by_name["XMBCD"].key_assignment == 0x01
+
+    end_entries = [p for p in programs if not p.is_named]
+    assert [p.end_type for p in end_entries] == [0x0, 0x0, 0x0, 0x2]
+    assert all(p.key_assignment is None for p in end_entries)
+
+    assert programs[-1].kind == ".END."
+
+
+def test_list_programs_finds_the_same_three_names_in_every_variant_dump():
+    """XMBCD/XMALPHA/PURXM also appear in 3x-xm.dm41 and manyfiles.dm41 --
+    different fixtures, same three real programs (see project notes on the
+    real device's CAT 1 listing)."""
+    for filename in ("3x-xm.dm41", "manyfiles.dm41"):
+        memory = Memory.from_file(DATA_DIR / filename)
+        named = {p.name for p in memory.list_programs() if p.is_named}
+        assert named == {"XMBCD", "XMALPHA", "PURXM"}, filename
+
+
+def test_list_programs_address_label_format():
+    memory = Memory.from_file(DATA_DIR / "simple.dm41")
+    assert memory.list_programs()[0].address_label == "0x19b:0"
+
+
+def test_list_programs_terminates_on_every_sample_dump():
+    """Defensive/regression coverage: list_programs() should never raise or
+    hang on any real fixture, regardless of whether it has programs."""
+    for path in DATA_DIR.glob("*.dm41"):
+        memory = Memory.from_file(path)
+        programs = memory.list_programs()
+        assert isinstance(programs, list)
+        for p in programs:
+            assert p.header_addr >= 0xC0
+            assert 0 <= p.header_offset <= 6

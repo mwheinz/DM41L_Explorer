@@ -3,9 +3,9 @@ DM41L Explorer: a CustomTkinter GUI for DM41L_Explorer.
 
 Design, per the 2026-08-12 rebuild request: menu items instead of toolbar
 buttons for every basic function, a status bar pinned to the bottom of the
-window, and a tabbed main view (Overview / Flags / Data Registers / XM
-Files, with more tabs planned as other memory regions get
-reverse-engineered).
+window, and a tabbed main view (Overview / Flags / Data Registers / Hex
+View / Programs / XM Files, with more tabs planned as other memory regions
+get reverse-engineered).
 
 Tabs render lazily -- only the tab currently on screen is (re)built; the
 others are marked dirty and build themselves the next time they're
@@ -50,6 +50,7 @@ from gui.flags_tab import FlagsTab
 from gui.data_registers_tab import DataRegistersTab
 from gui.xm_files_tab import XMFilesTab
 from gui.hex_view_tab import HexViewTab
+from gui.program_tab import ProgramTab
 
 try:
     from dm41lversion import _version
@@ -201,6 +202,7 @@ class DM41LExplorerApp(ctk.CTk):
         self.tabview.add("Flags")
         self.tabview.add("Data Registers")
         self.tabview.add("Hex View")
+        self.tabview.add("Programs")
         self.tabview.add("XM Files")
 
         self.overview_tab = OverviewTab(
@@ -221,6 +223,9 @@ class DM41LExplorerApp(ctk.CTk):
         self.hex_view_tab = HexViewTab(self.tabview.tab("Hex View"))
         self.hex_view_tab.pack(fill="both", expand=True)
 
+        self.program_tab = ProgramTab(self.tabview.tab("Programs"))
+        self.program_tab.pack(fill="both", expand=True)
+
         self.xm_files_tab = XMFilesTab(
             self.tabview.tab("XM Files"), on_change=self._on_memory_changed
         )
@@ -232,6 +237,7 @@ class DM41LExplorerApp(ctk.CTk):
             "Flags": self.flags_tab,
             "Data Registers": self.data_registers_tab,
             "Hex View": self.hex_view_tab,
+            "Programs": self.program_tab,
             "XM Files": self.xm_files_tab,
         }
         self._tabs_dirty = {name: True for name in self._tabs}
