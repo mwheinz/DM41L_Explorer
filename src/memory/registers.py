@@ -62,6 +62,19 @@ class Register:
     def get_hex(self) -> str:
         return self._data.hex()
 
+    def get_bytes(self) -> bytes:
+        """
+        Returns this register's raw data as an immutable bytes copy, in
+        the same MSB-first storage order as get_hex() (byte 0 = the
+        first/leftmost printed byte, matching how HP41 documentation and
+        docs/memory.md address register bytes).
+
+        Note this is NOT the same order as __getitem__/__setitem__, which
+        index LSB-first (see this class's docstring) -- get_bytes()[i]
+        and reg[i] refer to different bytes for the same register.
+        """
+        return bytes(self._data)
+
     def _get_nibbles(self) -> list[int]:
         """Returns the register data as a list of nibbles from MSB to LSB."""
         nibbles = []

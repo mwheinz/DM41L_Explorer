@@ -79,10 +79,10 @@ class StatusRegisters(MemoryRegion):
     def __init__(self, memory: "Memory"):
         super().__init__(memory, STATUS_REGISTERS_RANGE)
         bd = (
-            self.get_register(8)._data[4:7]
-            + self.get_register(7)._data
-            + self.get_register(6)._data
-            + self.get_register(5)._data
+            self.get_register(8).get_bytes()[4:7]
+            + self.get_register(7).get_bytes()
+            + self.get_register(6).get_bytes()
+            + self.get_register(5).get_bytes()
         )
         self.alpha = AlphaRegister(data=bd, ascii_only=True, read_only=True)
 

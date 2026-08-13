@@ -233,13 +233,13 @@ class Memory:
             raise ValueError(f"Flag number must be 0-{self.FLAG_COUNT - 1}, got {n}")
         d = self.get_register(self.REG_D_ADDR)
         byte_index, bit_in_byte = divmod(n, 8)
-        return bool((d._data[byte_index] >> (7 - bit_in_byte)) & 1)
+        return bool((d.get_bytes()[byte_index] >> (7 - bit_in_byte)) & 1)
 
     def set_flag(self, n: int, value: bool):
         if not (0 <= n < self.FLAG_COUNT):
             raise ValueError(f"Flag number must be 0-{self.FLAG_COUNT - 1}, got {n}")
         d = self.get_register(self.REG_D_ADDR)
-        data = bytearray(d._data)
+        data = bytearray(d.get_bytes())
         byte_index, bit_in_byte = divmod(n, 8)
         mask = 1 << (7 - bit_in_byte)
         if value:
@@ -251,7 +251,7 @@ class Memory:
     def get_all_flags(self) -> list:
         """Returns a list of FLAG_COUNT bools, flag 0 first."""
         d = self.get_register(self.REG_D_ADDR)
-        bits = int.from_bytes(bytes(d._data), "big")
+        bits = int.from_bytes(d.get_bytes(), "big")
         binary = format(bits, f"0{self.FLAG_COUNT}b")
         return [c == "1" for c in binary]
 
@@ -284,7 +284,7 @@ class Memory:
         out = bytearray()
         r, o = reg, offset
         for _ in range(count):
-            out.append(self.get_register(r)._data[o])
+            out.append(self.get_register(r).get_bytes()[o])
             o += 1
             if o > 6:
                 o = 0

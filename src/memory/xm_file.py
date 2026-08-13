@@ -139,7 +139,7 @@ class XMFile:
             raise ValueError(f"{self.name!r} is not an ASCII file ({self.type_label})")
         stream = bytearray()
         for reg in self.data_registers():
-            stream += bytes(reg._data)
+            stream += reg.get_bytes()
 
         records = []
         i = 0
@@ -168,7 +168,7 @@ class XMFile:
             raise ValueError(f"{self.name!r} is not a Program file ({self.type_label})")
         stream = bytearray()
         for reg in self.data_registers():
-            stream += bytes(reg._data)
+            stream += reg.get_bytes()
         return bytes(stream)
 
     def get_instruction_bytes(self) -> bytes:
@@ -366,7 +366,7 @@ class ExtendedMemory(MemoryRegion):
             segments = []
             header_addr = addr
             header_register = self.get_register(addr)
-            header = ExtendedMemory._parse_header(addr, header_register._data)
+            header = ExtendedMemory._parse_header(addr, header_register.get_bytes())
             if header is None:
                 raise DM41LMemoryError(
                     "Detected invalid XM file header. "
@@ -724,8 +724,8 @@ class ExtendedMemory(MemoryRegion):
             # had (no confirmed rule for updating those on every append --
             # see docs/memory.md sec. 4.1).
             r40 = self.get_register(XM_REGIONS[0][0])
-            ww0 = (r40._data[2] >> 4) & 0x0F
-            pp0 = r40._data[3]
+            ww0 = (r40.get_bytes()[2] >> 4) & 0x0F
+            pp0 = r40.get_bytes()[3]
             self.set_register(
                 XM_REGIONS[0][0],
                 self._build_region_pointer(0, next_region_active=True, ww=ww0, pp=pp0),
