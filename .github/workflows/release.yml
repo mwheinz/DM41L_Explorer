@@ -5,13 +5,19 @@ name: Release
 #   git push origin v0.1.0
 #
 # Builds a standalone binary on Linux (x86_64 and arm64), macOS, and
-# Windows via build.sh / dm41l.spec, zips each one up with a checksum, and
-# publishes them all to a GitHub Release named after the tag.
+# Windows (x86_64 and arm64) via build.sh / dm41l.spec, zips each one up
+# with a checksum, and publishes them all to a GitHub Release named after
+# the tag.
 #
-# PyInstaller can't cross-compile, so the arm64 build needs its own native
-# runner rather than a flag on the x86_64 leg: ubuntu-24.04-arm is a
-# GitHub-hosted Linux ARM64 runner, free and unlimited on public repos as
-# of GA 2025-08-07.
+# PyInstaller can't cross-compile, so each arm64 build needs its own
+# native runner rather than a flag on the corresponding x86_64 leg:
+# ubuntu-24.04-arm (GitHub-hosted Linux ARM64, GA 2025-08-07) and
+# windows-11-arm (GitHub-hosted Windows ARM64, still Public Preview as of
+# writing -- expect more rough edges there than the Linux leg, e.g. the
+# 7-Zip that ships on it currently runs under x64 emulation rather than
+# natively, which is why Windows packaging below uses PowerShell's
+# built-in Compress-Archive instead). Both are free and unlimited on
+# public repos, same as the x86_64 runners.
 
 on:
   push:
@@ -23,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm]
 
     runs-on: ${{ matrix.os }}
 
@@ -79,12 +85,23 @@ jobs:
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
-        shell: bash
+        shell: pwsh
         run: |
-          cd src/dist
-          7z a "../../DM41L-Explorer-${{ github.ref_name }}-windows-x86_64.zip" dm41lexplorer
-          cd ../..
-          sha256sum "DM41L-Explorer-${{ github.ref_name }}-windows-x86_64.zip" > "DM41L-Explorer-${{ github.ref_name }}-windows-x86_64.zip.sha256"
+          # Both the x64 and arm64 Windows legs hit this step (runner.os
+          # reads "Windows" for either). Uses PowerShell's built-in
+          # Compress-Archive/Get-FileHash rather than 7z + sha256sum (the
+          # prior bash/7z approach) for two reasons: it needs no external
+          # tool at all (7z on windows-11-arm currently only runs under
+          # x64 emulation, per actions/runner-images#14065), and it's
+          # naturally architecture-agnostic.
+          $arch = $env:PROCESSOR_ARCHITECTURE.ToLower()
+          if ($arch -eq "amd64") { $arch = "x86_64" }
+          $zipName = "DM41L-Explorer-${{ github.ref_name }}-windows-$arch.zip"
+          Compress-Archive -Path "src/dist/dm41lexplorer" -DestinationPath $zipName
+          $hash = (Get-FileHash -Algorithm SHA256 $zipName).Hash.ToLower()
+          # Match `sha256sum`'s output format ("<hash>  <filename>") so the
+          # checksum files stay consistent across every platform leg.
+          "$hash  $zipName" | Out-File -Encoding ascii "$zipName.sha256"
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
@@ -96,7 +113,7 @@ jobs:
           shasum -a 256 "DM41L-Explorer-${{ github.ref_name }}-macos.zip" > "DM41L-Explorer-${{ github.ref_name }}-macos.zip.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: dm41l-explorer-${{ matrix.os }}
           path: |
@@ -112,7 +129,7 @@ jobs:
 
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           path: artifacts
           merge-multiple: true

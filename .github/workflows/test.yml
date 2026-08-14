@@ -14,9 +14,12 @@ jobs:
       matrix:
         # ubuntu-24.04-arm is a GitHub-hosted Linux ARM64 runner, free and
         # unlimited on public repos (like x64 runners) as of GA 2025-08-07.
-        # Every step below keys off runner.os, which reads "Linux" for this
-        # runner too, so no other changes are needed here.
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+        # windows-11-arm is the Windows ARM64 equivalent -- also free on
+        # public repos, but still Public Preview (not GA) as of writing, so
+        # expect more rough edges there than on the Linux arm64 leg. Every
+        # step below keys off runner.os, which reads "Linux"/"Windows" for
+        # either architecture, so no other changes are needed here.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest, windows-11-arm]
 
     runs-on: ${{ matrix.os }}
 
