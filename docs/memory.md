@@ -1,22 +1,18 @@
-Title: DM41L Memory Architecture Reference
-Tags: Active, DM41L Explorer
-----------------------------------------
 # DM41L Explorer: Hardware Memory Architecture Reference
 
-The purpose of the DM41L Explorer project is to design a python application that
-can read, write, and edit the memory of the DM41L emulator via the DM41L's
+The purpose of the DM41L Explorer project is to design a python application
+that can read, write, and edit the memory of the DM41L emulator via the DM41L's
 serial port. This document outlines the memory architecture of the original
 HP41C calculator hardware and it's implementation in the DM41L. 
 
-Note on limitations: The DM41L specifically emulates the HP41CX
-calculator, which was an upgraded version of the HP41C and
-HP41CV models. The HP41C* series could be expanded with various
-ROM and RAM cartridges. The HP41C model had the most limited
-amount of main memory and no extended memory, while the HP41CV
-had the maximum amount of main memory already built in, but no
-extended memory. The HP41CX had the maximum amount of main
-memory and the equivalent of a time functions ROM cartridge and
-two extended memory cartridges already installed.
+Note on limitations: The DM41L specifically emulates the HP41CX calculator,
+which was an upgraded version of the HP41C and HP41CV models. The HP41C* series
+could be expanded with various ROM and RAM cartridges. The HP41C model had the
+most limited amount of main memory and no extended memory, while the HP41CV had
+the maximum amount of main memory already built in, but no extended memory. The
+HP41CX had the maximum amount of main memory and the equivalent of a time
+functions ROM cartridge, an extended functions ROM, and a extended memory
+cartridge already installed.
 
 A note on confidence: most of this document describes hardware
 behavior confirmed against real memory dumps (see
@@ -26,12 +22,11 @@ as such rather than stated as fact.
 
 A note on sources: Much of this data was derived from "HP-41 Advanced
 Programming Tips" by Alan McCornack & Keith Jarett, "HP41 Extended Functions
-Made Easy", "HP41 Synthetic Programming" and other documentation found on the
-internet in PDF format. 
+Made Easy", "HP41 Synthetic Programming" by Jonathan Wickes, and other
+documentation found on the internet in PDF format. 
 
 ## 1. Core Architectural Specifications
-- **Target Model:** DM41L which emulates the HP41CX (part of the HP41C series:
-  basic C, expanded memory CV, and extended capabilities CX).
+- **Target Model:** DM41L which emulates the HP41CX
 - **Memory Hardware:** The HP41 organized its memory into 7-byte (56-bit)
   registers. The DM41L emulator mimics this organization.
 - **Instruction Set:** Operates on a variable-length instruction set where
