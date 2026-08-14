@@ -4,26 +4,31 @@ A Windows, MacOS, and Linux desktop GUI for reading, writing, and editing the
 memory of a [DM41L](https://www.swissmicros.com/) (HP‑41CX emulator) over its
 serial console.
 
+## Screenshots
+
+| Overview | Hex View | XM Files |
+| --- | --- | --- |
+| ![Overview](resources/screenshots/overview.png) | ![Hex View](resources/screenshots/hex_view.png) | ![XM Files tab](resources/screenshots/xm_files.png) |
+|  ![Flags](resources/screenshots/flags_view.png) | ![Register View](resources/screenshots/register_view.png) | ![Programs](resources/screenshots/program_view.png) | 
+
+
 ## Features
 
-- **Overview** — A ![quick summary view](resources/screenshots/overview.png)
-  of the contents of the DM41L's memory, including
-  the stack & alpha registers, main memory, and extended memory.
+- **Overview** — A quick summary view of the contents of the DM41L's memory,
+  including the stack & alpha registers, main memory, and extended memory.
   (R00/.END./ΣREG), and a memory-usage summary at a glance.
-- **Flags** — all 56 status flags, ![named and editable](resources/screenshots/flags_view.png).
-- **Data Registers** — ![browse and edit any user memory](resources/screenshots/register_view.png) as a number,
+- **Flags** — all 56 status flags, named and editable.
+- **Data Registers** — browse and edit the user memory registers as numbers,
   text, or raw hex.
-- **Hex View** — a ![full, color-coded map of the entire memory space](resources/screenshots/hex_view.png)
-  (status registers, extended memory, program memory, data memory, and
-  unused space).
-- **Programs** — a read-only catalog (for now) of the ![named programs and END](resources/screenshots/program_view.png)
+- **Hex View** — a full, color-coded map of the entire memory space (status
+  registers, extended memory, program memory, data memory, and unused space).
+- **Programs** — a read-only catalog (for now) of the named programs and END
   markers found in program memory.
-- **XM Files** — list, add, edit, and remove files stored in ![extended memory](resources/screenshots/xm_files.png)
+- **XM Files** — list, add, edit, and remove files stored in extended memory
   (Data, ASCII, and Program types).
-- Connect directly to a DM41L over USB serial, or work entirely offline
-  from a saved `.dm41` dump file (File > Open / Save Dump).
-- Double-click a `.dm41` file (or drag it onto the app) to open it
-  directly.
+- Connect directly to a DM41L over USB serial, or work entirely offline from a
+  saved `.dm41` dump file (File > Open / Save Dump).
+- Double-click a `.dm41` file (or drag it onto the app) to open it directly.
 
 ## Requirements
 
@@ -92,10 +97,11 @@ these.
 - [`docs/program.md`](docs/program.md) — the program-memory "global
   chain" format (labels and END markers) used by the Programs tab.
 
-Most of this is reverse-engineered from sample memory dumps rather than
-an official spec, so treat field meanings as well-tested hypotheses
-rather than certainties — see the docs for what's confirmed versus still
-under research.
+Most of this is derived from 40 year old memories and classic HP41 texts like
+"Synthetic Programming" by Jonathan Wickes, supplemented by reverse-engineering
+DM41L memory dumps rather than an official spec, so treat field meanings as
+well-tested hypotheses rather than certainties — see the docs for what's
+confirmed versus still under research.
 
 ## Known limitations
 
