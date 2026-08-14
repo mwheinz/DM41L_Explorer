@@ -34,6 +34,9 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          # See test.yml: works around an intermittent broken Tcl/Tk bundle
+          # in the pre-baked Windows runner Python tool cache.
+          check-latest: true
 
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'

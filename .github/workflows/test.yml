@@ -24,6 +24,13 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          # Works around an intermittent GitHub-hosted Windows runner issue
+          # where the pre-baked Python in the image's tool cache has an
+          # incomplete Tcl/Tk bundle (missing ttk/*.tcl files -> tkinter
+          # import fails). check-latest makes the action verify the cached
+          # copy is actually the newest matching release and re-download
+          # otherwise, instead of trusting whatever's pre-installed as-is.
+          check-latest: true
 
       - name: Install Linux GUI/test dependencies
         if: runner.os == 'Linux'
