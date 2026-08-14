@@ -12,7 +12,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # ubuntu-24.04-arm is a GitHub-hosted Linux ARM64 runner, free and
+        # unlimited on public repos (like x64 runners) as of GA 2025-08-07.
+        # Every step below keys off runner.os, which reads "Linux" for this
+        # runner too, so no other changes are needed here.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
 

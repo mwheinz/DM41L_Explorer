@@ -4,9 +4,14 @@ name: Release
 #   git tag v0.1.0
 #   git push origin v0.1.0
 #
-# Builds a standalone binary on Linux, macOS, and Windows via build.sh /
-# dm41l.spec, zips each one up with a checksum, and publishes them all to
-# a GitHub Release named after the tag.
+# Builds a standalone binary on Linux (x86_64 and arm64), macOS, and
+# Windows via build.sh / dm41l.spec, zips each one up with a checksum, and
+# publishes them all to a GitHub Release named after the tag.
+#
+# PyInstaller can't cross-compile, so the arm64 build needs its own native
+# runner rather than a flag on the x86_64 leg: ubuntu-24.04-arm is a
+# GitHub-hosted Linux ARM64 runner, free and unlimited on public repos as
+# of GA 2025-08-07.
 
 on:
   push:
@@ -18,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
 
@@ -57,10 +62,20 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
+          # Both the x86_64 and arm64 legs hit this step (runner.os reads
+          # "Linux" for either), so the filename has to reflect the actual
+          # host arch rather than assuming x86_64 -- otherwise the two
+          # legs would produce identically-named zips that collide when
+          # the publish job merges all artifacts into one directory.
+          case "$(uname -m)" in
+            x86_64) ARCH=x86_64 ;;
+            aarch64) ARCH=arm64 ;;
+            *) ARCH="$(uname -m)" ;;
+          esac
           cd src/dist
-          zip -r "../../DM41L-Explorer-${{ github.ref_name }}-linux-x86_64.zip" dm41lexplorer
+          zip -r "../../DM41L-Explorer-${{ github.ref_name }}-linux-${ARCH}.zip" dm41lexplorer
           cd ../..
-          sha256sum "DM41L-Explorer-${{ github.ref_name }}-linux-x86_64.zip" > "DM41L-Explorer-${{ github.ref_name }}-linux-x86_64.zip.sha256"
+          sha256sum "DM41L-Explorer-${{ github.ref_name }}-linux-${ARCH}.zip" > "DM41L-Explorer-${{ github.ref_name }}-linux-${ARCH}.zip.sha256"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
