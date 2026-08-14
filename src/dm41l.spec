@@ -5,9 +5,19 @@
 # runs, and it also clears out any previous build/dist first.
 
 import os
+import platform
 
-ICON_PATH = "../resources/MyIcon.icns"
-icon = ICON_PATH if os.path.exists(ICON_PATH) else None
+# PyInstaller only honors EXE()/BUNDLE()'s icon= on Windows (.ico) and
+# macOS (.icns) -- there's no equivalent for Linux ELF binaries, so Linux
+# just gets no icon here. resources/makeicon.sh also builds
+# resources/MyIcon.png for that platform, ready to use as a .desktop
+# file's Icon= entry whenever this project ships one.
+ICON_BY_OS = {
+    "Windows": "../resources/MyIcon.ico",
+    "Darwin": "../resources/MyIcon.icns",
+}
+ICON_PATH = ICON_BY_OS.get(platform.system())
+icon = ICON_PATH if ICON_PATH and os.path.exists(ICON_PATH) else None
 
 a = Analysis(
     ["gui/app.py"],

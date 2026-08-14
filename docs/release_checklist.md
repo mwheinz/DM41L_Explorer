@@ -20,10 +20,17 @@ LICENSE are the highest-leverage starting point.
     `platformdirs`, `Pygments`, `pytokens`, `iniconfig`, `pluggy`)
     (Done 2026-08-13. `requirements-dev.txt` starts with `-r requirements.txt`
     so a dev install pulls in both.)
-- [ ] Generate `resources/MyIcon.ico` (multi-resolution, same Pillow approach
-  `resources/makeicon.sh` already uses for `.icns`). `src/dm41l.spec` currently
-  points `EXE(icon=...)` at the `.icns` file unconditionally — Windows needs
-  `.ico` there. Branch the icon path on `platform.system()` in the spec.
+- [X] Generate `resources/MyIcon.ico` for Windows and `resources/MyIcon.png`
+  for Linux. `src/dm41l.spec`'s `EXE()`/`BUNDLE()` icon now branches on
+  `platform.system()` (`.ico` on Windows, `.icns` on macOS, no icon on
+  Linux — PyInstaller doesn't support one there; `MyIcon.png` is ready for
+  a future `.desktop` file's `Icon=` instead).
+  (Done 2026-08-14. `resources/makeicon.sh` rewritten: the macOS `.icns`
+  step still uses `sips`/`iconutil` and only runs on macOS; `.ico`/`.png`
+  generation now uses Pillow (`requirements-dev.txt`) and runs on any
+  platform. `resources/MyIcon.ico`/`resources/MyIcon.png` were generated
+  from the real `icon.png` and delivered alongside the script, so nothing
+  further to run before the next build/release.)
 
 ## 2. Documentation
 
@@ -42,8 +49,12 @@ LICENSE are the highest-leverage starting point.
       Not decided yet.
       (Decided 2026-08-13: Simplified/2-clause BSD ("NetBSD license").
       LICENSE file added.)
-- [ ] Optional: `CONTRIBUTING.md` if you want outside PRs, issue
+- [X] Optional: `CONTRIBUTING.md` if you want outside PRs, issue
       templates if you want structured bug reports.
+      (Done 2026-08-14: `CONTRIBUTING.md` added — dev setup, running
+      tests, `black` formatting convention, PR expectations, and bug
+      report guidance. Issue templates not done — flagged as a further
+      optional step if you want more structure than free-form issues.)
 
 ## 3. Code organization
 
