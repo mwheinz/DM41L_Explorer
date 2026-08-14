@@ -1,15 +1,20 @@
 import json
 import os
+import platform
 import pytest
 from config import ProjectConfig
 
 # chmod-based permission restrictions have no effect when running as root
-# (uid 0 bypasses the permission bits) -- see the matching guard in
-# test_commands.py.
+# (uid 0 bypasses the permission bits), and separately os.chmod() on
+# Windows can only toggle the read-only attribute -- a directory's
+# read-only attribute there doesn't block creating files inside it, so
+# chmod(readonly_dir, 0o555) below is a no-op on Windows too -- see the
+# matching guards in test_commands.py.
 running_as_root = hasattr(os, "geteuid") and os.geteuid() == 0
-skip_if_root = pytest.mark.skipif(
-    running_as_root,
-    reason="chmod-based permission checks don't apply when running as root",
+skip_if_permission_bits_unenforced = pytest.mark.skipif(
+    running_as_root or platform.system() == "Windows",
+    reason="chmod-based directory/unreadable-file checks aren't enforced "
+    "(root, or Windows os.chmod semantics)",
 )
 
 
@@ -114,7 +119,7 @@ def test_round_trip_persists_across_instances(prefs_file):
     assert second.baudrate == 4800
 
 
-@skip_if_root
+@skip_if_permission_bits_unenforced
 def test_save_raises_exception_on_permission_error(tmp_path, monkeypatch):
     """Verifies that save() raises an exception when writing fails."""
     readonly_dir = tmp_path / "readonly_dir"

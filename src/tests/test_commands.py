@@ -1,4 +1,5 @@
 import os
+import platform
 from pathlib import Path
 from unittest.mock import MagicMock
 import pytest
@@ -13,6 +14,20 @@ running_as_root = hasattr(os, "geteuid") and os.geteuid() == 0
 skip_if_root = pytest.mark.skipif(
     running_as_root,
     reason="chmod-based permission checks don't apply when running as root",
+)
+
+# Separately, os.chmod() on Windows can only toggle the file read-only
+# attribute (stat.S_IWRITE/S_IREAD) -- it has no notion of an unreadable
+# file, and a directory's read-only attribute doesn't block creating files
+# inside it (Windows uses that bit for other purposes, not access control).
+# So chmod(dir, 0o555) and chmod(file, 0o000) are both no-ops there, while
+# chmod(file, 0o444) still works (Windows does enforce write-protection on
+# an individual file) -- see test_memory_dump_command_file_exists_but_not_writable
+# below, which stays root-only. These two need the extra Windows skip.
+skip_if_permission_bits_unenforced = pytest.mark.skipif(
+    running_as_root or platform.system() == "Windows",
+    reason="chmod-based directory/unreadable-file checks aren't enforced "
+    "(root, or Windows os.chmod semantics)",
 )
 
 
@@ -32,7 +47,7 @@ def test_memory_dump_command_nonexistent_parent(tmp_path):
     assert "does not exist" in str(excinfo.value)
 
 
-@skip_if_root
+@skip_if_permission_bits_unenforced
 def test_memory_dump_command_no_permission_on_parent(tmp_path):
     """Tests that a read-only parent directory triggers validation error."""
     dir_path = tmp_path / "readonly_dir"
@@ -79,7 +94,7 @@ def test_load_memory_command_nonexistent_file(tmp_path):
     assert "does not exist" in str(excinfo.value)
 
 
-@skip_if_root
+@skip_if_permission_bits_unenforced
 def test_load_memory_command_no_read_permission(tmp_path):
     """Tests that file read permissions are verified before attempting transfer."""
     file_path = tmp_path / "unreadable.bin"
