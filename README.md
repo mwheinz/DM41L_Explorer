@@ -9,7 +9,7 @@ serial console.
 | Overview | Hex View | XM Files |
 | --- | --- | --- |
 | ![Overview](resources/screenshots/overview.png) | ![Hex View](resources/screenshots/hex_view.png) | ![XM Files tab](resources/screenshots/xm_files.png) |
-|  ![Flags](resources/screenshots/flags_view.png) | ![Register View](resources/screenshots/register_view.png) | ![Programs](resources/screenshots/program_view.png) | 
+|  ![Flags](resources/screenshots/flags_view.png) | ![Register View](resources/screenshots/registers_view.png) | ![Programs](resources/screenshots/program_view.png) | 
 
 
 ## Features

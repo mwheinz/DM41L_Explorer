@@ -1,11 +1,14 @@
 ## 5. Program Memory
 
+The following are the author's own notes on trying to build a catalog of the
+programs contained in a DM41L dump file.
+
 ### 5.1 Traversing Program Memory
 
 The list of programs in an HP41/DM41L is traversed backwards, by starting at
 the register pointed to by .END. and progressing to higher addresses.
 
-From HP-41 Synthetic Programming by Jonathan Wickes:
+#### From HP-41 Synthetic Programming by Jonathan Wickes:
 
 >We have come to the 'END'. The bytes CO-CD, 'GLOBAL', play a dual role--they
 identify both 'END' lines and global alpha labels. If the third byte of a line
@@ -29,12 +32,16 @@ Reviewing the relevant section, we can see that END instructions will take the f
 
 `1100 bbbr rrrr rrrr eeee ffff`
 
-Where '1100' is the bytecode for indicating and END or LBL instruction, 'r rrrr rrrr' is the distance in registers, 
-and 'bbb' is the byte in the destination register.
+Where '1100' is the bytecode for indicating and END or LBL instruction, 'r rrrr
+rrrr' is the distance in registers, and 'bbb' is 0-6 additional bytes. Note
+that this is not simply "go rrrrrrrrr registers and then bbb bytes", the actual
+distance is the # of registers times 7 plus bbb, from the current HP41
+instruction pointer. For an END instruction that means you count from the last
+byte of the END instruction. For global labels, I believe it is from the 3rd
+byte of the label (i.e., the Fn byte).
 
-**Update:** the third byte ('eeee ffff' above) is explained a little further
-on in the same section of Wickes (2C, p.15), in the paragraph right after the
-one quoted above. For a plain END line, the high nibble ('eeee') is `0` for a
+The third byte ('eeee ffff' above) is explained a little further
+on in the same section of Wickes (2C, p.15). For a plain END line, the high nibble ('eeee') is `0` for a
 normal END or `2` for the permanent `.END.`; the low nibble ('ffff') is `9`
 if the program file has been packed, or `D` if it needs packing. For a global
 label line, the high nibble is always `F` — that's exactly the marker Wickes
@@ -43,29 +50,30 @@ label's name length, plus one. See §5.2 below for the full label format.
 
 #### Addressing within program memory
 
-Register offset and absolute address run in *opposite* directions within a
-register. If `reg` is a register's decimal value and `offset` is the byte
-position counting left-to-right through its printed hex (0 = the first/
-leftmost byte, 6 = the last/rightmost byte), then:
+When dealing with a memory dump, register offset and absolute address run in
+*opposite* directions within a register. (That is, in an actual calculator
+register, byte 0 is the LSB, but in DM41L Explorer, Register._data\[0\] is the MSB
+of the register.) This can be confusing. If `reg` is a register's decimal
+value and `offset` is the byte position counting left-to-right through its
+printed hex (0 = the first/ leftmost byte, 6 = the last/rightmost byte), then:
 
 ```
 address(reg, offset) = 7*reg + (6 - offset)
 ```
 
-Offset 0 (the first printed byte) is at the *highest* address within that
-register; offset 6 (the last printed byte) is at the *lowest*. This matches
-Wickes' own description in 2C: HP41 "byte 6" (offset 0 here) is a register's
-first byte and "byte 0" (offset 6 here) its last, and stepping forward
-through a program decrements the byte number before decrementing the
-register number. Every "distance in registers and bytes" calculation below
-works out to: take the address of the byte the distance is measured from,
-add `r*7 + bbb`, and convert the result back to (register, offset) with the
-same formula. Worked out this way, every hop in the examples below lands
-exactly on the next instruction, byte for byte — verified directly against
-`simple.dm41` and `6x-xm.dm41`.
+To state the issue in another way, offset 0 (the first printed byte) is at the
+*highest* address within that register; offset 6 (the last printed byte) is at
+the *lowest*. This matches Wickes' own description in 2C: HP41 "byte 6" (offset
+0 here) is a register's first byte and "byte 0" (offset 6 here) its last, and
+stepping forward through a program decrements the byte number before
+decrementing the register number. Every "distance in registers and bytes"
+calculation below works out to: take the address of the byte the distance is
+measured from, add `r*7 + bbb`, and convert the result back to (register,
+offset) with the same formula. Worked out this way, every hop in the examples
+below lands exactly on the next instruction, byte for byte — verified directly
+against `simple.dm41` and `6x-xm.dm41`.
 
-Simple example: This is a dump of a DM41L that has just been initalized; there
-are no programs in memory. R00 is 19c and .END. is 19b:
+**Example: "empty.dm41"**
 
 ```
 DM41
@@ -75,14 +83,11 @@ DM41
 ...
 ```
 
-The END instruction appears in the last 3 bytes of register 19b: 'c0 00 20'
+This is a dump of a DM41L that has just been initalized; there are no programs
+in memory. ("empty.dm41" in the tests/data folder) R00 is 19c and .END. is 19b. The END instruction appears in the last 3 bytes of register 19b: 'c0 00 20'
 which appears to encode a distance of 0 registers and 0 bytes to the next END.
 
-The next example contains a single small program in an otherwise empty DM41L
-emulator. The program is called "APPTEST" (this file used to be labeled
-"TESTAPP" in this doc — see the correction below). On the calculator, the CAT 1
-command reports that this program occupies 26 bytes and the nameless app
-occupies 10 bytes. The registers in the dumpfile looks like this:
+**Example: "simple.dm41"**
 
 ```
 DM41
@@ -95,36 +100,33 @@ DM41
 ...
 ```
 
-In this dump, R00 is register 19c and .END. is register 197.
+This example contains a small unnamed program and a program called "APPTEST" in an
+otherwise empty DM41L emulator. On the calculator, the `CAT 1` command reports
+that "APPTEST" occupies 26 bytes and the nameless app occupies 10 bytes.
 
-Register 197 contains "00 00 00 00 c4 01 20" which decodes to:
+In this dump, R00 is register 19c and .END. is register 197. Register 197 contains "00 00 00 00 c4 01 20" which decodes like this:
 
 | Instruction | bbb | rrrrrrrrr | eeee ffff | 
-|-|-|-|-|-|
+|-|-|-|-|
 | 1100 | 010 | 0 0000 0001 | 0010 0000 |
 | END | 2 bytes | 1 register | .END. |
 
-Total distance = 1 register + 2 bytes, so 9 bytes counting from the first byte
+**Total distance = 1 register + 2 bytes**, so 9 bytes counting from the first byte
 of the end instruction. That takes us to another END instruction: "c40309".
 Decoding that:
 
 | Instruction | bbb | rrrrrrrrr | eeee ffff | 
-|-|-|-|-|-|
+|-|-|-|-|
 | 1100 | 010 | 0 0000 0011 | 0000 1001 |
-| END | 2 bytes | 3 register | Packed End | ? |
+| END | 2 bytes | 3 registers | Packed End | ? |
 
-Total distance = 3 registers + 2 bytes, 23 bytes, counting from the first byte
+**Total distance = 3 registers + 2 bytes**, 23 bytes, counting from the first byte
 of the END instruction takes us to the MSB of register 19b: "c0 00 f8 00 41 50
-50", the label of the program. See §5.2 below for how to decode this into the
-name "APPTEST" — the name is *not* "TESTAPP" as this doc originally (and
-wrongly) said; that was a transcription error, not a decoding difference. The
-23-byte arithmetic above is correct as written and lands exactly on this
-register (see "Addressing within program memory" above for why).
+50", the beginning of the global label of the program. See §5.2 below for how
+to decode this into the name "APPTEST" (see "Addressing within program memory"
+above for why).
 
-The next example is a part of a dump that contains three apps, called "XMBCD",
-"XMALPHA", and "PURXM" (this doc used to misname the third one "PURFL" — the
-raw bytes spell "PURXM", confirmed against the real calculator's CAT 1
-listing):
+**Example: "6x-xm.dm41"**
 
 ```
 DM41
@@ -139,20 +141,19 @@ DM41
 ...
 ```
 
-R00 is 19c (which seems to be the default for the DM41L) and .END. is set to
-register 188. Looking at register 188 we find "00 00 00 00 c2 01 20". (In all
-samples, .END. is always found in the last 3 bytes of a register, even if that
-means padding it with null bytes.)
+
+This example is a part of a larger dump that contains three apps, called "XMBCD",
+"XMALPHA", and "PURXM". R00 is 19c (which seems to be the default for the DM41L) and .END. is set to register 188. Looking at register 188 we find "00 00 00 00 c2 01 20". (In all samples, .END. is always found in the last 3 bytes of a register, even if that means padding it with null bytes.)
 
 | Instruction | bbb | rrrrrrrrr | eeee ffff | 
-|-|-|-|-|-|
+|-|-|-|-|
 | 1100 | 001 | 0 0000 0001 | 0010 0000 |
 | END | 1 bytes | 1 register | .END. |
 
 This takes us to register 189 and the next END is "c6 02 09"
 
 | Instruction | bbb | rrrrrrrrr | eeee ffff | 
-|-|-|-|-|-|
+|-|-|-|-|
 | 1100 | 011 | 0 0000 0010 | 0000 1001 |
 | END | 3 bytes | 2 register | Packed End |
 
@@ -160,12 +161,11 @@ This takes us to register 189 and the next END is "c6 02 09"
 which is the label of the program "PURXM". c600 translates to 3 bytes, which takes us to "cc0609" in register 18c:
 
 | Instruction | bbb | rrrrrrrrr | eeee ffff | 
-|-|-|-|-|-|
+|-|-|-|-|
 | 1100 | 110 | 0 0000 0110 | 0000 1001 |
 | END | 6 bytes | 6 registers | Packed End |
 
-This continues the chain further back (toward XMALPHA/XMBCD) rather than
-terminating — not fully walked out in this doc yet.
+This continues the chain further back toward XMALPHA and XMBCD.
 
 ### 5.2 Decoding a Global Label's Name
 
