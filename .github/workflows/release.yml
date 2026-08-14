@@ -24,14 +24,14 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # build.sh embeds `git describe --tags` as the app version, which
           # needs real tag history, not the default shallow clone.
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -78,7 +78,7 @@ jobs:
           shasum -a 256 "DM41L-Explorer-${{ github.ref_name }}-macos.zip" > "DM41L-Explorer-${{ github.ref_name }}-macos.zip.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: dm41l-explorer-${{ matrix.os }}
           path: |
@@ -94,7 +94,7 @@ jobs:
 
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
           merge-multiple: true
