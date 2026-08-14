@@ -122,13 +122,35 @@ LICENSE are the highest-leverage starting point.
       `codesign --force --deep --sign - "dist/DM41L Explorer.app"`
       (Done 2026-08-13: added to `src/build.sh`, guarded by
       `[ "$(uname)" = "Darwin" ]` so it's a no-op elsewhere.)
-- [ ] Document the Gatekeeper workaround in the README (right-click the
+- [X] Document the Gatekeeper workaround in the README (right-click the
       app → Open, confirm once) for anyone downloading a release
       binary — ad-hoc signing doesn't satisfy Gatekeeper's quarantine
       check, only full notarization ($99/yr Apple Developer Program)
       would remove the prompt entirely.
-- [ ] **Windows**: document the SmartScreen click-through ("More info" →
+      (Already done as part of the README's "Building a standalone
+      application" section — noticed and checked off 2026-08-14.)
+- [X] **Windows**: document the SmartScreen click-through ("More info" →
       "Run anyway") in the README.
+      (Same section as above — already done, checked off 2026-08-14.)
+- [X] Linux/Windows onedir builds need their `_internal/` support-files
+      folder kept alongside the executable — explain this so a release
+      download isn't mistaken for clutter. Considered switching to
+      PyInstaller "onefile" mode instead, but decided against it: onefile
+      exes have to self-extract to a temp folder on every launch (slower
+      startup) and are flagged by Windows Defender/antivirus far more
+      often than onedir builds (a classic malware-dropper pattern) —
+      not worth the risk on top of the SmartScreen friction already
+      documented above.
+      (Done 2026-08-14: `resources/dist_readme.txt` added, copied into
+      `dist/dm41lexplorer/README.txt` by `build.sh` for Linux/Windows
+      builds — ships inside every release zip automatically since
+      `release.yml` zips that whole directory. Not needed for macOS;
+      the `.app` bundle is already a single self-contained unit. Also
+      added: `build.sh` now bundles `resources/MyIcon.png` into the
+      Linux build's output folder too — Linux has no equivalent of a
+      Windows `.exe`'s baked-in icon, so this ships the icon file
+      alongside the binary, ready for a `.desktop` file's `Icon=` entry
+      if the user sets one up.)
 - [ ] Optional/later if the friction becomes a real problem:
       [SignPath.org](https://signpath.org)'s free code-signing program
       for open-source projects (requires acceptance + CI integration) —

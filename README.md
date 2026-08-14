@@ -77,6 +77,13 @@ Windows](https://git-scm.com/download/win)) or WSL, or invoke PyInstaller
 directly with `pyinstaller dm41l.spec` after generating `dm41lversion.py`
 yourself (see the comment at the top of `build.sh`).
 
+On Linux and Windows, the executable needs the `_internal/` folder that's
+built alongside it — don't separate them, or move the exe without also
+moving `_internal/`. A `README.txt` explaining this ships in that same
+output folder (and in every release download) for anyone unzipping it
+without this context. The Linux build also includes `MyIcon.png`, ready
+to use as a `.desktop` file's `Icon=` entry if you set one up yourself.
+
 The built binaries aren't code-signed (this is an independently-developed
 hobby project without an Apple or Microsoft developer account), so:
 
