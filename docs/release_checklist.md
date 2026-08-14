@@ -93,7 +93,13 @@ LICENSE are the highest-leverage starting point.
       a GitHub Release.
       (Done 2026-08-13: `.github/workflows/release.yml`, same manual-drop
       caveat as above.)
-- [ ] Set up issues and test with the github workflow.
+- [X] Set up issues and test with the github workflow.
+      (Confirmed 2026-08-14 by checking the repo's Actions/Releases pages
+      directly: `test.yml` has run repeatedly on recent pushes to `main`
+      and every run passed; `release.yml` has now published two full
+      (non-draft) GitHub Releases end-to-end — `v2026.08.01` and
+      `v2026.08.02`, the latter with 10 build/checksum assets attached.
+      Both workflows are working as designed.)
 
 ## 5. Cross-platform build/test environment
 
@@ -132,13 +138,18 @@ LICENSE are the highest-leverage starting point.
 
 ## 7. Release process
 
-- [ ] One-time repo setting: Settings → Actions → General → Workflow
+- [X] One-time repo setting: Settings → Actions → General → Workflow
       permissions → "Read and write permissions". Required for
       `release.yml`'s `gh release create` step to be allowed to publish —
       the default is read-only and would make that step fail with a
       permissions error.
-- [ ] Tag a version (e.g. `v0.1.0`), let the release workflow build and
+      (Confirmed set 2026-08-13; confirmed working in practice 2026-08-14
+      — `release.yml` has successfully published to GitHub Releases.)
+- [X] Tag a version (e.g. `v0.1.0`), let the release workflow build and
       publish artifacts.
+      (Done — `v2026.08.01` and `v2026.08.02` both published as full
+      releases with build artifacts and checksums attached, confirmed
+      2026-08-14 via the repo's Releases page.)
 - [ ] Write release notes summarizing what's in the first public build.
 - [ ] Decide whether to keep `dm41l.spec`/`build.sh` as the single
       source of truth for local + CI builds (recommended — CI should
