@@ -84,7 +84,7 @@ are interpreted differently:
 | Void Region | Registers do not exist / not used. | 0x10 | 0x3F |
 | Extended Memory #0 | File-oriented memory region | 0x40 | 0xBF |
 | Main Memory | Main memory consists of 319 registers that are subdivided into variable length sub-regions. | 0xC0 | 0x1FF |
-| Extended Memory #1 | File-oriented memory region. | 0x200 | 0x2FF |
+| Extended Memory #1 | File-oriented memory region. | 0x200 | 0x2EF |
 
 An additional memory region may exist in actual HP41CV and HP41CX calculators
 if an an addition Extended Memory module is installed, but this is not
@@ -165,22 +165,49 @@ Extended Memory.
 
 ## 4. Extended Memory
 
-Extended memory (XM) is considered "off-line storage" because, in normal
-operation, data in extended memory has to be copied to "main memory" to be
-used. The first memory region occupies registers 0x040 to 0x0bf but register
-0x040 is used by the operating system and is not available for storage. (It does
-contain a pointer to the top of the next XM region.) Similarly, the
-second memory region only has 238 registers that are available for storage, it
-appears that registers 0x200 and 0x201 are reserved for the operating system
-and registers 0x2f0-0x2ff are "non-existant".
-
-For the DM41L emulator, this means there are a total of 362 extended memory
-registers available to the user. Addresses above 0x300 are not available in the
-DM41L emulator.
 
 Note: The structures will be described here in terms of registers and nibbles.
 Registers are composed of seven bytes. Nibbles are single hexadecimal digits.
 Two nibbles make one byte; seven bytes make one register.
+
+Extended memory (XM) is considered "off-line storage" because, in normal
+operation, data in extended memory has to be copied to "main memory" to be
+used. The first memory region occupies registers 0x040 to 0x0bf but some
+registers are used by the operating system and are not available for storage.
+Similarly, the second memory region only has 238 registers that are available
+for storage, it appears that registers 0x200 and 0x201 are reserved for the
+operating system and registers 0x2f0-0x2ff are "non-existant".
+
+This is described on page 29 of *HP-41 Advanced Programming Tips*:
+
+> The memory of the Extended Functions Module (XFM) is built into the
+HP-41CX, and is available in a separate module for the other HP-41 models. Look
+between hex addresses 0BF and 040 (191 to 64 decimal) in Figure 1.2.
+`(page 13 - MWH)` Not all of the 128 registers contained within this memory space are
+available for data, programs or text (ASCII) files. A certain amount of
+overhead is required to keep things in order, such as maintaining the illusion
+that this memory is one continuous block that includes any existing Extended
+Memory modules. After Extended Memory (XM) is cleared, executing EMDIR shows
+124 registers available. The bottom register in the memory of the Extended
+Functions module (hex address 040) contains a "header" which links XM to any
+existing Extended Memory modules. Another register is filled with seven FF
+(decimal 255) bytes to mark off the end of occupied XM. This leaves 126
+registers available. However, two is subtracted from this count because any
+file created requires one register for the file name and another to hold the
+file type and the number of bytes and number of registers the file takes up. So
+the count returned by EMDIR is exactly the number of registers available for
+CRFLD or CRFLAS (CReate FiLe -- Data, or AScii) 
+> ...
+> Depending on the number of Extended Memory modules (0, 1, or 2), XM may
+contain a total of 128, 367, or 606 total registers. Due to the fact that the
+bottom register of each XM device is used to link it to the next, and one
+register containing FF bytes is needed, this translates into 126, 364, or 602
+registers available. When the directory is empty, the count returned by EMDIR
+will always be two less than these numbers.
+
+For the DM41L emulator, this means there are a total of 362 extended memory
+registers available to the user. Addresses above 0x300 are not available in the
+DM41L emulator.
 
 ### 4.1 Special XM Registers
 

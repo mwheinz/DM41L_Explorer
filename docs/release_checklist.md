@@ -155,8 +155,18 @@ LICENSE are the highest-leverage starting point.
       [SignPath.org](https://signpath.org)'s free code-signing program
       for open-source projects (requires acceptance + CI integration) —
       the only no-cost path to a real Windows signature.
-- [ ] Publish SHA256 checksums with every release regardless, so users
+- [X] Publish SHA256 checksums with every release regardless, so users
       have an integrity check independent of signing.
+      (Already done — this happens automatically, no manual step needed.
+      `release.yml`'s "Package" step for each OS leg computes a SHA256 of
+      that leg's zip right after building it — `sha256sum` on Linux,
+      `Get-FileHash` in PowerShell on Windows, `shasum -a 256` on macOS,
+      all writing the same `<hash>  <filename>` format — and uploads the
+      resulting `.sha256` file alongside the zip. The `publish` job then
+      attaches everything, zips and checksums both, to the GitHub
+      Release. Confirmed present on the real `v2026.08.02` release: 10
+      assets = 5 platform zips + 5 matching `.sha256` files. Checked off
+      2026-08-14.)
 
 ## 7. Release process
 
