@@ -322,7 +322,7 @@ DATA_DIR = Path(__file__).parent / "data"
 
 def _load_xm(filename: str) -> ExtendedMemory:
     memory = Memory.from_file(DATA_DIR / filename)
-    return ExtendedMemory(memory, address_range=[0x40, 0x3FF])
+    return ExtendedMemory(memory, address_range=[0x40, 0x2EF])
 
 
 def test_xm_6x_finds_all_six_files():
@@ -618,7 +618,7 @@ def test_xm_add_file_dump_rows_stay_page_aligned():
 
     # And it must still round-trip correctly.
     reloaded = Memory.from_string(dump)
-    xm2 = ExtendedMemory(reloaded, address_range=[0x40, 0x3FF])
+    xm2 = ExtendedMemory(reloaded, address_range=[0x40, 0x2EF])
     files = xm2.list_files()
     assert len(files) == 1
     assert files[0].get_records() == ["1", "2", "3", "4", "5", "-16"]

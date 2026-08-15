@@ -36,7 +36,7 @@ class XMFilesTab(ctk.CTkFrame):
             self._on_change()
 
     def _xm(self) -> ExtendedMemory:
-        return ExtendedMemory(self._memory, address_range=[0x40, 0x3FF])
+        return ExtendedMemory(self._memory, address_range=[0x40, 0x2EF])
 
     def render(self, memory: Memory):
         self._memory = memory

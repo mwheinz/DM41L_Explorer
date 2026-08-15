@@ -6,7 +6,7 @@ how memory is divided up. Flags live in their own tab (gui/flags_tab.py).
 from tkinter import messagebox
 import customtkinter as ctk
 
-from memory import Memory, StatusRegisters, ExtendedMemory, DM41LMemoryError
+from memory import Memory, StatusRegisters, ExtendedMemory, DM41LMemoryError, XM_REGIONS
 from gui.memory_ranges import MIN_SANE_R00
 from gui.scroll_support import bind_touchpad_scroll
 from gui.tab_common import MONOSPACE_FONT_FAMILY
@@ -29,6 +29,49 @@ LOW_MEMORY_START = 0xC0
 FUTURE_STATS = (
     "Does not include key assignments or alarms. These will be included"
     " in a future release."
+)
+
+# Raw structural XM capacity, in registers: each region's usable span is
+# (lo, hi] -- lo itself is that region's reserved link/pointer register
+# (0x40 for region 0, 0x201 for region 1), not available for file storage
+# (see memory/xm_file.py's ExtendedMemory docstring and
+# memory/constants.py's XM_REGIONS). This is a fixed, dump-independent
+# ceiling, not something read from the dump itself -- but it is NOT the
+# same number a real DM41L's EMDIR command reports (see
+# XM_TOTAL_REGISTERS below).
+XM_RAW_REGISTERS = sum(hi - lo for lo, hi in XM_REGIONS)
+
+# Registers an XM file consumes beyond its own declared data: one header
+# register and one name register, packed directly above its data (see
+# XMFile.num_registers' docstring in memory/xm_file.py -- that property
+# only counts the file's data segments, not this per-file overhead).
+XM_FILE_OVERHEAD_REGISTERS = 2
+
+# EMDIR's "registers available" is XM_RAW_REGISTERS minus two more kinds
+# of overhead that aren't tied to any one file. One register is always
+# spent on the FF-filled sentinel that marks where free space starts
+# (see memory/constants.py's EOM_REGISTER and
+# ExtendedMemory.list_files()) -- that's XM_EOM_SENTINEL_REGISTERS.
+# EMDIR's own count is then defined as "how many registers a file
+# created right now could use", which reserves the 2-register header+
+# name overhead of that hypothetical next file on top of the sentinel --
+# that's XM_NEXT_FILE_RESERVE_REGISTERS (deliberately the same value as
+# XM_FILE_OVERHEAD_REGISTERS above, but conceptually distinct: this one
+# is reserved capacity, not registers a real file has claimed).
+#
+# Per "HP-41 Advanced Programming Tips" p.29 (docs/pdfs/
+# hp41-adv-prog-tips.pdf): for an N-device XM system, available =
+# raw - N (one link register per device, already excluded from
+# XM_RAW_REGISTERS above) - 1 (the shared FF sentinel), and EMDIR itself
+# reports 2 less than that. Confirmed against a real DM41L: a
+# freshly-cleared XM (0 files) reports 362 registers available via
+# EMDIR, matching XM_RAW_REGISTERS(365) - 1 (sentinel) - 2 (EMDIR's
+# next-file reserve) for the DM41L's 2-device configuration (the
+# built-in Extended Functions Module plus one Extended Memory module).
+XM_EOM_SENTINEL_REGISTERS = 1
+XM_NEXT_FILE_RESERVE_REGISTERS = 2
+XM_TOTAL_REGISTERS = (
+    XM_RAW_REGISTERS - XM_EOM_SENTINEL_REGISTERS - XM_NEXT_FILE_RESERVE_REGISTERS
 )
 
 CARD_FG = ("gray92", "gray17")
@@ -298,11 +341,25 @@ class OverviewTab(ctk.CTkScrollableFrame):
             r00 = None  # No real dump loaded yet -- see gui/memory_ranges.py.
 
         try:
-            xm = ExtendedMemory(self._memory, address_range=[0x40, 0x3FF])
-            xm_count = len(xm.list_files())
-            xm_text = str(xm_count)
+            xm = ExtendedMemory(self._memory, address_range=[0x40, 0x2EF])
+            xm_files = xm.list_files()
+            xm_text = str(len(xm_files))
+            xm_used = sum(f.num_registers + XM_FILE_OVERHEAD_REGISTERS for f in xm_files)
+            # xm_used can legitimately exceed XM_TOTAL_REGISTERS: that
+            # constant already has EMDIR's next-file reserve subtracted
+            # out (see its definition above), and a real file's own
+            # header+name overhead is exactly what eats into that
+            # reserve once the file actually exists. Clamp the
+            # free/percentage figures rather than showing negative
+            # numbers -- a real DM41L would report 0 free (and refuse
+            # new files), never a negative count.
+            xm_free = max(0, XM_TOTAL_REGISTERS - xm_used)
+            xm_used_pct = min(100, round(100 * xm_used / XM_TOTAL_REGISTERS))
+            xm_used_text = f"{xm_used}/{XM_TOTAL_REGISTERS} registers ({xm_used_pct}%)"
+            xm_free_text = f"{xm_free}/{XM_TOTAL_REGISTERS} registers ({100 - xm_used_pct}%)"
         except DM41LMemoryError as e:
             xm_text = f"could not be listed ({e})"
+            xm_used_text = xm_free_text = "unknown"
 
         rows = []
         if r00 is not None:
@@ -320,6 +377,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
                 )
             )
         rows.append(("Extended-memory files", xm_text))
+        rows.append(("XM memory used", xm_used_text))
+        rows.append(("XM memory free", xm_free_text))
 
         for i, (label, value) in enumerate(rows, start=1):
             ctk.CTkLabel(self._summary_frame, text=f"{label}:", anchor="w").grid(
