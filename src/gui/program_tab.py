@@ -24,11 +24,14 @@ but view-only: there's no way yet to decode a program's actual instruction
 bytes, so there's nothing here to edit, add, or remove.
 """
 
+import logging
 import customtkinter as ctk
 
 from memory import Memory
 from gui.scroll_support import bind_touchpad_scroll
 from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
+
+logger = logging.getLogger(__name__)
 
 
 class ProgramTab(ctk.CTkFrame):
@@ -78,6 +81,7 @@ class ProgramTab(ctk.CTkFrame):
         try:
             programs = memory.list_programs()
         except Exception as e:
+            logger.warning("Could not list programs: %s", e)
             self._header_label.configure(text=f"Could not list programs: {e}")
             return
 

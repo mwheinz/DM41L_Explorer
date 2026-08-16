@@ -6,12 +6,15 @@ not created or edited here -- there's still real research to do on program
 storage before it's safe to write program bytes from this tool.
 """
 
+import logging
 import platform
 from tkinter import messagebox
 import customtkinter as ctk
 
 from memory import ExtendedMemory
 from gui.tab_common import MONOSPACE_FONT_FAMILY
+
+logger = logging.getLogger(__name__)
 
 PLATFORM_SYSTEM = platform.system()
 
@@ -113,6 +116,7 @@ class XMFileDialog(ctk.CTkToplevel):
     def _on_save_clicked(self):
         name = self._name_var.get().strip()
         if not name or len(name) > 7:
+            logger.warning("Invalid XM file name %r: must be 1-7 characters.", name)
             messagebox.showerror(
                 "Invalid Name", "File name must be 1-7 characters."
             )
@@ -120,6 +124,7 @@ class XMFileDialog(ctk.CTkToplevel):
         try:
             name.encode("ascii")
         except UnicodeEncodeError:
+            logger.warning("Invalid XM file name %r: not plain ASCII.", name)
             messagebox.showerror("Invalid Name", "File name must be plain ASCII.")
             return
 
@@ -142,6 +147,7 @@ class XMFileDialog(ctk.CTkToplevel):
                     r.encode("ascii")
                 self._on_save(name, ExtendedMemory.TYPE_ASCII, {"records": records})
         except (ValueError, UnicodeEncodeError) as e:
+            logger.warning("Invalid XM file content for %r: %s", name, e)
             messagebox.showerror("Invalid Content", str(e))
             return
 

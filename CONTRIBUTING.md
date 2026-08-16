@@ -49,6 +49,54 @@ black src
 There's no CI enforcement of this yet, but please run it before
 submitting so diffs stay clean and reviewable.
 
+## Logging
+
+Every module should get its own logger, right after its imports:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+```
+
+Always `__name__`, never the root logger directly — that's what makes a
+log line traceable back to the module that wrote it (`gui.hex_view_tab`,
+`memory.registers`, etc.) once more than a couple of modules are writing
+to the same file. `gui/app.py`'s `_setup_logging()` attaches the one
+handler everything shares (a rotating file at the location and level set
+in Preferences); modules never configure their own handlers.
+
+Pick a level by what the record means, not by habit:
+
+- **DEBUG** — internal detail only useful while actively debugging (raw
+  serial bytes, state-machine transitions, an exception that was caught
+  and handled as an expected, no-op case — e.g. "no dump loaded yet").
+- **INFO** — a normal lifecycle event a user could plausibly want to see
+  in their own log: connect/disconnect, a dump loaded or saved, an XM
+  file added/edited/removed, a register or flag edited, preferences
+  saved.
+- **WARNING** — something unexpected happened but the app recovered on
+  its own and kept going (a bad log directory fell back to the home
+  directory, a user typed an invalid value that got rejected).
+- **ERROR** — an operation the user asked for failed and was surfaced to
+  them via a dialog. **Every `messagebox.showerror(...)` call should
+  have a `logger.error(...)` or `logger.exception(...)` right next to
+  it** (use `logger.exception(...)` inside an `except` block so the
+  traceback gets captured) — the dialog tells the user something broke,
+  the log records enough detail to diagnose *why* after the fact. This
+  is the rule most worth remembering: a new error dialog with no log
+  call next to it is the single most common way this codebase drifts
+  back into inconsistent logging.
+- **CRITICAL** — reserved for failures serious enough to abort a whole
+  run loop (see `serial_manager.py`'s read-thread crash handling).
+
+The data/model layer (`src/memory/`) deliberately has no loggers of its
+own — it raises (`ValueError`/`DM41LMemoryError`) rather than swallowing,
+so logging happens exactly once, at whichever GUI code catches the
+exception and decides how to present it to the user. Keep that
+separation: don't add a `logger.error()` call in `memory/*.py` right
+before a `raise` — let the catching code log it instead.
+
 ## Making changes
 
 - Keep pull requests focused — one bug fix or one feature per PR is

@@ -2,6 +2,7 @@
 XM Files tab: view, add, edit, and remove extended-memory files.
 """
 
+import logging
 from tkinter import messagebox
 import customtkinter as ctk
 
@@ -9,6 +10,8 @@ from memory import Memory, ExtendedMemory, DM41LMemoryError
 from gui.xm_file_dialog import XMFileDialog
 from gui.scroll_support import bind_touchpad_scroll
 from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
+
+logger = logging.getLogger(__name__)
 
 
 class XMFilesTab(ctk.CTkFrame):
@@ -50,6 +53,7 @@ class XMFilesTab(ctk.CTkFrame):
         try:
             files = self._xm().list_files()
         except DM41LMemoryError as e:
+            logger.warning("Could not list XM files: %s", e)
             self._header_label.configure(text=f"Could not list XM files: {e}")
             return
 
@@ -150,6 +154,11 @@ class XMFilesTab(ctk.CTkFrame):
                 )
                 return f"{f.byte_length} instruction bytes, checksum {status}"
         except Exception as e:
+            # Expected for a file whose content doesn't fit the shape its
+            # own type nibble claims (e.g. a corrupt or hand-edited dump)
+            # -- shown inline in the Preview column rather than a popup,
+            # so this is a DEBUG detail, not a WARNING-worthy event.
+            logger.debug("Could not decode preview for XM file: %s", e)
             return f"(could not decode: {e})"
         return ""
 
@@ -164,8 +173,10 @@ class XMFilesTab(ctk.CTkFrame):
             try:
                 self._xm().add_file(name, file_type, **kwargs)
             except (ValueError, DM41LMemoryError) as e:
+                logger.warning("Could not add XM file %r: %s", name, e)
                 messagebox.showerror("Could Not Add File", str(e))
                 return
+            logger.info("XM file added: %r (%s)", name, file_type)
             self._notify_change()
             self.render(self._memory)
 
@@ -176,6 +187,7 @@ class XMFilesTab(ctk.CTkFrame):
         files = xm.list_files()
         existing = next((f for f in files if f.header_addr == header_addr), None)
         if existing is None:
+            logger.warning("Edit requested for XM file at 0x%03x, but it no longer exists.", header_addr)
             messagebox.showerror("Not Found", "That file no longer exists.")
             self.render(self._memory)
             return
@@ -191,8 +203,10 @@ class XMFilesTab(ctk.CTkFrame):
                 xm2.remove_file(header_addr)
                 xm2.add_file(name, file_type, **kwargs)
             except (ValueError, DM41LMemoryError) as e:
+                logger.warning("Could not save XM file %r: %s", name, e)
                 messagebox.showerror("Could Not Save File", str(e))
                 return
+            logger.info("XM file edited: %r (%s)", name, file_type)
             self._notify_change()
             self.render(self._memory)
 
@@ -206,7 +220,9 @@ class XMFilesTab(ctk.CTkFrame):
         try:
             self._xm().remove_file(header_addr)
         except DM41LMemoryError as e:
+            logger.warning("Could not remove XM file %r: %s", name, e)
             messagebox.showerror("Could Not Remove File", str(e))
             return
+        logger.info("XM file removed: %r", name)
         self._notify_change()
         self.render(self._memory)

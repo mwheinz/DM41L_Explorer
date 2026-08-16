@@ -4,6 +4,7 @@ DM41L Explorer: a CustomTkinter GUI for DM41L_Explorer.
 """
 
 import logging
+import logging.handlers
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -43,7 +44,46 @@ ENGINE_POLL_MS = 50
 
 PLATFORM_SYSTEM = platform.system()
 
-logger = logging.getLogger("DM41L Explorer")
+logger = logging.getLogger(__name__)
+
+# Cap the log file at 2MB with 3 rotated backups (dm41l_explorer.log,
+# .log.1, .log.2, .log.3 -- ~8MB worst case) so a long-running session
+# (or a chatty DEBUG level left on by mistake) can't grow the file
+# unbounded the way the previous plain FileHandler did.
+LOG_FILE_MAX_BYTES = 2 * 1024 * 1024
+LOG_FILE_BACKUP_COUNT = 3
+
+# --- Logging model -----------------------------------------------------
+# Every module gets its own logger via `logging.getLogger(__name__)` at
+# import time (never the root logger directly) -- log records then carry
+# the originating module's dotted path (e.g. "gui.hex_view_tab") for
+# free, which is what makes a shared log file navigable once more than a
+# couple of modules are writing to it. See CONTRIBUTING.md's "Logging"
+# section for the full writeup; the short version, by level:
+#   DEBUG    Internal detail only useful while actively debugging (raw
+#            serial bytes, state-machine transitions, expected/no-op
+#            exceptions swallowed during defensive rendering).
+#   INFO     Normal lifecycle events a user could plausibly want to see
+#            in their own log: connect/disconnect, a dump loaded/saved,
+#            an XM file added/edited/removed, a register edited,
+#            preferences saved.
+#   WARNING  Something unexpected happened but the app recovered on its
+#            own and kept going (e.g. an invalid log directory fell back
+#            to the home directory; a malformed preference value was
+#            ignored).
+#   ERROR    An operation the user asked for failed and was surfaced to
+#            them via a dialog. Every `messagebox.showerror(...)` call
+#            in this codebase should be paired with a `logger.error(...)`
+#            or `logger.exception(...)` (inside an `except` block, to
+#            capture the traceback) right next to it -- the dialog tells
+#            the user something broke, the log records enough to
+#            diagnose *why* after the fact.
+#   CRITICAL Reserved for failures serious enough to abort a whole run
+#            loop (see serial_manager.py's read-thread crash handling).
+# The data/model layer (memory/*.py) deliberately has no loggers of its
+# own -- it raises (ValueError/DM41LMemoryError) rather than swallowing,
+# so logging happens exactly once, at whichever GUI boundary catches the
+# exception and decides how to present it to the user.
 
 
 def _setup_logging(config_store):
@@ -52,11 +92,23 @@ def _setup_logging(config_store):
     log_dir = config_store.log_directory
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
-    except OSError:
+    except OSError as e:
+        # Falls back rather than raising -- a bad configured log
+        # directory shouldn't prevent the app from starting at all, just
+        # log to the default location instead. Logged as a warning (not
+        # an error) once the fallback handler below is attached; nothing
+        # is lost, just redirected.
+        logger.warning("Could not use log directory %s (%s); falling back to %s", log_dir, e, Path.home())
         log_dir = Path.home()
     log_file = log_dir / "dm41l_explorer.log"
 
-    file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        mode="a",
+        encoding="utf-8",
+        maxBytes=LOG_FILE_MAX_BYTES,
+        backupCount=LOG_FILE_BACKUP_COUNT,
+    )
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     )
@@ -67,6 +119,7 @@ def _setup_logging(config_store):
         root_logger.removeHandler(handler)
     root_logger.setLevel(level)
     root_logger.addHandler(file_handler)
+    logger.info("Logging configured: level=%s, file=%s", config_store.logging_level, log_file)
 
 
 def _apply_font_prefs(config_store):
@@ -611,8 +664,10 @@ class DM41LExplorerApp(ctk.CTk):
             self.memory.to_file(self.memory_source)
             self.dirty = False
             self._modified_label.configure(text="")
+            logger.info("Dump saved to %s", self.memory_source)
             messagebox.showinfo("Saved", f"Memory dump written to {self.memory_source}")
         except Exception as e:
+            logger.exception("Could not save dump to %s", self.memory_source)
             messagebox.showerror("Error", f"Could not save dump: {e}")
 
     def save_dump_as(self):
@@ -628,8 +683,10 @@ class DM41LExplorerApp(ctk.CTk):
             self.dirty = False
             self._modified_label.configure(text="")
             self._update_source_label()
+            logger.info("Dump saved to %s", path)
             messagebox.showinfo("Saved", f"Memory dump written to {path}")
         except Exception as e:
+            logger.exception("Could not save dump to %s", path)
             messagebox.showerror("Error", f"Could not save dump: {e}")
 
     def load_dump_from_file(self):
@@ -661,7 +718,9 @@ class DM41LExplorerApp(ctk.CTk):
             self._render_tabs()
             name = Path(path).name
             self._set_status(f"Loaded dump from {name}")
+            logger.info("Dump loaded from %s", path)
         except Exception as e:
+            logger.exception("Could not load dump from %s", path)
             messagebox.showerror("Error", f"Could not load dump: {e}")
 
     def open_dump_file(self, path):
@@ -676,6 +735,7 @@ class DM41LExplorerApp(ctk.CTk):
         Document" AppleEvent for double-clicking a .dm41 file while the
         app is already running (see `_on_mac_open_document` below)."""
         if not Path(path).exists():
+            logger.warning("Could not find file: %s", path)
             messagebox.showerror("Error", f"Could not find file: {path}")
             return
         if self.dirty and not messagebox.askyesno(
@@ -808,7 +868,12 @@ def _handle_startup_file_arg(app):
 
 def main():
     app = DM41LExplorerApp()
-    logger.debug(main.__name__)
+    logger.info(
+        "DM41L Explorer %s starting (Python %s, %s)",
+        _version,
+        platform.python_version(),
+        platform.platform(),
+    )
     app.protocol("WM_DELETE_WINDOW", app.on_close)
     _handle_startup_file_arg(app)
     app.mainloop()

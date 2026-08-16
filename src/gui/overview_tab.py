@@ -3,6 +3,7 @@ Overview tab: status registers, the R00/.END. partition, and a summary of
 how memory is divided up. Flags live in their own tab (gui/flags_tab.py).
 """
 
+import logging
 from tkinter import messagebox
 import customtkinter as ctk
 
@@ -10,6 +11,8 @@ from memory import Memory, StatusRegisters, ExtendedMemory, DM41LMemoryError, XM
 from gui.memory_ranges import MIN_SANE_R00
 from gui.scroll_support import bind_touchpad_scroll
 from gui.tab_common import MONOSPACE_FONT_FAMILY
+
+logger = logging.getLogger(__name__)
 
 # Registers 0x0c1-0x1ff are the addressable main-memory range (0x0c0 is Key
 # Assignments); PRIMARY_DATA_END (0x1ff) is main memory's top boundary, so
@@ -252,6 +255,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             dot_end = self._memory.DotEnd()
             sigma_reg = self._memory.SigmaReg()
         except Exception as e:
+            logger.warning("Could not decode register c: %s", e)
             ctk.CTkLabel(
                 self._partition_frame, text=f"Could not decode register c: {e}"
             ).grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
@@ -301,6 +305,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         try:
             value = int(text, 16) if text.lower().startswith("0x") else int(text, 16)
         except ValueError:
+            logger.warning("Invalid R00 entry: %r", text)
             messagebox.showerror("Invalid R00", f"'{text}' is not a valid hex address.")
             return
 
@@ -317,9 +322,11 @@ class OverviewTab(ctk.CTkScrollableFrame):
         try:
             self._memory.set_R00(value)
         except ValueError as e:
+            logger.warning("Could not set R00 to 0x%03x: %s", value, e)
             messagebox.showerror("Invalid R00", str(e))
             return
 
+        logger.info("R00 changed to 0x%03x", value)
         self._notify_change()
         self.render(self._memory)
 
@@ -334,7 +341,10 @@ class OverviewTab(ctk.CTkScrollableFrame):
         try:
             r00 = self._memory.R00()
             dot_end = self._memory.DotEnd()
-        except Exception:
+        except Exception as e:
+            # Expected whenever no real dump is loaded yet (a fresh empty
+            # buffer has no sane R00/.END.) -- routine, not warning-worthy.
+            logger.debug("Could not read R00/.END. for summary: %s", e)
             r00 = dot_end = None
 
         if r00 is not None and r00 < MIN_SANE_R00:
@@ -358,6 +368,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             xm_used_text = f"{xm_used}/{XM_TOTAL_REGISTERS} registers ({xm_used_pct}%)"
             xm_free_text = f"{xm_free}/{XM_TOTAL_REGISTERS} registers ({100 - xm_used_pct}%)"
         except DM41LMemoryError as e:
+            logger.warning("Could not list XM files for summary: %s", e)
             xm_text = f"could not be listed ({e})"
             xm_used_text = xm_free_text = "unknown"
 

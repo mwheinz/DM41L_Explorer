@@ -5,9 +5,12 @@ a built-in copy of the same table if the docs file can't be found or
 parsed, so the Overview tab still works from a packaged install.
 """
 
+import logging
 import re
 from pathlib import Path
 from typing import Dict
+
+logger = logging.getLogger(__name__)
 
 # Two levels up from src/gui/flags_doc.py is the project root.
 DOCS_FLAGS_PATH = Path(__file__).resolve().parents[2] / "docs" / "flags.md"
@@ -52,7 +55,8 @@ def load_flag_names(path: Path = DOCS_FLAGS_PATH) -> Dict[int, str]:
     names: Dict[int, str] = {}
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except OSError as e:
+        logger.warning("Could not read %s, using built-in flag names: %s", path, e)
         return dict(_FALLBACK_FLAG_NAMES)
 
     for line in text.splitlines():
@@ -64,6 +68,7 @@ def load_flag_names(path: Path = DOCS_FLAGS_PATH) -> Dict[int, str]:
         names[int(b)] = desc_b
 
     if not names:
+        logger.warning("%s did not contain a parseable flag table, using built-in flag names.", path)
         return dict(_FALLBACK_FLAG_NAMES)
 
     # Fill in anything the docs table didn't cover with the fallback, so a

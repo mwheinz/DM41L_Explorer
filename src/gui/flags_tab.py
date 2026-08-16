@@ -3,12 +3,15 @@ Flags tab: the 56 user/system flags (register d, 0x0e), editable, with
 names loaded live from docs/flags.md.
 """
 
+import logging
 import customtkinter as ctk
 
 from memory import Memory
 from gui.flags_doc import load_flag_names
 from gui.scroll_support import bind_touchpad_scroll
 from gui.tab_common import build_tab_header
+
+logger = logging.getLogger(__name__)
 
 FLAG_COUNT = 56
 
@@ -55,6 +58,7 @@ class FlagsTab(ctk.CTkFrame):
         try:
             current = memory.get_all_flags()
         except Exception as e:
+            logger.warning("Could not decode flags: %s", e)
             self._header_label.configure(text=f"Could not decode flags: {e}")
             return
 
@@ -88,4 +92,5 @@ class FlagsTab(ctk.CTkFrame):
             return
         value = self._flag_vars[n].get()
         self._memory.set_flag(n, value)
+        logger.info("Flag %02d set to %s", n, value)
         self._notify_change()

@@ -18,12 +18,15 @@ top-to-bottom listing, and the whole point here is seeing color bands
 transition as you scroll through it.
 """
 
+import logging
 from tkinter import ttk
 import customtkinter as ctk
 
 from memory import Memory
 from gui.memory_ranges import MIN_SANE_R00
 from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY
+
+logger = logging.getLogger(__name__)
 
 # The full addressable range this tab displays. Per docs/memory.md section
 # 3/4: Status Registers 0x000-0x00f, an unused/"void" gap 0x010-0x03f,
@@ -171,8 +174,10 @@ class HexViewTab(ctk.CTkFrame):
         style = ttk.Style()
         try:
             style.theme_use("clam")
-        except Exception:
-            pass
+        except Exception as e:
+            # "clam" ships with every Tcl/Tk this project supports; this
+            # is a defensive fallback, not something expected to fire.
+            logger.debug("Could not switch ttk theme to 'clam': %s", e)
         dark = ctk.get_appearance_mode() == "Dark"
         bg = "#2b2b2b" if dark else "#f4f4f4"
         field_bg = "#242424" if dark else "#ffffff"
@@ -264,7 +269,10 @@ class HexViewTab(ctk.CTkFrame):
         try:
             r00 = memory.R00()
             dot_end = memory.DotEnd()
-        except Exception:
+        except Exception as e:
+            # Expected whenever no real dump is loaded yet -- see the
+            # identical pattern in overview_tab.py's _render_summary().
+            logger.debug("Could not read R00/.END. for hex view: %s", e)
             r00 = dot_end = 0
 
         has_partition = r00 >= MIN_SANE_R00 and dot_end <= r00

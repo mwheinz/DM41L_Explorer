@@ -11,6 +11,7 @@ macOS trackpad scroll events correctly on its own, so it doesn't need the
 CTkScrollableFrame workaround in gui/scroll_support.py.
 """
 
+import logging
 from tkinter import ttk, messagebox
 import customtkinter as ctk
 
@@ -18,6 +19,8 @@ from memory import Memory, Register, PRIMARY_DATA_END
 from gui.register_edit_dialog import RegisterEditDialog
 from gui.memory_ranges import MIN_SANE_R00
 from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
+
+logger = logging.getLogger(__name__)
 
 
 class DataRegistersTab(ctk.CTkFrame):
@@ -124,8 +127,11 @@ class DataRegistersTab(ctk.CTkFrame):
         style = ttk.Style()
         try:
             style.theme_use("clam")
-        except Exception:
-            pass
+        except Exception as e:
+            # "clam" ships with every Tcl/Tk this project supports; this
+            # is a defensive fallback, not something expected to fire --
+            # see the identical pattern in hex_view_tab.py.
+            logger.debug("Could not switch ttk theme to 'clam': %s", e)
         dark = ctk.get_appearance_mode() == "Dark"
         bg = stripe_bg_color()
         field_bg = "#242424" if dark else "#ffffff"
@@ -213,6 +219,7 @@ class DataRegistersTab(ctk.CTkFrame):
         try:
             r00 = memory.R00()
         except Exception as e:
+            logger.warning("Could not determine R00: %s", e)
             self._header_label.configure(text=f"Could not determine R00: {e}")
             return
 
@@ -274,6 +281,7 @@ class DataRegistersTab(ctk.CTkFrame):
 
         def save(new_register: Register):
             self._memory.set_register(addr, new_register)
+            logger.info("Register 0x%03x edited: %s", addr, new_register)
             self._notify_change()
             self.render(self._memory)
             tree = self._tree_left if str(addr) in \

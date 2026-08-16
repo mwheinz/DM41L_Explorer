@@ -3,11 +3,14 @@ Preferences dialog: default serial port/baud/timeout, logging, appearance,
 and font.
 """
 
+import logging
 import platform
 from pathlib import Path
 from tkinter import filedialog, messagebox
 import tkinter.font as tkfont
 import customtkinter as ctk
+
+logger = logging.getLogger(__name__)
 
 PLATFORM_SYSTEM = platform.system()
 
@@ -200,6 +203,7 @@ class PreferencesDialog(ctk.CTkToplevel):
         try:
             Path(log_dir_str).expanduser().mkdir(parents=True, exist_ok=True)
         except OSError as e:
+            logger.warning("Could not use log directory %r: %s", log_dir_str, e)
             messagebox.showerror(
                 "Invalid Log Directory",
                 f"Could not use '{log_dir_str}' for logs: {e}",
@@ -210,8 +214,12 @@ class PreferencesDialog(ctk.CTkToplevel):
         try:
             self._config.baudrate = int(self._baud_var.get())
             self._config.console_timeout_minutes = int(self._timeout_var.get())
-        except ValueError:
-            pass
+        except ValueError as e:
+            # Silently discarded, matching this dialog's existing
+            # behavior (no messagebox for these two fields) -- logged so
+            # a preference that silently failed to save is at least
+            # visible after the fact instead of leaving no trace at all.
+            logger.warning("Invalid baud rate or console timeout, not saved: %s", e)
         self._config.logging_level = self._log_level_var.get()
         self._config.appearance_mode = self._appearance_var.get()
         family_choice = self._font_family_var.get()
@@ -221,11 +229,12 @@ class PreferencesDialog(ctk.CTkToplevel):
             self._config.font_size = (
                 0 if size_choice == FONT_SIZE_DEFAULT_LABEL else int(size_choice)
             )
-        except ValueError:
-            pass
+        except ValueError as e:
+            logger.warning("Invalid font size %r, not saved: %s", size_choice, e)
         self._config.log_directory = log_dir_str
 
         self._config.save()
+        logger.info("Preferences saved.")
 
         if self._on_saved:
             self._on_saved()

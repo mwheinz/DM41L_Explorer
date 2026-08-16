@@ -3,12 +3,15 @@ Modal dialog for editing a single data register as a number, short alpha
 text, or raw hex.
 """
 
+import logging
 import platform
 from tkinter import messagebox
 import customtkinter as ctk
 
 from memory import Register
 from gui.tab_common import MONOSPACE_FONT_FAMILY
+
+logger = logging.getLogger(__name__)
 
 PLATFORM_SYSTEM = platform.system()
 
@@ -134,6 +137,7 @@ class RegisterEditDialog(ctk.CTkToplevel):
                         f"Expected 14 hex characters (7 bytes), got {reg.size} bytes."
                     )
         except (ValueError, UnicodeEncodeError) as e:
+            logger.warning("Invalid register value on %s tab: %s", which, e)
             messagebox.showerror("Invalid Value", str(e))
             return
 

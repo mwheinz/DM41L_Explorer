@@ -3,7 +3,10 @@ Centralized configuration for DM41L_Explorer.
 """
 
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectConfig:
@@ -40,6 +43,7 @@ class ProjectConfig:
                     loaded_data = json.load(f)
                     prefs.update(loaded_data)
         except Exception as e:
+            logger.warning("Could not load preferences from %s: %s", self.PREFS_FILE, e)
             raise Exception(
                 f"Warning: Could not load preferences from {self.PREFS_FILE}: {e}"
             )
@@ -55,6 +59,7 @@ class ProjectConfig:
             with open(self.PREFS_FILE, "w", encoding="utf-8") as f:
                 json.dump(self._prefs, f, indent=2)
         except Exception as e:
+            logger.error("Could not save preferences to %s: %s", self.PREFS_FILE, e)
             raise Exception(
                 f"Error: Could not save preferences to {self.PREFS_FILE}: {e}"
             )

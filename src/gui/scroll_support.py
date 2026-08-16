@@ -22,7 +22,10 @@ a Linux sandbox). Non-macOS platforms fall back to whatever normal
 built in, so this is skipped there rather than guessed at.
 """
 
+import logging
 import platform
+
+logger = logging.getLogger(__name__)
 
 PLATFORM_SYSTEM = platform.system()
 
@@ -61,7 +64,7 @@ def bind_touchpad_scroll(scrollable_frame):
     # itself -- so a plain instance-level bind() would frequently miss it.
     try:
         scrollable_frame.bind_all("<TouchpadScroll>", _trackpad_scroll, add="+")
-    except Exception:
+    except Exception as e:
         # Defensive: some Tk/Aqua build without this virtual event
         # shouldn't take the whole app down over a scroll nicety.
-        pass
+        logger.debug("Could not bind <TouchpadScroll>: %s", e)
