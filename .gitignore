@@ -2,7 +2,7 @@
 **/__pycache__/**
 data/*
 docs/pdfs
-resources/MyIcon.icns
+resources/MyIcon.*
 src/build/**
 src/dist/**
 src/dm41lversion.py
