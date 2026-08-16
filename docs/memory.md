@@ -267,23 +267,45 @@ the same position — nibbles 11-13 (the low nibble of byte 5, plus all of byte
 (12-bit) field, up to 0xFFF = 4095**.
 
 * **Program** (saved program/app): `10000000BBBSSS`
-  - Nibble 0 = `1` (type). Nibbles 1-7 are a **fixed `0x10 00 00 00` signature** (bytes 0-3 of the register) — this is the one header field, across all three types, confirmed reliable enough to use as a structural fingerprint on its own (see §4.4).
-  - `BBB` (nibbles 8-10): length of the program's instruction bytes, **not including the trailing checksum byte**.
+  - Nibble 0 = `1` (type). Nibbles 1-7 are a **fixed `0x10 00 00 00`
+    signature** (bytes 0-3 of the register) — this is the one header field,
+    across all three types, confirmed reliable enough to use as a structural
+    fingerprint on its own (see §4.4).
+  - `BBB` (nibbles 8-10): length of the program's instruction bytes, **not
+    including the trailing checksum byte**.
   - `SSS` (nibbles 11-13): length of the file in registers.
-  - The program's raw bytes occupy the `SSS` registers below the header, read nearest-header-first (i.e. descending address, same convention as Data/ASCII data registers). Concatenating those registers gives a byte stream of exactly `SSS * 7` bytes; the first `BBB` bytes are the instruction bytes, and the byte immediately after them is a **modulo-256 checksum of those `BBB` bytes**.
-  - The saved-program's *name* register (7 ASCII characters, space-padded like Data/ASCII names) sits immediately above the header, following the same "name register above header register" convention as Data/ASCII files.
+  - The program's raw bytes occupy the `SSS` registers below the header, read
+    nearest-header-first (i.e. descending address, same convention as
+    Data/ASCII data registers). Concatenating those registers gives a byte
+    stream of exactly `SSS * 7` bytes; the first `BBB` bytes are the
+    instruction bytes, and the byte immediately after them is a **modulo-256
+    checksum of those `BBB` bytes**.
+  - The saved-program's *name* register (7 ASCII characters, space-padded like
+    Data/ASCII names) sits immediately above the header, following the same
+    "name register above header register" convention as Data/ASCII files.
 
 * **Data**: `2AAA0000RRRSSS`
-  - `AAA` (nibbles 1-3): the header's own address — confirmed reliable, see §4.4.
-  - `RRR` (nibbles 8-10): documented as "address of the current record of the file". Registers in a data file are numbered from 0, with register zero being the register immediately below the name register.
+  - `AAA` (nibbles 1-3): the header's own address — confirmed reliable, see
+    §4.4.
+  - `RRR` (nibbles 8-10): documented as "address of the current record of the
+    file". Registers in a data file are numbered from 0, with register zero
+    being the register immediately below the name register.
   - `SSS` (nibbles 11-13): length of the file in registers, per §4.3 above.
 
 * **ASCII**: `3AAA00CCRRRSSS`
   - `AAA` (nibbles 1-3): the header's own address, same as Data — see §4.4.
-  - `CC` (nibbles 6-7): documented as pointing to a character within the current register.
+  - `CC` (nibbles 6-7): documented as pointing to a character within the
+    current register.
   - `RRR` (nibbles 8-10): documented as pointing to the current register.
   - `SSS` (nibbles 11-13): length of the file in registers, per §4.3 above.
-  - ASCII file *contents* are packed as a byte stream across the file's data registers (nearest-header-first, concatenated in normal left-to-right byte order): a series of `[1-byte length][text bytes]` records back-to-back with no padding between them. **Confirmed** (by comparing a real DM41L-created 2-record file against a hand-packed one that used a `0x00` terminator and was rejected by the calculator): the record stream is terminated by a `0xFF` length byte, matching the same "`0xFF` marks free/end" convention as elsewhere in this format (see §4.5) — not by a `0x00` length byte.
+  - ASCII file *contents* are packed as a byte stream across the file's data
+    registers (nearest-header-first, concatenated in normal left-to-right byte
+    order): a series of `[1-byte length][text bytes]` records back-to-back with
+    no padding between them. **Confirmed** (by comparing a real DM41L-created
+    2-record file against a hand-packed one that used a `0x00` terminator and
+    was rejected by the calculator): the record stream is terminated by a
+    `0xFF` length byte, matching the same "`0xFF` marks free/end" convention as
+    elsewhere in this format (see §4.5) — not by a `0x00` length byte.
 
 ### 4.5 File Boundaries, Free Space, and Open Questions
 
