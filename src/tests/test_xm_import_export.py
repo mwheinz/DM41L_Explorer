@@ -464,7 +464,9 @@ def test_data_registers_import_rejects_wrong_line_count(root, tmp_path, monkeypa
     assert after == before
 
 
-def test_data_registers_import_rejects_invalid_line_with_line_number(root, tmp_path, monkeypatch):
+def test_data_registers_import_rejects_invalid_line_with_line_number(
+    root, tmp_path, monkeypatch, caplog
+):
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
     tab = DataRegistersTab(root)
     tab.render(memory)
@@ -484,8 +486,18 @@ def test_data_registers_import_rejects_invalid_line_with_line_number(root, tmp_p
         messagebox, "showerror", lambda title, msg: errors.append((title, msg))
     )
 
-    tab._import_registers()
+    with caplog.at_level("ERROR"):
+        tab._import_registers()
 
     assert errors and "Line 3" in errors[0][1]
     after = [memory.get_register(a).get_hex() for a in range(r00, r00 + count)]
     assert after == before
+
+    # Regression: every messagebox.showerror() in this codebase is
+    # supposed to be paired with a logger.error()/logger.exception() call
+    # (see gui/app.py's logging-level policy comment) -- this path was
+    # missing one until now.
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelname == "ERROR"
+    assert "line 3" in caplog.records[0].message
+    assert "TOOLONGTEXTVALUE" in caplog.records[0].message

@@ -360,6 +360,7 @@ class DataRegistersTab(ctk.CTkFrame):
             try:
                 new_registers.append(parse_data_line(line))
             except ValueError as e:
+                logger.error("Could not import %s: line %d (%r): %s", path, i, line, e)
                 messagebox.showerror("Invalid Content", f"Line {i} ({line!r}): {e}")
                 return
 
