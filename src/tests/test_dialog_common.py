@@ -1,0 +1,164 @@
+"""
+Tests for gui/dialog_common.py's build_dialog_button_row() -- GitHub issue
+#13 (consistent Cancel-left/primary-right/extras-centered button placement,
+plus Return triggering the "default" primary action).
+
+Requires a real Tk display (Xvfb in CI/sandboxes) -- same requirement as
+test_app.py.
+"""
+
+from unittest import mock
+
+import pytest
+
+pytest.importorskip("tkinter")
+pytest.importorskip("customtkinter")
+
+import customtkinter as ctk
+
+from gui.dialog_common import build_dialog_button_row, _is_multiline_text_widget
+
+
+def _buttons_by_text(widget) -> dict:
+    """Walks `widget`'s children (recursively, since extra_buttons live
+    inside their own centering CTkFrame) and returns {button_text:
+    CTkButton}. Restricted to actual CTkButton instances -- other widgets
+    in the tree (CTkFrame, and CTkButton's own internal CTkCanvas) either
+    don't support cget("text") at all or raise for it."""
+    found = {}
+    for child in widget.winfo_children():
+        if isinstance(child, ctk.CTkButton):
+            found[child.cget("text")] = child
+        else:
+            found.update(_buttons_by_text(child))
+    return found
+
+
+@pytest.fixture
+def root():
+    r = ctk.CTk()
+    r.withdraw()
+    yield r
+    r.destroy()
+
+
+@pytest.fixture
+def dialog(root):
+    d = ctk.CTkToplevel(root)
+    yield d
+    if d.winfo_exists():
+        d.destroy()
+
+
+# ---- placement: Cancel left, primary right, extras centered ----
+
+
+def test_cancel_is_left_of_primary(dialog):
+    row, primary = build_dialog_button_row(
+        dialog, primary_text="Save", on_primary=lambda: None,
+    )
+    dialog.update_idletasks()
+    cancel = _buttons_by_text(row)["Cancel"]
+    assert primary.cget("text") == "Save"
+    assert cancel.winfo_x() < primary.winfo_x()
+
+
+def test_extra_buttons_sit_between_cancel_and_primary(dialog):
+    row, primary = build_dialog_button_row(
+        dialog,
+        primary_text="Connect",
+        on_primary=lambda: None,
+        extra_buttons=[("Rescan", lambda: None)],
+    )
+    dialog.update_idletasks()
+    buttons = _buttons_by_text(row)
+    cancel, rescan = buttons["Cancel"], buttons["Rescan"]
+    assert cancel.winfo_x() < rescan.winfo_x() < primary.winfo_x()
+
+
+def test_custom_cancel_text_and_multiple_extra_buttons(dialog):
+    row, primary = build_dialog_button_row(
+        dialog,
+        primary_text="OK",
+        on_primary=lambda: None,
+        cancel_text="Close",
+        extra_buttons=[("Reset", lambda: None), ("Apply", lambda: None)],
+    )
+    dialog.update_idletasks()
+    buttons = _buttons_by_text(row)
+    assert set(buttons) == {"Close", "Reset", "Apply", "OK"}
+    ordered = sorted(buttons.items(), key=lambda kv: kv[1].winfo_x())
+    assert [text for text, _ in ordered] == ["Close", "Reset", "Apply", "OK"]
+
+
+# ---- commands: primary/cancel wiring ----
+
+
+def test_primary_button_invokes_on_primary(dialog):
+    on_primary = mock.Mock()
+    row, primary = build_dialog_button_row(dialog, primary_text="Save", on_primary=on_primary)
+    primary.invoke()
+    on_primary.assert_called_once()
+
+
+def test_cancel_defaults_to_dialog_destroy(dialog):
+    row, primary = build_dialog_button_row(dialog, primary_text="Save", on_primary=lambda: None)
+    cancel = row.winfo_children()[0]
+    assert dialog.winfo_exists()
+    cancel.invoke()
+    assert not dialog.winfo_exists()
+
+
+def test_cancel_uses_explicit_on_cancel_instead_of_destroy(dialog):
+    on_cancel = mock.Mock()
+    row, primary = build_dialog_button_row(
+        dialog, primary_text="Connect", on_primary=lambda: None, on_cancel=on_cancel,
+    )
+    cancel = row.winfo_children()[0]
+    cancel.invoke()
+    on_cancel.assert_called_once()
+    # Explicit on_cancel replaces the default destroy -- the dialog is
+    # still open unless on_cancel itself closes it (matches
+    # PortSelectionDialog's _on_cancel, which does its own grab_release()
+    # + destroy()).
+    assert dialog.winfo_exists()
+
+
+# ---- Return / "default action" ----
+
+
+def test_is_multiline_text_widget_true_for_ctktextbox_internal_text(root):
+    box = ctk.CTkTextbox(root)
+    assert _is_multiline_text_widget(box._textbox) is True
+
+
+def test_is_multiline_text_widget_false_for_entry(root):
+    entry = ctk.CTkEntry(root)
+    assert _is_multiline_text_widget(entry) is False
+
+
+def test_return_on_dialog_triggers_primary_action(dialog):
+    on_primary = mock.Mock()
+    build_dialog_button_row(dialog, primary_text="Save", on_primary=on_primary)
+    dialog.focus_force()
+    dialog.update()
+    dialog.event_generate("<Return>")
+    dialog.update()
+    on_primary.assert_called_once()
+
+
+def test_return_inside_textbox_does_not_trigger_primary_action(dialog):
+    """The scenario the guard exists for: a multi-line CTkTextbox (like
+    XMFileDialog's Data/ASCII editors) needs Return to insert a newline,
+    not submit the dialog."""
+    on_primary = mock.Mock()
+    box = ctk.CTkTextbox(dialog)
+    box.pack()
+    build_dialog_button_row(dialog, primary_text="Save", on_primary=on_primary)
+
+    box._textbox.focus_force()
+    dialog.update()
+    box._textbox.event_generate("<Return>")
+    dialog.update()
+
+    on_primary.assert_not_called()

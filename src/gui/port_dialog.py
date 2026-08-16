@@ -5,6 +5,8 @@ Modal dialog for choosing a serial port to connect to the DM41L.
 import platform
 import customtkinter as ctk
 
+from gui.dialog_common import build_dialog_button_row
+
 PLATFORM_SYSTEM = platform.system()
 
 DIALOG_WIDTH = 420
@@ -51,19 +53,14 @@ class PortSelectionDialog(ctk.CTkToplevel):
 
         self._populate_ports()
 
-        button_row = ctk.CTkFrame(self, fg_color="transparent")
-        button_row.pack(padx=16, pady=(0, 16), fill="x")
-
-        ctk.CTkButton(
-            button_row, text="Rescan", width=90, command=self._populate_ports
-        ).pack(side="left")
-        ctk.CTkButton(
-            button_row, text="Cancel", width=90, command=self._on_cancel
-        ).pack(side="right", padx=(8, 0))
-        self._connect_button = ctk.CTkButton(
-            button_row, text="Connect", width=90, command=self._on_connect
+        _, self._connect_button = build_dialog_button_row(
+            self,
+            primary_text="Connect",
+            on_primary=self._on_connect,
+            on_cancel=self._on_cancel,
+            extra_buttons=[("Rescan", self._populate_ports)],
+            pack_kwargs={"padx": 16, "pady": (0, 16), "fill": "x"},
         )
-        self._connect_button.pack(side="right")
 
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
 

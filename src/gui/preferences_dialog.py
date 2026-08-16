@@ -10,6 +10,8 @@ from tkinter import filedialog, messagebox
 import tkinter.font as tkfont
 import customtkinter as ctk
 
+from gui.dialog_common import build_dialog_button_row
+
 logger = logging.getLogger(__name__)
 
 PLATFORM_SYSTEM = platform.system()
@@ -49,13 +51,11 @@ class PreferencesDialog(ctk.CTkToplevel):
         self._build_connection_tab(tabs.tab("Connection"))
         self._build_logging_tab(tabs.tab("Logging & Appearance"))
 
-        button_row = ctk.CTkFrame(self, fg_color="transparent")
-        button_row.pack(padx=16, pady=(0, 16), fill="x")
-        ctk.CTkButton(button_row, text="Cancel", width=90, command=self.destroy).pack(
-            side="right"
-        )
-        ctk.CTkButton(button_row, text="Save", width=90, command=self._on_save).pack(
-            side="right", padx=(0, 8)
+        build_dialog_button_row(
+            self,
+            primary_text="Save",
+            on_primary=self._on_save,
+            pack_kwargs={"padx": 16, "pady": (0, 16), "fill": "x"},
         )
 
     # -- Connection tab -------------------------------------------------

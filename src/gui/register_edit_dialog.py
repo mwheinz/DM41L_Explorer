@@ -9,6 +9,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from memory import Register
+from gui.dialog_common import build_dialog_button_row
 from gui.tab_common import MONOSPACE_FONT_FAMILY
 
 logger = logging.getLogger(__name__)
@@ -100,13 +101,11 @@ class RegisterEditDialog(ctk.CTkToplevel):
 
         self._tabs = tabs
 
-        button_row = ctk.CTkFrame(self, fg_color="transparent")
-        button_row.pack(padx=16, pady=(8, 16), fill="x")
-        ctk.CTkButton(button_row, text="Cancel", width=90, command=self.destroy).pack(
-            side="right"
-        )
-        ctk.CTkButton(button_row, text="Save", width=90, command=self._on_save_clicked).pack(
-            side="right", padx=(0, 8)
+        build_dialog_button_row(
+            self,
+            primary_text="Save",
+            on_primary=self._on_save_clicked,
+            pack_kwargs={"padx": 16, "pady": (8, 16), "fill": "x"},
         )
 
         self.protocol("WM_DELETE_WINDOW", self.destroy)

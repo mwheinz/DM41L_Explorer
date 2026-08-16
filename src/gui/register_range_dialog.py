@@ -14,6 +14,8 @@ import platform
 from tkinter import messagebox
 import customtkinter as ctk
 
+from gui.dialog_common import build_dialog_button_row
+
 logger = logging.getLogger(__name__)
 
 PLATFORM_SYSTEM = platform.system()
@@ -55,14 +57,12 @@ class RegisterRangeDialog(ctk.CTkToplevel):
         self._end_var = ctk.StringVar(value=str(last))
         ctk.CTkEntry(row, textvariable=self._end_var, width=50).grid(row=0, column=3)
 
-        button_row = ctk.CTkFrame(self, fg_color="transparent")
-        button_row.pack(padx=16, pady=(0, 16), fill="x")
-        ctk.CTkButton(button_row, text="Cancel", width=90, command=self.destroy).pack(
-            side="right"
+        build_dialog_button_row(
+            self,
+            primary_text="Export",
+            on_primary=self._on_confirm_clicked,
+            pack_kwargs={"padx": 16, "pady": (0, 16), "fill": "x"},
         )
-        ctk.CTkButton(
-            button_row, text="Export", width=90, command=self._on_confirm_clicked
-        ).pack(side="right", padx=(0, 8))
 
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
@@ -137,14 +137,12 @@ class RegisterImportLocationDialog(ctk.CTkToplevel):
         self._start_var = ctk.StringVar(value="0")
         ctk.CTkEntry(row, textvariable=self._start_var, width=50).grid(row=0, column=1)
 
-        button_row = ctk.CTkFrame(self, fg_color="transparent")
-        button_row.pack(padx=16, pady=(0, 16), fill="x")
-        ctk.CTkButton(button_row, text="Cancel", width=90, command=self.destroy).pack(
-            side="right"
+        build_dialog_button_row(
+            self,
+            primary_text="Import",
+            on_primary=self._on_confirm_clicked,
+            pack_kwargs={"padx": 16, "pady": (0, 16), "fill": "x"},
         )
-        ctk.CTkButton(
-            button_row, text="Import", width=90, command=self._on_confirm_clicked
-        ).pack(side="right", padx=(0, 8))
 
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 

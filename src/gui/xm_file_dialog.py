@@ -18,6 +18,7 @@ from memory import (
     NAME_MIN_CHAR,
     NAME_MAX_CHAR,
 )
+from gui.dialog_common import build_dialog_button_row
 from gui.tab_common import MONOSPACE_FONT_FAMILY
 
 logger = logging.getLogger(__name__)
@@ -146,13 +147,11 @@ class XMFileDialog(ctk.CTkToplevel):
         self._content_row = 6
         self._on_type_changed(self._type_var.get())
 
-        button_row = ctk.CTkFrame(self, fg_color="transparent")
-        button_row.pack(padx=16, pady=(12, 16), fill="x", side="bottom")
-        ctk.CTkButton(button_row, text="Cancel", width=90, command=self.destroy).pack(
-            side="right"
-        )
-        ctk.CTkButton(button_row, text="Save", width=90, command=self._on_save_clicked).pack(
-            side="right", padx=(0, 8)
+        build_dialog_button_row(
+            self,
+            primary_text="Save",
+            on_primary=self._on_save_clicked,
+            pack_kwargs={"padx": 16, "pady": (12, 16), "fill": "x", "side": "bottom"},
         )
 
     def _on_type_changed(self, value):
