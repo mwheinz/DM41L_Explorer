@@ -252,21 +252,32 @@ def test_xm_import_file_prefills_dialog_and_adds_on_save(root, tmp_path, monkeyp
 
 # ---- _guess_file_type() / import-type-detection regressions ----
 #
-# User-reported bug: importing a genuine ASCII text file (long, prose-like
-# lines -- see tests/data/AS1.005.txt) opened the Add dialog defaulted to
-# "Data", and the lines don't parse as DATA lines (way over the 6-char
-# alpha-text limit, not numbers, no 0x prefix), so saving failed with a
-# DATA-line error even though the user wanted an ASCII file. Two separate
-# fixes: _guess_file_type() below picks a better default, and
-# XMFileDialog pre-fills *both* editors (see the dialog tests above) so
-# switching the type dropdown to correct a wrong guess doesn't lose the
-# imported text either.
+# User-reported bug: importing a genuine ASCII text file (long, punctuated
+# lines -- see tests/data/ALLCHRS.txt, a real XM ASCII-file export) opened
+# the Add dialog defaulted to "Data", and the lines don't parse as DATA
+# lines (way over the 6-char alpha-text limit, not numbers, no 0x prefix),
+# so saving failed with a DATA-line error even though the user wanted an
+# ASCII file. Two separate fixes: _guess_file_type() below picks a better
+# default, and XMFileDialog pre-fills *both* editors (see the dialog tests
+# above) so switching the type dropdown to correct a wrong guess doesn't
+# lose the imported text either.
+#
+# These tests originally used tests/data/AS1.005.txt, an export the user
+# had made from tests/data/manyfiles.dm41's "AS1.005" XM file -- but it was
+# never actually committed (untracked, and not gitignored either) and later
+# went missing from disk entirely, so the tests failed -- and, worse, one
+# of them hung the whole suite: with the file gone, _import_file() below
+# hit a real, unmocked messagebox.showerror() that blocks forever under
+# headless Xvfb. ALLCHRS.txt (already tracked in git, exported from
+# tests/data/allchrs.dm41's "ALLCHRS" XM file the same way) reproduces the
+# same "not valid DATA content" property and won't go missing again.
 
 
 def test_guess_file_type_prose_text_is_ascii():
-    """The exact scenario reported: long, punctuated, prose-like lines
-    aren't valid DATA lines (too long, not numbers, no 0x prefix)."""
-    lines = (DATA_DIR / "AS1.005.txt").read_text(encoding="ascii").splitlines()
+    """The exact scenario reported: long, punctuated lines from a real XM
+    ASCII export aren't valid DATA lines (too long, not numbers, no 0x
+    prefix)."""
+    lines = (DATA_DIR / "ALLCHRS.txt").read_text(encoding="ascii").splitlines()
     assert _guess_file_type(lines) == "ASCII"
 
 
@@ -289,14 +300,15 @@ def test_guess_file_type_one_bad_line_is_enough_for_ascii():
 
 
 def test_xm_import_prose_file_guesses_ascii_and_saves_correctly(root, tmp_path, monkeypatch):
-    """End-to-end regression for the reported bug, using the user's own
-    AS1.005.txt: Import File... must guess ASCII and actually let it save
-    as an ASCII file without the user touching the type dropdown."""
+    """End-to-end regression for the reported bug, using a real ASCII XM
+    export (ALLCHRS.txt): Import File... must guess ASCII and actually let
+    it save as an ASCII file without the user touching the type
+    dropdown."""
     memory = Memory.from_file(DATA_DIR / "empty.dm41")
     tab = XMFilesTab(root)
     tab.render(memory)
 
-    src_path = DATA_DIR / "AS1.005.txt"
+    src_path = DATA_DIR / "ALLCHRS.txt"
     monkeypatch.setattr("gui.xm_files_tab.filedialog.askopenfilename", lambda **k: str(src_path))
 
     created = {}
@@ -311,7 +323,7 @@ def test_xm_import_prose_file_guesses_ascii_and_saves_correctly(root, tmp_path, 
     expected_lines = src_path.read_text(encoding="ascii").splitlines()
     assert created["kwargs"]["initial"]["content"] == "\n".join(expected_lines)
 
-    created["on_save"]("AS1", ExtendedMemory.TYPE_ASCII, {"records": expected_lines})
+    created["on_save"]("CHRS", ExtendedMemory.TYPE_ASCII, {"records": expected_lines})
     xm = ExtendedMemory(memory, address_range=[0x40, 0x2EF])
     files = xm.list_files()
     assert len(files) == 1
@@ -323,7 +335,7 @@ def test_dialog_switching_type_after_import_does_not_lose_content(root):
     """The other half of the same bug: even when the guess is wrong (or
     the user just wants to double check), toggling the type dropdown must
     not empty out the box the user is switching to."""
-    lines = (DATA_DIR / "AS1.005.txt").read_text(encoding="ascii").splitlines()
+    lines = (DATA_DIR / "ALLCHRS.txt").read_text(encoding="ascii").splitlines()
     content = "\n".join(lines)
 
     dlg = XMFileDialog(
@@ -331,7 +343,7 @@ def test_dialog_switching_type_after_import_does_not_lose_content(root):
         lambda *a: None,
         # Deliberately wrong guess ("Data") to prove switching *to* ASCII
         # still shows the content, not an empty box.
-        initial={"name": "AS1", "file_type": "Data", "content": content},
+        initial={"name": "CHRS", "file_type": "Data", "content": content},
     )
     assert dlg._data_box.get("1.0", "end").rstrip("\n") == content
 
@@ -370,14 +382,31 @@ def test_xm_import_duplicate_name_shows_error_not_silent_success(root, tmp_path,
 
 
 # ---- DataRegistersTab: Export / Import ----
+#
+# _export_registers()/_import_registers() now open RegisterRangeDialog /
+# RegisterImportLocationDialog (gui/register_range_dialog.py -- issues #15
+# and #14) before touching the filesystem or Memory; that dialog's own
+# validation is tested directly in test_register_range_dialog.py. These
+# tests monkeypatch the dialog classes to invoke their on_confirm callback
+# immediately with a chosen (start[, end]), the same way
+# test_xm_import_file_prefills_dialog_and_adds_on_save above bypasses
+# XMFileDialog's UI to drive XMFilesTab's save path.
 
 
-def test_data_registers_export_writes_one_line_per_register(root, tmp_path, monkeypatch):
+def test_data_registers_export_default_range_writes_every_register(
+    root, tmp_path, monkeypatch
+):
+    """Confirming the range dialog unchanged reproduces the pre-#15
+    'export everything' behavior."""
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
     tab = DataRegistersTab(root)
     tab.render(memory)
     r00, count = tab._current_range()
 
+    monkeypatch.setattr(
+        "gui.data_registers_tab.RegisterRangeDialog",
+        lambda master, cnt, on_confirm: on_confirm(0, cnt - 1),
+    )
     out_path = tmp_path / "registers.txt"
     monkeypatch.setattr(
         "gui.data_registers_tab.filedialog.asksaveasfilename", lambda **k: str(out_path)
@@ -392,7 +421,35 @@ def test_data_registers_export_writes_one_line_per_register(root, tmp_path, monk
     assert lines == expected
 
 
-def test_data_registers_import_overwrites_registers_on_confirm(root, tmp_path, monkeypatch):
+def test_data_registers_export_partial_range_writes_only_that_range(
+    root, tmp_path, monkeypatch
+):
+    memory = Memory.from_file(DATA_DIR / "simple.dm41")
+    tab = DataRegistersTab(root)
+    tab.render(memory)
+    r00, count = tab._current_range()
+    assert count > 5  # sanity: simple.dm41 needs enough registers for this range
+
+    monkeypatch.setattr(
+        "gui.data_registers_tab.RegisterRangeDialog",
+        lambda master, cnt, on_confirm: on_confirm(2, 4),
+    )
+    out_path = tmp_path / "registers.txt"
+    monkeypatch.setattr(
+        "gui.data_registers_tab.filedialog.asksaveasfilename", lambda **k: str(out_path)
+    )
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
+
+    tab._export_registers()
+
+    lines = out_path.read_text(encoding="ascii").splitlines()
+    expected = [format_data_line(memory.get_register(a)) for a in range(r00 + 2, r00 + 5)]
+    assert lines == expected
+
+
+def test_data_registers_import_default_location_overwrites_registers_on_confirm(
+    root, tmp_path, monkeypatch
+):
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
     tab = DataRegistersTab(root)
     tab.render(memory)
@@ -405,12 +462,51 @@ def test_data_registers_import_overwrites_registers_on_confirm(root, tmp_path, m
     monkeypatch.setattr(
         "gui.data_registers_tab.filedialog.askopenfilename", lambda **k: str(in_path)
     )
+    monkeypatch.setattr(
+        "gui.data_registers_tab.RegisterImportLocationDialog",
+        lambda master, cnt, import_count, on_confirm: on_confirm(0),
+    )
     monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
 
     tab._import_registers()
 
     for addr in range(r00, r00 + count):
         assert memory.get_register(addr).get_bcd_number() == pytest.approx(7)
+
+
+def test_data_registers_import_at_offset_only_overwrites_target_registers(
+    root, tmp_path, monkeypatch
+):
+    """The scenario from GitHub issue #14: a file with fewer registers
+    than the displayed range, imported starting partway through it --
+    only the targeted registers should change."""
+    memory = Memory.from_file(DATA_DIR / "simple.dm41")
+    tab = DataRegistersTab(root)
+    tab.render(memory)
+    r00, count = tab._current_range()
+    assert count > 5
+    before = [memory.get_register(a).get_hex() for a in range(r00, r00 + count)]
+
+    in_path = tmp_path / "registers.txt"
+    in_path.write_text("7\n7\n7\n", encoding="ascii")  # 3 registers
+
+    monkeypatch.setattr(
+        "gui.data_registers_tab.filedialog.askopenfilename", lambda **k: str(in_path)
+    )
+    monkeypatch.setattr(
+        "gui.data_registers_tab.RegisterImportLocationDialog",
+        lambda master, cnt, import_count, on_confirm: on_confirm(2),
+    )
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+
+    tab._import_registers()
+
+    after = [memory.get_register(a).get_hex() for a in range(r00, r00 + count)]
+    for i in range(count):
+        if 2 <= i <= 4:
+            assert memory.get_register(r00 + i).get_bcd_number() == pytest.approx(7)
+        else:
+            assert after[i] == before[i]
 
 
 def test_data_registers_import_declines_on_cancel(root, tmp_path, monkeypatch):
@@ -428,6 +524,10 @@ def test_data_registers_import_declines_on_cancel(root, tmp_path, monkeypatch):
     monkeypatch.setattr(
         "gui.data_registers_tab.filedialog.askopenfilename", lambda **k: str(in_path)
     )
+    monkeypatch.setattr(
+        "gui.data_registers_tab.RegisterImportLocationDialog",
+        lambda master, cnt, import_count, on_confirm: on_confirm(0),
+    )
     monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: False)
 
     tab._import_registers()
@@ -436,7 +536,7 @@ def test_data_registers_import_declines_on_cancel(root, tmp_path, monkeypatch):
     assert after == before
 
 
-def test_data_registers_import_rejects_wrong_line_count(root, tmp_path, monkeypatch):
+def test_data_registers_import_rejects_empty_file(root, tmp_path, monkeypatch):
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
     tab = DataRegistersTab(root)
     tab.render(memory)
@@ -444,7 +544,7 @@ def test_data_registers_import_rejects_wrong_line_count(root, tmp_path, monkeypa
     before = [memory.get_register(a).get_hex() for a in range(r00, r00 + count)]
 
     in_path = tmp_path / "registers.txt"
-    in_path.write_text("1\n2\n3\n", encoding="ascii")  # far fewer lines than count
+    in_path.write_text("", encoding="ascii")
 
     monkeypatch.setattr(
         "gui.data_registers_tab.filedialog.askopenfilename", lambda **k: str(in_path)
@@ -453,13 +553,16 @@ def test_data_registers_import_rejects_wrong_line_count(root, tmp_path, monkeypa
     monkeypatch.setattr(
         messagebox, "showerror", lambda title, msg: errors.append((title, msg))
     )
-    asked = []
-    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(1) or True)
+    dialog_shown = []
+    monkeypatch.setattr(
+        "gui.data_registers_tab.RegisterImportLocationDialog",
+        lambda *a, **k: dialog_shown.append(1),
+    )
 
     tab._import_registers()
 
-    assert errors and "Line Count Mismatch" in errors[0][0]
-    assert not asked  # must bail out before ever asking to confirm
+    assert errors and "Empty File" in errors[0][0]
+    assert not dialog_shown  # must bail out before ever prompting for a location
     after = [memory.get_register(a).get_hex() for a in range(r00, r00 + count)]
     assert after == before
 
@@ -485,11 +588,17 @@ def test_data_registers_import_rejects_invalid_line_with_line_number(
     monkeypatch.setattr(
         messagebox, "showerror", lambda title, msg: errors.append((title, msg))
     )
+    dialog_shown = []
+    monkeypatch.setattr(
+        "gui.data_registers_tab.RegisterImportLocationDialog",
+        lambda *a, **k: dialog_shown.append(1),
+    )
 
     with caplog.at_level("ERROR"):
         tab._import_registers()
 
     assert errors and "Line 3" in errors[0][1]
+    assert not dialog_shown  # must bail out before ever prompting for a location
     after = [memory.get_register(a).get_hex() for a in range(r00, r00 + count)]
     assert after == before
 
@@ -501,3 +610,33 @@ def test_data_registers_import_rejects_invalid_line_with_line_number(
     assert caplog.records[0].levelname == "ERROR"
     assert "line 3" in caplog.records[0].message
     assert "TOOLONGTEXTVALUE" in caplog.records[0].message
+
+
+def test_data_registers_import_dialog_receives_actual_import_count(root, tmp_path, monkeypatch):
+    """RegisterImportLocationDialog needs the file's real register count
+    (not the displayed range's count) to validate/report where an offset
+    import would land -- see GitHub issue #14's example (a 30-register
+    file imported into a larger buffer)."""
+    memory = Memory.from_file(DATA_DIR / "simple.dm41")
+    tab = DataRegistersTab(root)
+    tab.render(memory)
+    r00, count = tab._current_range()
+    assert count > 3
+
+    in_path = tmp_path / "registers.txt"
+    in_path.write_text("1\n2\n3\n", encoding="ascii")
+
+    monkeypatch.setattr(
+        "gui.data_registers_tab.filedialog.askopenfilename", lambda **k: str(in_path)
+    )
+    captured = {}
+    monkeypatch.setattr(
+        "gui.data_registers_tab.RegisterImportLocationDialog",
+        lambda master, cnt, import_count, on_confirm: captured.update(
+            count=cnt, import_count=import_count
+        ),
+    )
+
+    tab._import_registers()
+
+    assert captured == {"count": count, "import_count": 3}
