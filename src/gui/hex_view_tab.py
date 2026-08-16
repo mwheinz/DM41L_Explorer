@@ -99,6 +99,12 @@ class HexViewTab(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
         self._memory: Memory = None
+        # (light_color, dark_color, swatch_label) per legend entry, in
+        # REGIONS order -- stashed so refresh_theme() can recolor the
+        # existing swatches in place rather than tearing the legend down
+        # and rebuilding it (which would also lose its packed position
+        # between the header and the table -- see refresh_theme()).
+        self._legend_swatches = []
 
         _, self._header_label = build_tab_header(self)
         self._build_legend()
@@ -108,8 +114,7 @@ class HexViewTab(ctk.CTkFrame):
 
         self._style_treeview()
         self._tree = self._build_tree(table_frame)
-        for key, _, _, _ in REGIONS:
-            self._tree.tag_configure(key, background=self._region_bg[key])
+        self._apply_region_tags()
 
     def _build_legend(self):
         """A row of small color swatches + labels so the row colors below
@@ -121,10 +126,16 @@ class HexViewTab(ctk.CTkFrame):
             color = dark_color if dark else light
             chip = ctk.CTkFrame(legend, fg_color="transparent")
             chip.pack(side="left", padx=(0, 14), pady=2)
-            ctk.CTkLabel(
+            swatch = ctk.CTkLabel(
                 chip, text="", fg_color=color, width=14, height=14, corner_radius=3,
-            ).pack(side="left", padx=(0, 5))
+            )
+            swatch.pack(side="left", padx=(0, 5))
             ctk.CTkLabel(chip, text=label, font=ctk.CTkFont(size=11)).pack(side="left")
+            self._legend_swatches.append((light, dark_color, swatch))
+
+    def _apply_region_tags(self):
+        for key, _, _, _ in REGIONS:
+            self._tree.tag_configure(key, background=self._region_bg[key])
 
     def _build_tree(self, parent) -> ttk.Treeview:
         columns = ("addr", "hex", "ascii", "region")
@@ -210,6 +221,26 @@ class HexViewTab(ctk.CTkFrame):
             "DM41L.Vertical.TScrollbar",
             background=[("active", thumb_active), ("pressed", thumb_active)],
         )
+
+    def refresh_theme(self):
+        """Re-applies every theme-dependent color after
+        ctk.set_appearance_mode() changes elsewhere (e.g. Preferences --
+        see gui/app.py's _on_preferences_saved()).
+
+        __init__ used to call _style_treeview() and _build_legend() once,
+        at construction time, and nothing ever re-invoked them on a live
+        theme change -- CTk's own theme engine has no hook into ttk (see
+        _style_treeview()'s docstring), and the legend's swatch colors
+        were likewise only ever computed once. That's why this tab used
+        to need a full restart to follow a dark/light switch. This
+        recomputes and re-applies both, in place, without touching the
+        legend's layout or the tree's already-rendered rows (tag_configure
+        updates propagate to existing rows automatically)."""
+        self._style_treeview()
+        self._apply_region_tags()
+        dark = ctk.get_appearance_mode() == "Dark"
+        for light, dark_color, swatch in self._legend_swatches:
+            swatch.configure(fg_color=dark_color if dark else light)
 
     @staticmethod
     def _ascii_preview(register) -> str:

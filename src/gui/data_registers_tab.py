@@ -173,6 +173,23 @@ class DataRegistersTab(ctk.CTkFrame):
             background=[("active", thumb_active), ("pressed", thumb_active)],
         )
 
+    def refresh_theme(self):
+        """Re-applies theme-dependent ttk styling/colors after
+        ctk.set_appearance_mode() changes elsewhere (e.g. Preferences --
+        see gui/app.py's _on_preferences_saved()).
+
+        __init__ used to call _style_treeview() once, at construction
+        time, and nothing ever re-invoked it on a live theme change --
+        CTk's own theme engine has no hook into ttk (see
+        _style_treeview()'s docstring). That's why this tab used to need
+        a full restart to follow a dark/light switch. This recomputes
+        _stripe_bg and re-applies the "oddrow" tag on both trees, in
+        place -- tag_configure updates propagate to already-rendered
+        rows automatically, no need to re-render()."""
+        self._style_treeview()
+        for tree in self._trees:
+            tree.tag_configure("oddrow", background=self._stripe_bg)
+
     def _notify_change(self):
         if self._on_change:
             self._on_change()
