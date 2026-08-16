@@ -37,6 +37,16 @@ jobs:
           # import fails). check-latest makes the action verify the cached
           # copy is actually the newest matching release and re-download
           # otherwise, instead of trusting whatever's pre-installed as-is.
+          #
+          # This does NOT fix the *other*, still-open Windows Tcl flake --
+          # see the "Run tests (Windows)" step below -- and actually widens
+          # its window: check-latest means every run freshly downloads and
+          # unzips Python's Tcl/Tk bundle instead of reusing an
+          # already-extracted tool-cache copy, and that fresh-extraction
+          # window is exactly when the other bug bites. Keeping check-latest
+          # anyway because the bug it fixes (files silently missing) is
+          # deterministic and worse than the one it slightly worsens (files
+          # present but transiently unreadable, self-heals on retry).
           check-latest: true
 
       - name: Install Linux GUI/test dependencies
@@ -54,6 +64,29 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a pytest
 
-      - name: Run tests
-        if: runner.os != 'Linux'
+      - name: Run tests (macOS)
+        if: runner.os == 'macOS'
         run: pytest
+
+      # Windows-hosted runners have a well-known, still-unresolved
+      # intermittent failure in actions/setup-python's Tcl/Tk bundle: Tcl
+      # fails to source tcl8.6/init.tcl with "couldn't read file ...: No
+      # error" even though the file is right there on disk -- see
+      # https://github.com/actions/setup-python/issues/1102. It's
+      # consistent with the file being transiently locked (most likely
+      # Windows Defender's real-time scanner grabbing it right after
+      # setup-python freshly extracts it -- see the check-latest comment
+      # above) rather than actually missing or corrupt, which is why
+      # simply re-running always seems to clear it. There's no known
+      # permanent fix, so this retries the whole `pytest` invocation a
+      # few times with a short pause instead of requiring a human to
+      # notice the failure and click "Re-run failed jobs" -- the same
+      # workaround already being done by hand, just automatic.
+      - name: Run tests (Windows, retried -- see comment)
+        if: runner.os == 'Windows'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 20
+          command: pytest
