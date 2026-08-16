@@ -333,21 +333,36 @@ class DM41LExplorerApp(ctk.CTk):
         # Connect Menu
         connect_menu = Menu(menubar, tearoff=0)
         connect_menu.add_command(
-            label="Connect / Reconnect...", command=self.show_connect_dialog, underline=0
+            label="Connect / Reconnect...",
+            command=self.show_connect_dialog,
+            accelerator=f"{acc}+K",
+            underline=0,
         )
         connect_menu.add_command(
-            label="Disconnect", command=self.disconnect, underline=0
+            label="Disconnect",
+            command=self.disconnect,
+            accelerator=f"{acc}+D",
+            underline=0,
         )
         connect_menu.add_separator()
         connect_menu.add_command(
-            label="Set Calculator Time", command=self.set_calculator_time, underline=4
+            label="Set Calculator Time",
+            command=self.set_calculator_time,
+            accelerator=f"{acc}+T",
+            underline=4,
         )
         connect_menu.add_separator()
         connect_menu.add_command(
-            label="Get Dump from DM41L", command=self.get_dump_from_calculator, underline=0
+            label="Get Dump from DM41L",
+            command=self.get_dump_from_calculator,
+            accelerator=f"{acc}+G",
+            underline=0,
         )
         connect_menu.add_command(
-            label="Send Dump to DM41L", command=self.send_dump_to_calculator, underline=0
+            label="Send Dump to DM41L",
+            command=self.send_dump_to_calculator,
+            accelerator=f"{acc}+U",
+            underline=0,
         )
         menubar.add_cascade(label="Connect", menu=connect_menu)
 
@@ -377,6 +392,17 @@ class DM41LExplorerApp(ctk.CTk):
         self.bind(f"<{acc}-s>", lambda e: self.save_dump_to_file())
         self.bind(f"<{acc}-q>", lambda e: self.on_close())
         self.bind("<F5>", lambda e: self._render_tabs())
+
+        # Connect menu (GitHub issue #9) -- each of these already no-ops
+        # with a "Not Connected" warning (or, for disconnect(), silently)
+        # when the serial port isn't open, exactly like clicking the menu
+        # item itself would, so binding them globally doesn't open up any
+        # new not-connected crash path.
+        self.bind(f"<{acc}-k>", lambda e: self.show_connect_dialog())
+        self.bind(f"<{acc}-d>", lambda e: self.disconnect())
+        self.bind(f"<{acc}-t>", lambda e: self.set_calculator_time())
+        self.bind(f"<{acc}-g>", lambda e: self.get_dump_from_calculator())
+        self.bind(f"<{acc}-u>", lambda e: self.send_dump_to_calculator())
 
     def _show_about(self):
         messagebox.showinfo(
