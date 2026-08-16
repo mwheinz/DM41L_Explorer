@@ -9,3 +9,4 @@ src/dm41lversion.py
 src/engine/__pycache__/**
 src/gui/__pycache__/**
 src/scratch
+_to_delete/*
