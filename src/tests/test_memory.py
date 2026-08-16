@@ -9,6 +9,10 @@ from memory import (
     Register,
     Memory,
     StatusRegisters,
+    format_data_line,
+    parse_data_line,
+    encode_trigraphs,
+    decode_trigraphs,
 )  # Assuming memory.py is in the same directory or installable
 
 # --- Register Tests ---
@@ -101,6 +105,207 @@ def test_register_ascii_error():
     reg_long = Register(size=7)
     with pytest.raises(ValueError, match="non-ASCII"):
         reg_long.set_ascii("Hélló")  # Contains non-ASCII characters
+
+
+def test_register_alpha_text_roundtrip():
+    """Register.set_alpha_text()/get_alpha_text() -- the docs/memory.md
+    "Alpha Storage" format: byte 0 == 0x10, remaining 6 bytes hold the
+    text right-justified, NUL-padded on the left."""
+    reg = Register(size=7)
+    reg.set_alpha_text("HI")
+    assert reg.is_alpha_text() is True
+    assert reg.get_hex() == "10000000004849"  # 0x10, 4 NULs, "HI"
+    assert reg.get_alpha_text() == "HI"
+
+    reg.set_alpha_text("ABCDEF")  # exactly 6 chars, no padding
+    assert reg.get_hex() == "10414243444546"
+    assert reg.get_alpha_text() == "ABCDEF"
+
+
+def test_register_alpha_text_errors():
+    reg = Register(size=7)
+    with pytest.raises(ValueError, match="1-6 characters"):
+        reg.set_alpha_text("")
+    with pytest.raises(ValueError, match="1-6 characters"):
+        reg.set_alpha_text("TOOLONG")
+    with pytest.raises(ValueError, match="non-ASCII"):
+        reg.set_alpha_text("héllo")
+
+    reg3 = Register(size=3)
+    with pytest.raises(ValueError, match="7-byte register"):
+        reg3.set_alpha_text("HI")
+
+    # A plain zero register isn't alpha-marked (byte 0 == 0x00, not 0x10).
+    assert Register(size=7).is_alpha_text() is False
+    with pytest.raises(ValueError, match="not alpha-marked"):
+        Register(size=7).get_alpha_text()
+
+
+def test_register_alpha_bytes_roundtrip_non_ascii_focal_bytes():
+    """get_alpha_bytes()/set_alpha_bytes() are the raw-byte primitives
+    get_alpha_text()/set_alpha_text() are built on -- unlike the text
+    wrappers, they accept any byte value 0-255, including bytes above the
+    plain-ASCII range (128-255) that get_alpha_text()'s ASCII decode can't
+    handle."""
+    reg = Register(size=7)
+    data = bytes([0xFF, 0x41, 0x00])  # a >127 FOCAL byte, 'A', a NUL
+    reg.set_alpha_bytes(data)
+    assert reg.is_alpha_text() is True
+    assert reg.get_alpha_bytes() == data
+
+    # get_alpha_text() refuses to decode a byte above the plain-ASCII
+    # range rather than silently mangling it.
+    with pytest.raises(ValueError, match="non-ASCII FOCAL character"):
+        reg.get_alpha_text()
+
+
+def test_register_alpha_bytes_errors():
+    reg = Register(size=7)
+    with pytest.raises(ValueError, match="1-6 characters"):
+        reg.set_alpha_bytes(b"")
+    with pytest.raises(ValueError, match="1-6 characters"):
+        reg.set_alpha_bytes(b"TOOLONG")
+
+
+def test_register_alpha_text_is_thin_ascii_wrapper_over_alpha_bytes():
+    """set_alpha_text()/get_alpha_text() must still work exactly as
+    before for pure-ASCII content -- they're now just get_alpha_bytes()/
+    set_alpha_bytes() with an ASCII encode/decode around them."""
+    reg = Register(size=7)
+    reg.set_alpha_text("HI")
+    assert reg.get_alpha_bytes() == b"HI"
+    assert reg.get_alpha_text() == "HI"
+
+
+def test_register_alpha_and_bcd_markers_cannot_collide():
+    """An alpha-marked register (byte 0 == 0x10) can never also parse as a
+    valid BCD number, and vice versa -- confirms format_data_line()/
+    parse_data_line() below can tell the two apart unambiguously."""
+    reg = Register(size=7)
+    reg.set_alpha_text("HI")
+    with pytest.raises(ValueError, match="Invalid MS sign nibble"):
+        reg.get_bcd_number()
+
+
+# --- DATA line format (format_data_line/parse_data_line, issue #11) ---
+
+
+def test_format_data_line_number():
+    reg = Register(size=7)
+    reg.set_bcd_number(3.5)
+    assert format_data_line(reg) == "3.5"
+    reg.set_bcd_number(-42)
+    assert format_data_line(reg) == "-42.0"  # get_bcd_number() always returns a float
+
+
+def test_format_data_line_alpha_text():
+    reg = Register(size=7)
+    reg.set_alpha_text("HELLO")
+    assert format_data_line(reg) == "HELLO"
+
+
+def test_format_data_line_raw_hex_fallback():
+    """A register that's neither a valid BCD number (bad MS sign nibble,
+    5, instead of the only legal 0/9) nor alpha-marked (byte 0 is 0x50,
+    not 0x10) round-trips as a 0x-prefixed 14-hex-digit line."""
+    reg = Register.from_hex("50000000000000")
+    line = format_data_line(reg)
+    assert line == "0x50000000000000"
+
+
+def test_parse_data_line_number():
+    reg = parse_data_line("3.5")
+    assert reg.get_bcd_number() == pytest.approx(3.5)
+    reg2 = parse_data_line("-42")
+    assert reg2.get_bcd_number() == pytest.approx(-42)
+
+
+def test_parse_data_line_alpha_text():
+    reg = parse_data_line("HELLO")
+    assert reg.is_alpha_text() is True
+    assert reg.get_alpha_text() == "HELLO"
+
+
+def test_parse_data_line_raw_hex_requires_0x_prefix():
+    """The "0x" prefix is required specifically so a bare 14-digit decimal
+    number isn't ambiguous with raw hex -- without the prefix requirement,
+    "12345678901234" (14 digits, all valid hex) could mean either."""
+    reg = parse_data_line("0x99999999999999")
+    assert reg.get_hex() == "99999999999999"
+
+    # No prefix, same 14 digits: parsed as a (very large) decimal number,
+    # not raw hex.
+    reg2 = parse_data_line("12345678901234")
+    assert reg2.get_bcd_number() == pytest.approx(12345678901234, rel=1e-9)
+
+
+def test_parse_data_line_invalid_raises():
+    with pytest.raises(ValueError):
+        parse_data_line("")  # empty
+    with pytest.raises(ValueError):
+        parse_data_line("TOOLONGTEXT")  # > 6 chars, not a number
+    with pytest.raises(ValueError):
+        parse_data_line("0xZZZZZZZZZZZZZZ")  # "0x" prefix but not valid hex
+    with pytest.raises(ValueError):
+        parse_data_line("nan")  # not finite
+    with pytest.raises(ValueError):
+        parse_data_line("inf")  # not finite
+
+
+def test_data_line_roundtrip_through_format_and_parse():
+    """format_data_line() -> parse_data_line() must reproduce the exact
+    same register bytes, for all three line kinds."""
+    number_reg = Register(size=7)
+    number_reg.set_bcd_number(1234567890.0)
+    assert parse_data_line(format_data_line(number_reg)).get_hex() == number_reg.get_hex()
+
+    alpha_reg = Register(size=7)
+    alpha_reg.set_alpha_text("AB")
+    assert parse_data_line(format_data_line(alpha_reg)).get_hex() == alpha_reg.get_hex()
+
+    raw_reg = Register.from_hex("50000000000000")
+    assert parse_data_line(format_data_line(raw_reg)).get_hex() == raw_reg.get_hex()
+
+
+def test_format_data_line_alpha_text_uses_trigraphs_for_focal_bytes():
+    """A register holding a FOCAL-special byte (Sigma, 0x7E) must format
+    as its trigraph, not raise or mangle the byte."""
+    reg = Register(size=7)
+    reg.set_alpha_bytes(bytes([0x7E]))
+    assert format_data_line(reg) == "\\E"
+
+
+def test_parse_data_line_alpha_text_decodes_trigraphs():
+    reg = parse_data_line("\\E")
+    assert reg.is_alpha_text() is True
+    assert reg.get_alpha_bytes() == bytes([0x7E])
+
+
+def test_data_line_alpha_trigraph_roundtrip():
+    """format_data_line() -> parse_data_line() must reproduce the exact
+    same register bytes when the alpha content includes FOCAL-special
+    bytes needing trigraphs."""
+    reg = Register(size=7)
+    reg.set_alpha_bytes(bytes([0x7E, 0x41, 0x00]))  # Sigma, 'A', high bar
+    line = format_data_line(reg)
+    assert parse_data_line(line).get_hex() == reg.get_hex()
+
+
+def test_parse_data_line_alpha_validates_decoded_byte_length_not_source_length():
+    """The 1-6 character alpha limit applies to DECODED bytes, not raw
+    source-text length -- "\\E\\T\\+" is 3 decoded bytes (legal) despite
+    being 9 source characters; "\\E\\E\\E\\E\\E\\E\\E" is 7 decoded bytes
+    (too many) despite being shorter in some other encoding."""
+    reg = parse_data_line("\\E\\T\\+")
+    assert reg.get_alpha_bytes() == bytes([0x7E, 0x60, 0x7F])
+
+    with pytest.raises(ValueError, match="alpha text must be 1-6 characters"):
+        parse_data_line("\\E\\E\\E\\E\\E\\E\\E")
+
+
+def test_parse_data_line_rejects_invalid_trigraph():
+    with pytest.raises(ValueError):
+        parse_data_line("\\zz")  # not a recognized shorthand or 3 digits
 
 
 def test_register_indexing():
@@ -448,6 +653,66 @@ def test_xm_add_file_bootstraps_empty_extended_memory():
     assert files[0].get_numbers() == [1, 2, 3.5, -42]
 
 
+def test_xm_add_file_data_lines_supports_mixed_content():
+    """add_file(data_lines=[...]) (GitHub issue #11) lets a Data file mix
+    numbers, short alpha text, and raw-hex registers -- unlike numbers=,
+    which only ever produces plain BCD registers."""
+    xm = _load_xm("empty.dm41")
+    added = xm.add_file(
+        "MIXED",
+        xm.TYPE_DATA,
+        data_lines=["1.5", "HI", "0x50000000000000", "-3"],
+    )
+    assert added.name == "MIXED  "
+
+    files = xm.list_files()
+    assert len(files) == 1
+    assert files[0].get_data_lines() == ["1.5", "HI", "0x50000000000000", "-3.0"]
+    regs = files[0].data_registers()
+    assert regs[0].get_bcd_number() == pytest.approx(1.5)
+    assert regs[1].get_alpha_text() == "HI"
+    assert regs[2].get_hex() == "50000000000000"
+    assert regs[3].get_bcd_number() == pytest.approx(-3)
+
+
+def test_xm_add_file_rejects_duplicate_name():
+    """Regression (user-reported): re-importing an exported file whose
+    name matches one already present used to silently create a duplicate
+    directory entry -- something a real DM41L would reject. add_file()
+    must raise before writing anything."""
+    xm = _load_xm("6x-xm.dm41")
+    before = {f.name: f for f in xm.list_files()}
+    assert "XM1.000" in before  # sanity: this fixture really has it
+
+    with pytest.raises(DM41LMemoryError, match="already exists"):
+        xm.add_file("XM1.000", xm.TYPE_DATA, numbers=[1, 2, 3])
+
+    # Nothing should have been written -- same files, same content.
+    after = {f.name: f for f in xm.list_files()}
+    assert set(after) == set(before)
+
+
+def test_xm_add_file_duplicate_check_does_not_flag_unrelated_names():
+    """The duplicate check shouldn't be overly broad -- a genuinely
+    different (if short) name must still be addable even though a
+    same-prefix file already exists."""
+    xm = _load_xm("6x-xm.dm41")
+    added = xm.add_file("XM1", xm.TYPE_DATA, numbers=[1])
+    assert added.name == "XM1    "
+
+
+def test_xm_edit_file_keeping_same_name_does_not_self_collide():
+    """Editing a file without renaming it (remove-then-add with the same
+    name, as the GUI's Edit flow does) must not trip the new duplicate
+    check against its own old entry."""
+    xm = _load_xm("empty.dm41")
+    added = xm.add_file("NOTES", xm.TYPE_ASCII, records=["hello"])
+
+    xm.remove_file(added.header_addr)
+    edited = xm.add_file("NOTES", xm.TYPE_ASCII, records=["hello", "world"])
+    assert edited.get_records() == ["hello", "world"]
+
+
 def test_xm_add_file_appends_after_existing_files():
     """Adding a file to an already-populated region must place it after
     (below) the current last file, and must not disturb any existing
@@ -588,6 +853,59 @@ def test_xm_add_file_rejects_name_over_seven_characters():
     xm = _load_xm("empty.dm41")
     with pytest.raises(ValueError):
         xm.add_file("TOOLONGNAME", xm.TYPE_DATA, numbers=[1])
+
+
+def test_xm_add_file_rejects_name_outside_allowed_character_range():
+    """File names must be plain ASCII 32-101 inclusive (space through
+    lowercase 'e') -- unlike file *content*, names don't support
+    trigraphs, so a character above that range is simply rejected."""
+    xm = _load_xm("empty.dm41")
+    # 'z' is 122, above the 101 ('e') upper bound.
+    with pytest.raises(ValueError, match="outside the allowed range"):
+        xm.add_file("zzz", xm.TYPE_DATA, numbers=[1])
+    # A DEL byte (127) or anything else above 101 is rejected the same way.
+    with pytest.raises(ValueError, match="outside the allowed range"):
+        xm.add_file("A\x7fB", xm.TYPE_DATA, numbers=[1])
+
+
+def test_xm_add_file_accepts_name_at_range_boundaries():
+    """32 (space) and 101 ('e') are themselves valid -- the range is
+    inclusive on both ends."""
+    xm = _load_xm("empty.dm41")
+    added_low = xm.add_file(" a", xm.TYPE_DATA, numbers=[1])  # leading space
+    assert added_low.name == " a".ljust(7)
+    xm2 = _load_xm("empty.dm41")
+    added_high = xm2.add_file("e", xm.TYPE_DATA, numbers=[1])  # 'e' == 101
+    assert added_high.name == "e".ljust(7)
+
+
+def test_xm_get_records_encodes_focal_bytes_as_trigraphs():
+    """get_records() must losslessly round-trip FOCAL-special bytes as
+    trigraphs rather than the old lossy '?' replacement behavior."""
+    xm = _load_xm("empty.dm41")
+    added = xm.add_file("NOTES", xm.TYPE_ASCII, records=["A\\EB", "\\T\\+"])
+    assert added.get_records() == ["A\\EB", "\\T\\+"]
+
+    # And it decodes to the correct raw bytes underneath.
+    regs = added.data_registers()
+    stream = b"".join(r.get_bytes() for r in regs)
+    # First record: length 3, then 'A', 0x7E (Sigma), 'B'.
+    assert stream[0] == 3
+    assert stream[1:4] == bytes([0x41, 0x7E, 0x42])
+
+
+def test_xm_add_file_ascii_records_reject_out_of_range_trigraph():
+    xm = _load_xm("empty.dm41")
+    with pytest.raises(ValueError):
+        xm.add_file("BAD", xm.TYPE_ASCII, records=["\\999"])  # >255
+
+
+def test_xm_add_file_ascii_plain_content_unaffected_by_trigraph_support():
+    """Existing plain-ASCII-only content (no trigraphs present) must still
+    round-trip identically -- no regression from adding trigraph support."""
+    xm = _load_xm("empty.dm41")
+    added = xm.add_file("NOTES", xm.TYPE_ASCII, records=["hello", "world"])
+    assert added.get_records() == ["hello", "world"]
 
 
 def test_xm_add_file_rejects_wrong_argument_for_type():
@@ -773,7 +1091,10 @@ def _snapshot_content(f):
     back whatever ends up at those addresses *after* the mutation, not
     the content that was really there when the snapshot was taken."""
     if f.file_type == ExtendedMemory.TYPE_DATA:
-        return (f.file_type, f.get_numbers())
+        # get_data_lines() (not get_numbers()) so this snapshot works for
+        # a Data file that mixes numbers, alpha text, and/or raw-hex
+        # registers -- see test_xm_remove_file_preserves_mixed_data_file.
+        return (f.file_type, f.get_data_lines())
     if f.file_type == ExtendedMemory.TYPE_ASCII:
         return (f.file_type, f.get_records())
     if f.file_type == ExtendedMemory.TYPE_PROGRAM:
@@ -802,6 +1123,24 @@ def test_xm_remove_file_from_middle_preserves_the_rest():
     for f in after_files:
         if f.file_type == ExtendedMemory.TYPE_PROGRAM:
             assert f.checksum_valid is True
+
+
+def test_xm_remove_file_preserves_mixed_data_file():
+    """Regression: remove_file()'s rebuild used to snapshot Data-type
+    survivors via get_numbers(), which raises ValueError for any register
+    that isn't a plain BCD number -- so removing *any* file while a
+    sibling Data file contained alpha text or raw-hex content would have
+    crashed instead of preserving it. It now uses get_data_lines()."""
+    xm = _load_xm("empty.dm41")
+    xm.add_file("MIXED", xm.TYPE_DATA, data_lines=["1.5", "HI", "0x50000000000000"])
+    xm.add_file("DOOMED", xm.TYPE_ASCII, records=["remove me"])
+
+    doomed = next(f for f in xm.list_files() if f.name == "DOOMED ")
+    xm.remove_file(doomed.header_addr)
+
+    files = xm.list_files()
+    assert {f.name for f in files} == {"MIXED  "}
+    assert files[0].get_data_lines() == ["1.5", "HI", "0x50000000000000"]
 
 
 def test_xm_remove_last_file_leaves_extended_memory_empty():

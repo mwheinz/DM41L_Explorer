@@ -1,17 +1,41 @@
 """
-XM Files tab: view, add, edit, and remove extended-memory files.
+XM Files tab: view, add, edit, remove, import, and export extended-memory
+files.
 """
 
 import logging
-from tkinter import messagebox
+from pathlib import Path
+from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
-from memory import Memory, ExtendedMemory, DM41LMemoryError
+from memory import Memory, ExtendedMemory, DM41LMemoryError, parse_data_line
 from gui.xm_file_dialog import XMFileDialog
 from gui.scroll_support import bind_touchpad_scroll
 from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
 
 logger = logging.getLogger(__name__)
+
+
+def _guess_file_type(lines: list) -> str:
+    """Best-effort default type for a freshly-imported file's content:
+    "Data" only if *every* line actually parses as a valid DATA line (see
+    registers.parse_data_line()); "ASCII" otherwise, since ASCII only
+    requires 1-254 characters per line -- real text (e.g. anything with a
+    line longer than 6 characters that isn't a plain number) almost never
+    also happens to be valid DATA content, but the reverse doesn't hold at
+    all: a file of short numbers/words is completely ambiguous between the
+    two, so this can only ever be a starting guess -- the type stays
+    editable in the dialog (see XMFileDialog's `initial=` handling, which
+    pre-fills both the Data and ASCII editors with the same lines so
+    switching the guess doesn't lose anything)."""
+    if not lines:
+        return "Data"
+    try:
+        for line in lines:
+            parse_data_line(line)
+    except ValueError:
+        return "ASCII"
+    return "Data"
 
 
 class XMFilesTab(ctk.CTkFrame):
@@ -23,14 +47,17 @@ class XMFilesTab(ctk.CTkFrame):
         self._memory: Memory = None
         self._on_change = on_change
 
-        _, self._header_label = build_tab_header(
+        header, self._header_label = build_tab_header(
             self,
-            button_kwargs={"text": "Add File...", "width": 100, "command": self._add_file},
+            button_kwargs={"text": "Add File", "width": 100, "command": self._add_file},
         )
+        ctk.CTkButton(
+            header, text="Import File", width=110, command=self._import_file,
+        ).pack(side="right", padx=(0, 8))
 
         self._table = ctk.CTkScrollableFrame(self)
         self._table.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        for col, weight in enumerate([0, 0, 0, 0, 1, 0, 0]):
+        for col, weight in enumerate([0, 0, 0, 0, 1, 0, 0, 0]):
             self._table.grid_columnconfigure(col, weight=weight)
         bind_touchpad_scroll(self._table)
 
@@ -60,7 +87,7 @@ class XMFilesTab(ctk.CTkFrame):
         self._header_label.configure(text=f"Extended-memory files: {len(files)}")
         self._stripe_bg = stripe_bg_color()
 
-        headers = ["Name", "Type", "Header", "Registers", "Preview", "", ""]
+        headers = ["Name", "Type", "Header", "Registers", "Preview", "", "", ""]
         for col, text in enumerate(headers):
             ctk.CTkLabel(
                 self._table, text=text, font=ctk.CTkFont(weight="bold")
@@ -114,7 +141,19 @@ class XMFilesTab(ctk.CTkFrame):
             anchor="w", fg_color=row_bg,
         ).grid(row=row, column=4, sticky="nsew", padx=6, pady=1)
 
+        # Export (like Edit) only makes sense for Data/ASCII -- Program
+        # files' on-disk format isn't part of this feature (see the
+        # XMFileDialog module docstring on why Program isn't editable
+        # here either).
         can_edit = f.file_type in (ExtendedMemory.TYPE_DATA, ExtendedMemory.TYPE_ASCII)
+        export_button = ctk.CTkButton(
+            self._table,
+            text="Export...",
+            width=76,
+            state="normal" if can_edit else "disabled",
+            command=lambda file=f: self._export_file(file),
+        )
+        export_button.grid(row=row, column=5, sticky="e", padx=6, pady=1)
         edit_button = ctk.CTkButton(
             self._table,
             text="Edit",
@@ -122,7 +161,7 @@ class XMFilesTab(ctk.CTkFrame):
             state="normal" if can_edit else "disabled",
             command=lambda addr=f.header_addr: self._edit_file(addr),
         )
-        edit_button.grid(row=row, column=5, sticky="e", padx=6, pady=1)
+        edit_button.grid(row=row, column=6, sticky="e", padx=6, pady=1)
         ctk.CTkButton(
             self._table,
             text="Remove",
@@ -130,16 +169,16 @@ class XMFilesTab(ctk.CTkFrame):
             fg_color="#a03e3e",
             hover_color="#832f2f",
             command=lambda addr=f.header_addr, name=f.name: self._remove_file(addr, name),
-        ).grid(row=row, column=6, sticky="e", padx=6, pady=1)
+        ).grid(row=row, column=7, sticky="e", padx=6, pady=1)
 
     @staticmethod
     def _preview_for(f) -> str:
         try:
             if f.file_type == ExtendedMemory.TYPE_DATA:
-                numbers = f.get_numbers()
-                text = ", ".join(f"{n:g}" for n in numbers[:6])
-                if len(numbers) > 6:
-                    text += f", ... ({len(numbers)} total)"
+                lines = f.get_data_lines()
+                text = ", ".join(lines[:6])
+                if len(lines) > 6:
+                    text += f", ... ({len(lines)} total)"
                 return text
             if f.file_type == ExtendedMemory.TYPE_ASCII:
                 records = f.get_records()
@@ -164,23 +203,111 @@ class XMFilesTab(ctk.CTkFrame):
 
     # -- Add / Edit / Remove ------------------------------------------------
 
+    def _save_new_or_edited_file(self, name, file_type, kwargs, *, replacing_addr=None):
+        """Shared save path for Add, Import, and Edit -- all three end up
+        calling ExtendedMemory.add_file() with the same kind of kwargs
+        (see XMFileDialog); Edit additionally removes the file being
+        replaced first (see _edit_file())."""
+        try:
+            xm = self._xm()
+            if replacing_addr is not None:
+                # Editing is implemented as remove-then-add (see
+                # ExtendedMemory.remove_file()'s docstring): there's no
+                # in-place content resize, so the edited file is rebuilt
+                # fresh and ends up positioned after whatever files
+                # remain, rather than keeping its original slot.
+                xm.remove_file(replacing_addr)
+            xm.add_file(name, file_type, **kwargs)
+        except (ValueError, DM41LMemoryError) as e:
+            verb = "save" if replacing_addr is not None else "add"
+            logger.warning("Could not %s XM file %r: %s", verb, name, e)
+            messagebox.showerror(f"Could Not {verb.title()} File", str(e))
+            return
+        logger.info(
+            "XM file %s: %r (%s)",
+            "edited" if replacing_addr is not None else "added",
+            name,
+            file_type,
+        )
+        self._notify_change()
+        self.render(self._memory)
+
     def _add_file(self):
         if self._memory is None:
             messagebox.showwarning("No Memory Loaded", "Load or start a memory buffer first.")
             return
 
         def save(name, file_type, kwargs):
-            try:
-                self._xm().add_file(name, file_type, **kwargs)
-            except (ValueError, DM41LMemoryError) as e:
-                logger.warning("Could not add XM file %r: %s", name, e)
-                messagebox.showerror("Could Not Add File", str(e))
-                return
-            logger.info("XM file added: %r (%s)", name, file_type)
-            self._notify_change()
-            self.render(self._memory)
+            self._save_new_or_edited_file(name, file_type, kwargs)
 
         XMFileDialog(self, save)
+
+    def _import_file(self):
+        """Reads a plain-text file from disk and opens it pre-filled in
+        the Add dialog (Data or ASCII, per the DATA/ASCII line formats --
+        see registers.parse_data_line()) so the user can review/adjust the
+        name and type before it's actually added. GitHub issue #11."""
+        if self._memory is None:
+            messagebox.showwarning("No Memory Loaded", "Load or start a memory buffer first.")
+            return
+
+        path = filedialog.askopenfilename(
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        if not path:
+            return
+        try:
+            content = Path(path).read_text(encoding="ascii")
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("Could not read %s for XM file import: %s", path, e)
+            messagebox.showerror("Could Not Read File", str(e))
+            return
+
+        default_name = Path(path).stem[:7] or "IMPORT"
+        stripped_content = content.rstrip("\n")
+        guessed_type = _guess_file_type(
+            [line for line in stripped_content.split("\n") if line != ""]
+        )
+        # The guessed type just picks which editor is shown first --
+        # XMFileDialog pre-fills *both* the Data and ASCII boxes with this
+        # same content when given `initial=`, so switching the type
+        # dropdown afterward re-labels the same lines rather than clearing
+        # whichever box wasn't showing.
+        XMFileDialog(
+            self,
+            lambda name, file_type, kwargs: self._save_new_or_edited_file(
+                name, file_type, kwargs
+            ),
+            initial={
+                "name": default_name,
+                "file_type": guessed_type,
+                "content": stripped_content,
+            },
+        )
+
+    def _export_file(self, f):
+        default_name = f"{f.name.rstrip()}.txt"
+        path = filedialog.asksaveasfilename(
+            initialfile=default_name,
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            if f.file_type == ExtendedMemory.TYPE_DATA:
+                lines = f.get_data_lines()
+            elif f.file_type == ExtendedMemory.TYPE_ASCII:
+                lines = f.get_records()
+            else:
+                raise ValueError(f"Export isn't supported for {f.type_label} files.")
+            Path(path).write_text("\n".join(lines) + "\n", encoding="ascii")
+        except (OSError, ValueError, UnicodeEncodeError) as e:
+            logger.warning("Could not export XM file %r to %s: %s", f.name, path, e)
+            messagebox.showerror("Could Not Export File", str(e))
+            return
+        logger.info("XM file %r exported to %s", f.name, path)
+        messagebox.showinfo("Exported", f"{f.name.rstrip()!r} written to {path}")
 
     def _edit_file(self, header_addr: int):
         xm = self._xm()
@@ -193,22 +320,9 @@ class XMFilesTab(ctk.CTkFrame):
             return
 
         def save(name, file_type, kwargs):
-            # Editing is implemented as remove-then-add (see
-            # ExtendedMemory.remove_file()'s docstring): there's no
-            # in-place content resize, so the edited file is rebuilt fresh
-            # and ends up positioned after whatever files remain, rather
-            # than keeping its original slot.
-            try:
-                xm2 = self._xm()
-                xm2.remove_file(header_addr)
-                xm2.add_file(name, file_type, **kwargs)
-            except (ValueError, DM41LMemoryError) as e:
-                logger.warning("Could not save XM file %r: %s", name, e)
-                messagebox.showerror("Could Not Save File", str(e))
-                return
-            logger.info("XM file edited: %r (%s)", name, file_type)
-            self._notify_change()
-            self.render(self._memory)
+            self._save_new_or_edited_file(
+                name, file_type, kwargs, replacing_addr=header_addr
+            )
 
         XMFileDialog(self, save, existing=existing)
 

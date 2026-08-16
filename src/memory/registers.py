@@ -10,7 +10,11 @@ comparing HP41 documentation with the implementation of the Register and
 Memory classes.
 """
 
+import math
+import re
 from decimal import Decimal, Context, ROUND_HALF_EVEN
+
+from .trigraphs import encode_trigraphs, decode_trigraphs
 
 
 class DM41LMemoryError(ValueError):
@@ -204,6 +208,85 @@ class Register:
             new_data.append(byte)
         self._data = new_data
 
+    # Byte-0 marker for a register holding short alpha text rather than a
+    # BCD number (docs/memory.md "Alpha Storage"): a register whose first
+    # byte is exactly 0x10 holds 1-6 ASCII characters in the remaining 6
+    # bytes, NUL-padded on the *left* (i.e. right-justified) when shorter
+    # than 6 characters. This is distinct from get_ascii()/set_ascii()
+    # above, which just treat all 7 bytes as raw left-justified text with
+    # no marker byte or hardware-format padding -- that's what XM file name
+    # registers use, not what a data register holding text uses.
+    ALPHA_TEXT_MARKER = 0x10
+
+    def is_alpha_text(self) -> bool:
+        """True if this looks like a data register holding short alpha
+        text per the hardware convention (see ALPHA_TEXT_MARKER above),
+        rather than a BCD number. Note a BCD register can never produce a
+        false positive here: 0x10's high nibble (1) is not a legal BCD
+        sign nibble (only 0/9 are), so the two encodings can't collide."""
+        return self.size == 7 and self._data[0] == self.ALPHA_TEXT_MARKER
+
+    def get_alpha_bytes(self) -> bytes:
+        """Decodes this register as short alpha *bytes* -- the raw
+        HP41/DM41L (FOCAL) character codes, not decoded to text. Raises
+        ValueError if it isn't marked as an alpha-text register (see
+        is_alpha_text()). Callers that know the content is safely plain
+        ASCII can use get_alpha_text() instead; callers that need to
+        handle FOCAL's non-ASCII characters (docs/trigraphs.md) should
+        work with these raw bytes and trigraphs.encode_trigraphs()."""
+        if not self.is_alpha_text():
+            raise ValueError(
+                f"Register {self.get_hex()} is not alpha-marked "
+                f"(byte 0 must be 0x{self.ALPHA_TEXT_MARKER:02x})."
+            )
+        # Real text is right-justified in the remaining 6 bytes, with any
+        # padding as *leading* NUL bytes -- so trimming leading NULs (not
+        # filtering all NULs, which would corrupt a genuine embedded NUL
+        # were one ever legal here) recovers exactly the original content.
+        return bytes(self._data[1:]).lstrip(b"\x00")
+
+    def set_alpha_bytes(self, data: bytes):
+        """Writes `data` (1-6 raw HP41/DM41L character bytes -- not
+        necessarily plain ASCII, see get_alpha_bytes()) into this register
+        using the hardware's alpha-text encoding (see ALPHA_TEXT_MARKER
+        above). Requires a 7-byte register, matching every real data
+        register this format is used with."""
+        if self.size != 7:
+            raise ValueError(
+                f"Alpha-text encoding requires a 7-byte register, got {self.size} bytes."
+            )
+        if not 1 <= len(data) <= 6:
+            raise ValueError(f"Alpha content must be 1-6 characters, got {len(data)}.")
+
+        new_data = bytearray(7)
+        new_data[0] = self.ALPHA_TEXT_MARKER
+        new_data[1 + (6 - len(data)) :] = data
+        self._data = new_data
+
+    def get_alpha_text(self) -> str:
+        """Decodes this register as short *plain-ASCII* alpha text.
+        Raises ValueError if it isn't alpha-marked, or if its content
+        includes a FOCAL character with no plain-ASCII meaning (use
+        get_alpha_bytes() + trigraphs.encode_trigraphs() for those)."""
+        try:
+            return self.get_alpha_bytes().decode("ascii")
+        except UnicodeDecodeError as e:
+            raise ValueError(
+                f"Register {self.get_hex()} holds a non-ASCII FOCAL "
+                f"character -- use get_alpha_bytes() instead: {e}"
+            ) from e
+
+    def set_alpha_text(self, text: str):
+        """Writes `text` (1-6 plain-ASCII characters) into this register
+        using the hardware's alpha-text encoding (see ALPHA_TEXT_MARKER
+        above). Use set_alpha_bytes() directly for FOCAL characters with
+        no plain-ASCII meaning (docs/trigraphs.md)."""
+        try:
+            encoded = text.encode("ascii")
+        except UnicodeEncodeError as e:
+            raise ValueError(f"Text contains non-ASCII characters: {e}") from e
+        self.set_alpha_bytes(encoded)
+
     def get_ascii(self) -> str:
         """
         Reads this register as raw ASCII text, one character per byte,
@@ -277,6 +360,93 @@ class Register:
 
     def __repr__(self):
         return f"Register({self.get_hex()})"
+
+
+# -- DATA line format (GitHub issue #11) -------------------------------
+#
+# Both extended-memory "Data" files and main memory's data registers are
+# import/exported one register per line, in a plain-ASCII text format
+# where each line is exactly one of:
+#   - a decimal floating point number (e.g. "3.5", "-42", "1e-5")
+#   - 1-6 *characters* of alpha text (a register holding alpha text per
+#     Register.set_alpha_bytes()/ALPHA_TEXT_MARKER above), written as
+#     trigraphs.encode_trigraphs() would render it: plain ASCII for any
+#     byte that's safely plain ASCII, and a trigraph escape (see
+#     docs/trigraphs.md) for any HP41/DM41L FOCAL character that isn't --
+#     the 1-6 count is of *decoded bytes*, not source characters, since a
+#     single trigraph like "\E" can be several source characters long but
+#     always decodes to exactly one register byte.
+#   - "0x" followed by exactly 14 hex digits -- the register's raw bytes,
+#     used as a fallback for content that isn't a valid number or a valid
+#     1-6 character alpha string (e.g. a corrupted/hand-crafted register).
+#     The "0x" prefix is required (rather than treating any bare 14-digit
+#     string as hex) specifically so an all-decimal-digit hex string can't
+#     be confused with a plain decimal number.
+#
+# These three forms don't overlap: a BCD register's first nibble can only
+# be 0 or 9 (see Register.get_bcd_number()), which can never equal the
+# alpha marker's first nibble (1), the "0x" prefix makes the raw-hex form
+# syntactically distinct from a bare number or short text, and a
+# trigraph's leading backslash never appears in valid float syntax.
+_HEX_LINE_RE = re.compile(r"^0[xX]([0-9a-fA-F]{14})$")
+
+
+def format_data_line(register: "Register") -> str:
+    """Formats one register as a DATA line: a number if it holds a valid
+    BCD value, trigraph-encoded alpha text if it's alpha-marked, or a
+    "0x"-prefixed raw-hex fallback otherwise (see the module note above)."""
+    try:
+        number = register.get_bcd_number()
+    except ValueError:
+        pass
+    else:
+        # repr() gives the shortest string that round-trips back to this
+        # exact float via float() -- the same approach set_bcd_number()
+        # itself uses (see its docstring), so parse_data_line(line) below
+        # is guaranteed to reproduce the same register bytes.
+        return repr(number)
+
+    if register.is_alpha_text():
+        return encode_trigraphs(register.get_alpha_bytes())
+
+    return "0x" + register.get_hex()
+
+
+def parse_data_line(line: str) -> "Register":
+    """Parses one DATA line (see the module note above) into a new 7-byte
+    Register. Raises ValueError if `line` doesn't match any of the three
+    accepted forms."""
+    hex_match = _HEX_LINE_RE.match(line.strip())
+    if hex_match:
+        return Register.from_hex(hex_match.group(1))
+
+    try:
+        number = float(line)
+    except ValueError:
+        number = None
+    if number is not None:
+        if not math.isfinite(number):
+            raise ValueError(f"{line!r} is not a finite number.")
+        reg = Register(size=7)
+        reg.set_bcd_number(number)
+        return reg
+
+    try:
+        decoded = decode_trigraphs(line)
+    except ValueError as e:
+        raise ValueError(
+            f"{line!r} isn't a valid DATA line -- must be a decimal "
+            "number, 1-6 characters of text (trigraphs allowed -- see "
+            f"docs/trigraphs.md), or 0x + 14 hex digits. ({e})"
+        ) from e
+    if not 1 <= len(decoded) <= 6:
+        raise ValueError(
+            f"{line!r} decodes to {len(decoded)} character(s) after "
+            "trigraph expansion -- alpha text must be 1-6 characters."
+        )
+    reg = Register(size=7)
+    reg.set_alpha_bytes(decoded)
+    return reg
 
 
 class AlphaRegister(Register):

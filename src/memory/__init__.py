@@ -19,7 +19,10 @@ the re-exports below, so `from memory import Memory, Register, ...`
 elsewhere in the codebase (or in external code) is unaffected. See the
 individual submodules for what lives where:
 
-  registers.py     Register, AlphaRegister, DM41LMemoryError
+  registers.py     Register, AlphaRegister, DM41LMemoryError,
+                    format_data_line/parse_data_line (DATA line format)
+  trigraphs.py     encode_trigraphs/decode_trigraphs (docs/trigraphs.md --
+                    the HP41/DM41L FOCAL character set's non-ASCII symbols)
   constants.py     address-range and sentinel-register constants
   regions.py       MemoryRegion and its non-XM subclasses
   xm_file.py       XMFile, ExtendedMemory (extended-memory file storage)
@@ -29,7 +32,14 @@ individual submodules for what lives where:
                     accessors built on top of it)
 """
 
-from .registers import DM41LMemoryError, Register, AlphaRegister
+from .registers import (
+    DM41LMemoryError,
+    Register,
+    AlphaRegister,
+    format_data_line,
+    parse_data_line,
+)
+from .trigraphs import encode_trigraphs, decode_trigraphs
 from .constants import (
     STATUS_REGISTERS_RANGE,
     VOID_RANGE,
@@ -51,7 +61,7 @@ from .regions import (
     PrimaryData,
     UnusedRegion,
 )
-from .xm_file import XMFile, ExtendedMemory
+from .xm_file import XMFile, ExtendedMemory, NAME_MIN_CHAR, NAME_MAX_CHAR
 from .program_info import ProgramInfo
 from .memory import Memory
 
@@ -76,6 +86,10 @@ __all__ = [
     "DM41LMemoryError",
     "Register",
     "AlphaRegister",
+    "format_data_line",
+    "parse_data_line",
+    "encode_trigraphs",
+    "decode_trigraphs",
     "STATUS_REGISTERS_RANGE",
     "VOID_RANGE",
     "KEY_ASSIGNMENTS_RANGE",
@@ -95,6 +109,8 @@ __all__ = [
     "UnusedRegion",
     "XMFile",
     "ExtendedMemory",
+    "NAME_MIN_CHAR",
+    "NAME_MAX_CHAR",
     "ProgramInfo",
     "Memory",
     "REGION_CLASSES",

@@ -12,10 +12,11 @@ CTkScrollableFrame workaround in gui/scroll_support.py.
 """
 
 import logging
-from tkinter import ttk, messagebox
+from pathlib import Path
+from tkinter import ttk, filedialog, messagebox
 import customtkinter as ctk
 
-from memory import Memory, Register, PRIMARY_DATA_END
+from memory import Memory, Register, PRIMARY_DATA_END, format_data_line, parse_data_line
 from gui.register_edit_dialog import RegisterEditDialog
 from gui.memory_ranges import MIN_SANE_R00
 from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
@@ -32,14 +33,20 @@ class DataRegistersTab(ctk.CTkFrame):
         self._memory: Memory = None
         self._on_change = on_change
 
-        _, self._header_label = build_tab_header(
+        header, self._header_label = build_tab_header(
             self,
             button_kwargs={
-                "text": "Edit Selected...",
+                "text": "Edit...",
                 "width": 130,
                 "command": self._edit_selected,
             },
         )
+        ctk.CTkButton(
+            header, text="Export...", width=90, command=self._export_registers,
+        ).pack(side="right", padx=(0, 8))
+        ctk.CTkButton(
+            header, text="Import...", width=90, command=self._import_registers,
+        ).pack(side="right", padx=(0, 8))
 
         table_frame = ctk.CTkFrame(self, fg_color="transparent")
         table_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -259,6 +266,115 @@ class DataRegistersTab(ctk.CTkFrame):
                 values=(f"R{i:02d}", f"0x{addr:03x}", register.get_hex(), str(register)),
                 tags=("oddrow",) if pos % 2 else (),
             )
+
+    def _current_range(self):
+        """Returns (r00, count) for the currently-displayed data
+        registers, or None if there's no memory loaded / no sane R00 --
+        the same check render() uses, shared here so Export/Import don't
+        each re-derive it."""
+        if self._memory is None:
+            return None
+        try:
+            r00 = self._memory.R00()
+        except Exception:
+            return None
+        if r00 < MIN_SANE_R00:
+            return None
+        return r00, (PRIMARY_DATA_END + 1) - r00
+
+    def _export_registers(self):
+        """Writes every currently-displayed data register as one DATA-
+        format line each (see registers.format_data_line()), in R00..end
+        order -- GitHub issue #11."""
+        current_range = self._current_range()
+        if current_range is None:
+            messagebox.showwarning(
+                "No Data Registers", "Load or start a memory buffer first."
+            )
+            return
+        r00, count = current_range
+
+        path = filedialog.asksaveasfilename(
+            initialfile="registers.txt",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            lines = [
+                format_data_line(self._memory.get_register(addr))
+                for addr in range(r00, PRIMARY_DATA_END + 1)
+            ]
+            Path(path).write_text("\n".join(lines) + "\n", encoding="ascii")
+        except (OSError, UnicodeEncodeError) as e:
+            logger.warning("Could not export data registers to %s: %s", path, e)
+            messagebox.showerror("Could Not Export", str(e))
+            return
+        logger.info("Exported %d data registers to %s", count, path)
+        messagebox.showinfo("Exported", f"{count} data registers written to {path}")
+
+    def _import_registers(self):
+        """Reads a DATA-format file (see registers.parse_data_line()) and
+        overwrites the currently-displayed data registers with it, in
+        R00..end order -- GitHub issue #11. The file must have exactly as
+        many lines as there are currently-displayed registers; this does
+        not resize main memory."""
+        current_range = self._current_range()
+        if current_range is None:
+            messagebox.showwarning(
+                "No Data Registers", "Load or start a memory buffer first."
+            )
+            return
+        r00, count = current_range
+
+        path = filedialog.askopenfilename(
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        if not path:
+            return
+        try:
+            content = Path(path).read_text(encoding="ascii")
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("Could not read %s for register import: %s", path, e)
+            messagebox.showerror("Could Not Read File", str(e))
+            return
+
+        # Every line matters here -- each maps to one specific register
+        # address -- so, unlike the XM file dialogs, blank lines aren't
+        # silently skipped; a blank line just fails to parse like any
+        # other bad line would.
+        lines = content.rstrip("\n").split("\n") if content.strip("\n") else []
+        if len(lines) != count:
+            messagebox.showerror(
+                "Line Count Mismatch",
+                f"{path} has {len(lines)} line(s), but there are {count} "
+                f"currently-displayed data registers (R00-R{count - 1:02d}). "
+                "Import requires an exact match; it does not resize main "
+                "memory.",
+            )
+            return
+
+        new_registers = []
+        for i, line in enumerate(lines, start=1):
+            try:
+                new_registers.append(parse_data_line(line))
+            except ValueError as e:
+                messagebox.showerror("Invalid Content", f"Line {i} ({line!r}): {e}")
+                return
+
+        if not messagebox.askyesno(
+            "Import Data Registers",
+            f"Overwrite all {count} data registers (R00-R{count - 1:02d}) "
+            f"with the contents of {path}?",
+        ):
+            return
+
+        for addr, reg in zip(range(r00, PRIMARY_DATA_END + 1), new_registers):
+            self._memory.set_register(addr, reg)
+        logger.info("Imported %d data registers from %s", count, path)
+        self._notify_change()
+        self.render(self._memory)
 
     def _selected_addr(self):
         for tree in self._trees:

@@ -7,12 +7,20 @@ from.
 
 from typing import Optional, TYPE_CHECKING
 
-from .registers import Register, DM41LMemoryError
+from .registers import Register, DM41LMemoryError, format_data_line, parse_data_line
+from .trigraphs import encode_trigraphs, decode_trigraphs
 from .constants import XM_REGIONS, ZERO_REGISTER, EOM_REGISTER
 from .regions import MemoryRegion
 
 if TYPE_CHECKING:
     from .memory import Memory
+
+# XM file names are restricted to plain ASCII 32-101 (space through
+# lowercase 'e') -- unlike a Data/ASCII file's *content*, which supports
+# the full HP41/DM41L FOCAL character set via trigraphs (docs/trigraphs.md),
+# names don't get trigraph translation at all.
+NAME_MIN_CHAR = 0x20
+NAME_MAX_CHAR = 0x65
 
 
 class XMFile:
@@ -108,10 +116,25 @@ class XMFile:
         return regs
 
     def get_numbers(self) -> list:
-        """Data-type files: one BCD number per register, in record order."""
+        """Data-type files: one BCD number per register, in record order.
+        Raises ValueError if any register isn't a valid BCD number (e.g.
+        it holds alpha text instead) -- use get_data_lines() for files
+        that may hold a mix of numbers, short text, and/or raw content."""
         if self.file_type != self.TYPE_DATA:
             raise ValueError(f"{self.name!r} is not a Data file ({self.type_label})")
         return [reg.get_bcd_number() for reg in self.data_registers()]
+
+    def get_data_lines(self) -> list:
+        """Data-type files: one DATA-format line per register (see
+        registers.format_data_line()), in record order -- a number, short
+        alpha text, or a "0x"-prefixed raw-hex fallback, per register.
+        Unlike get_numbers(), this never raises for a register that isn't
+        a plain number, so it's what import/export (GitHub issue #11) and
+        remove_file()'s rebuild use to round-trip a Data file's full
+        content regardless of what each register actually holds."""
+        if self.file_type != self.TYPE_DATA:
+            raise ValueError(f"{self.name!r} is not a Data file ({self.type_label})")
+        return [format_data_line(reg) for reg in self.data_registers()]
 
     def get_records(self) -> list:
         """
@@ -134,6 +157,13 @@ class XMFile:
         defensive fallback for leftover zero-filled space below a
         partially-used file; it hasn't been tested against a file that
         legitimately contains a genuine zero-length record.
+
+        Each record's raw bytes are trigraph-encoded (see
+        trigraphs.encode_trigraphs()/docs/trigraphs.md) rather than
+        ascii-decoded, since a real record can hold HP41/DM41L (FOCAL)
+        characters with no plain-ASCII meaning -- ascii-decoding those
+        would previously have silently mangled them into "?" replacement
+        characters instead of round-tripping losslessly.
         """
         if self.file_type != self.TYPE_ASCII:
             raise ValueError(f"{self.name!r} is not an ASCII file ({self.type_label})")
@@ -147,9 +177,7 @@ class XMFile:
             length = stream[i]
             if length == 0 or i + 1 + length > len(stream):
                 break
-            records.append(
-                bytes(stream[i + 1 : i + 1 + length]).decode("ascii", errors="replace")
-            )
+            records.append(encode_trigraphs(bytes(stream[i + 1 : i + 1 + length])))
             i += 1 + length
         return records
 
@@ -554,6 +582,7 @@ class ExtendedMemory(MemoryRegion):
         file_type: int,
         *,
         numbers: Optional[list] = None,
+        data_lines: Optional[list] = None,
         records: Optional[list] = None,
         instruction_bytes: Optional[bytes] = None,
     ) -> XMFile:
@@ -563,6 +592,13 @@ class ExtendedMemory(MemoryRegion):
 
         Exactly one of the following must be given, matching file_type:
           - numbers (TYPE_DATA): a list of floats, one BCD register each.
+          - data_lines (TYPE_DATA): a list of DATA-format strings (see
+            registers.parse_data_line()), one register each -- like
+            numbers, but each entry can also be 1-6 characters of alpha
+            text or a "0x"-prefixed raw-hex register. This is what
+            import/export (GitHub issue #11) and the GUI's Data-file
+            editor use; numbers= is kept for callers that only ever deal
+            in plain numbers.
           - records (TYPE_ASCII): a list of strings, packed as
             [1-byte length][text] records (docs/memory.md sec. 4.3), with
             a trailing 0xFF terminator byte always written explicitly, so
@@ -587,29 +623,54 @@ class ExtendedMemory(MemoryRegion):
             raise ValueError(
                 f"File name {name!r} must be 1-7 characters, got {len(name)}."
             )
-        try:
-            name.encode("ascii")
-        except UnicodeEncodeError as e:
-            raise ValueError(f"File name contains non-ASCII characters: {e}") from e
+        for ch in name:
+            if not NAME_MIN_CHAR <= ord(ch) <= NAME_MAX_CHAR:
+                raise ValueError(
+                    f"File name {name!r} contains {ch!r} (code {ord(ch)}), "
+                    f"outside the allowed range {NAME_MIN_CHAR}-{NAME_MAX_CHAR} "
+                    "(ASCII space through lowercase 'e'). Unlike file "
+                    "content, names don't support trigraphs."
+                )
         padded_name = name.ljust(7)
 
+        # A real DM41L rejects a duplicate directory entry name -- caught
+        # here (rather than left for the emulator to reject later) so a
+        # dump built by this tool can't be created in a state real
+        # hardware wouldn't accept. This also naturally allows editing a
+        # file "in place" under its own unchanged name: the GUI's Edit
+        # flow (and remove_file()'s own rebuild) always removes the old
+        # entry *before* calling add_file(), so by the time this check
+        # runs, that name is no longer in list_files().
+        if any(f.name == padded_name for f in self.list_files()):
+            raise DM41LMemoryError(
+                f"A file named {name!r} already exists in extended memory "
+                "-- duplicate names aren't allowed (the real DM41L would "
+                "reject this)."
+            )
+
         byte_length = None
-        given = [x for x in (numbers, records, instruction_bytes) if x is not None]
+        given = [
+            x for x in (numbers, data_lines, records, instruction_bytes) if x is not None
+        ]
         if len(given) != 1:
             raise ValueError(
-                "Pass exactly one of numbers=, records=, or instruction_bytes=."
+                "Pass exactly one of numbers=, data_lines=, records=, or "
+                "instruction_bytes=."
             )
 
         if file_type == self.TYPE_DATA:
-            if numbers is None:
-                raise ValueError("Data files require numbers=[...]")
-            if not numbers:
-                raise ValueError("Data files require at least one number")
-            data_registers = []
-            for n in numbers:
-                reg = Register(size=7)
-                reg.set_bcd_number(n)
-                data_registers.append(reg)
+            if numbers is None and data_lines is None:
+                raise ValueError("Data files require numbers=[...] or data_lines=[...]")
+            if numbers is not None:
+                if not numbers:
+                    raise ValueError("Data files require at least one number")
+                data_registers = [Register(size=7) for _ in numbers]
+                for reg, n in zip(data_registers, numbers):
+                    reg.set_bcd_number(n)
+            else:
+                if not data_lines:
+                    raise ValueError("Data files require at least one line")
+                data_registers = [parse_data_line(line) for line in data_lines]
 
         elif file_type == self.TYPE_ASCII:
             if records is None:
@@ -618,11 +679,18 @@ class ExtendedMemory(MemoryRegion):
                 raise ValueError("ASCII files require at least one record")
             stream = bytearray()
             for r in records:
-                encoded = r.encode("ascii")
+                # decode_trigraphs (not r.encode("ascii")): a record can
+                # contain HP41/DM41L FOCAL characters with no plain-ASCII
+                # meaning, written as trigraph escapes -- see
+                # docs/trigraphs.md and trigraphs.decode_trigraphs().
+                try:
+                    encoded = decode_trigraphs(r)
+                except ValueError as e:
+                    raise ValueError(f"Record {r!r}: {e}") from e
                 if len(encoded) > 255:
                     raise ValueError(
-                        f"Record {r!r} is longer than 255 characters "
-                        "(1-byte length prefix can't hold it)."
+                        f"Record {r!r} decodes to {len(encoded)} characters, "
+                        "longer than 255 (1-byte length prefix can't hold it)."
                     )
                 stream.append(len(encoded))
                 stream += encoded
@@ -785,7 +853,10 @@ class ExtendedMemory(MemoryRegion):
             if f.header_addr == header_addr:
                 continue
             if f.file_type == self.TYPE_DATA:
-                rebuild.append((f.name, f.file_type, {"numbers": f.get_numbers()}))
+                # get_data_lines() (not get_numbers()) so a Data file
+                # containing alpha-text or raw-hex registers -- not just
+                # plain numbers -- survives rebuilding correctly.
+                rebuild.append((f.name, f.file_type, {"data_lines": f.get_data_lines()}))
             elif f.file_type == self.TYPE_ASCII:
                 rebuild.append((f.name, f.file_type, {"records": f.get_records()}))
             elif f.file_type == self.TYPE_PROGRAM:
