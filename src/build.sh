@@ -18,7 +18,13 @@ cd "$(dirname "$0")"
 
 rm -rf build dist
 
+# Generate a version id for the about box.
 echo "_version = '$(git describe --tags --always)'" >dm41lversion.py
+
+# Make the icons
+bash ../resources/makeicon.sh
+
+# Generate the binary
 pyinstaller dm41l.spec
 
 # macOS requires at least an ad-hoc signature for the app to launch at all
@@ -27,20 +33,12 @@ pyinstaller dm41l.spec
 if [ "$(uname)" = "Darwin" ]; then
     codesign --force --deep --sign - "dist/DM41L Explorer.app"
 else
-    # The Linux/Windows build is a PyInstaller "onedir" bundle: the
-    # executable needs its _internal/ support-files folder alongside it
-    # to run. Drop a short README into that output directory so anyone
+    # Drop a short README into that output directory so anyone
     # who unzips a release and sees an unfamiliar _internal folder next
-    # to the exe knows it's required, not clutter. Not needed for macOS
-    # -- the .app bundle is already a single self-contained unit.
+    # to the exe knows it's required, not clutter.
     cp "../resources/dist_readme.txt" "dist/dm41lexplorer/README.txt"
 
-    # Linux has no equivalent of a Windows .exe's baked-in icon (PyInstaller
-    # doesn't support one there), so bundle MyIcon.png alongside the binary
-    # -- ready to use as a .desktop file's Icon= entry. `uname` reports
-    # "Linux" both natively and under WSL; on a Windows Git Bash shell it
-    # reports something like "MINGW64_NT-...", so this correctly only fires
-    # for actual Linux builds.
+    # Add a "sample" icon to the Linux bundle.
     if [ "$(uname)" = "Linux" ]; then
         cp "../resources/MyIcon.png" "dist/dm41lexplorer/MyIcon.png"
     fi
