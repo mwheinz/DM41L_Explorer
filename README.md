@@ -110,6 +110,12 @@ DM41L memory dumps rather than an official spec, so treat field meanings as
 well-tested hypotheses rather than certainties — see the docs for what's
 confirmed versus still under research.
 
+## Contributing
+
+Bug reports, feature requests, and pull requests are welcome — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for how to get set up, run the
+tests, and what makes a good bug report or PR.
+
 ## Known limitations
 
 - Key assignments and alarms aren't decoded yet (Overview shows a
