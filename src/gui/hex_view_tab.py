@@ -56,7 +56,7 @@ REGIONS = [
     ("status", "Status Registers", "#cfe0f5", "#39507a"),
     ("unused", "Unused / Free", "#e8e8e8", "#3a3a3a"),
     ("xm", "XM", "#d7f0dc", "#3f6b4f"),
-    ("key_alarm", "Key Assignments / Alarms", "#e6d9f5", "#6b4f8c"),
+    ("key", "Key Assignments", "#e6d9f5", "#6b4f8c"),
     ("program", "User Programs", "#f5e3c2", "#8c6b2f"),
     ("data", "Data Memory", "#c9f0ee", "#2f7a7a"),
     ("nonexistent", "Inaccessible", "#d0d0d0", "#242424"),
@@ -83,7 +83,7 @@ def _classify(
         return "xm"
     if addr <= MAIN_MEMORY_END:
         if addr < key_assignments_end:
-            return "key_alarm"
+            return "key"
         if not has_partition:
             return "unused"
         # Alarms and genuinely free registers still share one undivided
