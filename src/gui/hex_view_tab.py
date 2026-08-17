@@ -54,43 +54,50 @@ XM1_END = 0x2EF
 # is also legend display order.
 REGIONS = [
     ("status", "Status Registers", "#cfe0f5", "#39507a"),
-    ("unused", "Unused / Void", "#e8e8e8", "#3a3a3a"),
-    ("xm0", "Extended Memory #0", "#d7f0dc", "#3f6b4f"),
+    ("unused", "Unused / Free", "#e8e8e8", "#3a3a3a"),
+    ("xm", "XM", "#d7f0dc", "#3f6b4f"),
     ("key_alarm", "Key Assignments / Alarms", "#e6d9f5", "#6b4f8c"),
     ("program", "User Programs", "#f5e3c2", "#8c6b2f"),
     ("data", "Data Memory", "#c9f0ee", "#2f7a7a"),
-    ("xm1", "Extended Memory #1", "#d7f0dc", "#3f6b4f"),
-    ("nonexistent", "Non-existent (unused by emulator)", "#d0d0d0", "#242424"),
-    ("main_unknown", "Main Memory (no dump loaded -- subdivision unknown)", "#dadada", "#5a5a5a"),
+    ("nonexistent", "Inaccessible", "#d0d0d0", "#242424"),
 ]
 REGION_LABELS = {key: label for key, label, _, _ in REGIONS}
 
 
-def _classify(addr: int, r00: int, dot_end: int, has_partition: bool) -> str:
+def _classify(
+    addr: int, r00: int, dot_end: int, has_partition: bool, key_assignments_end: int
+) -> str:
     """Returns the region key for a single address. `has_partition` is
     False when no real dump is loaded yet (R00 below MIN_SANE_R00) -- in
     that case Main Memory is shown as one undivided band rather than
-    guessing at a program/data split from meaningless R00/.END. values."""
+    guessing at a program/data split from meaningless R00/.END. values.
+    `key_assignments_end` (Memory.key_assignments_end()) is independent of
+    R00/.END. sanity -- it's found by scanning for the 0xF0 marker byte
+    Key Assignment registers start with -- so it's honored even when
+    `has_partition` is False."""
     if DISPLAY_START <= addr <= STATUS_END:
         return "status"
     if addr <= UNUSED_END:
-        return "unused"
+        return "nonexistent"
     if addr <= XM0_END:
-        return "xm0"
+        return "xm"
     if addr <= MAIN_MEMORY_END:
+        if addr < key_assignments_end:
+            return "key_alarm"
         if not has_partition:
-            return "main_unknown"
-        # Key Assignments and Alarms share one undivided span here -- see
-        # docs/memory.md's FUTURE_STATS note in overview_tab.py: this tool
-        # doesn't yet know how to tell them apart from each other, only
-        # where the combined span starts (0x0c0) and ends (.END.).
+            return "unused"
+        # Alarms and genuinely free registers still share one undivided
+        # span here -- this tool doesn't yet know how to tell those apart
+        # from each other, only where the combined span starts (right
+        # after the identified Key Assignments registers) and ends
+        # (.END.). See regions.py's Alarms class.
         if addr < dot_end:
             return "unused"
         if addr < r00:
             return "program"
         return "data"
     if addr <= XM1_END:
-        return "xm1"
+        return "xm"
     return "nonexistent"
 
 
@@ -276,6 +283,7 @@ class HexViewTab(ctk.CTkFrame):
             r00 = dot_end = 0
 
         has_partition = r00 >= MIN_SANE_R00 and dot_end <= r00
+        key_assignments_end = memory.key_assignments_end()
 
         count = DISPLAY_END - DISPLAY_START + 1
         self._header_label.configure(
@@ -284,7 +292,7 @@ class HexViewTab(ctk.CTkFrame):
 
         for addr in range(DISPLAY_START, DISPLAY_END + 1):
             register = memory.get_register(addr)
-            region_key = _classify(addr, r00, dot_end, has_partition)
+            region_key = _classify(addr, r00, dot_end, has_partition, key_assignments_end)
             self._tree.insert(
                 "",
                 "end",

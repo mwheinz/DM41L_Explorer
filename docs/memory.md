@@ -41,6 +41,25 @@ documentation found on the internet in PDF format.
   high memory. This same high-to-low convention governs saved files in Extended
   Memory (see §4), but not user data stored in main memory.
 
+### 1.1 Reading Direction Quick Reference
+
+Several regions grow toward *lower* addresses as more gets added to them, so
+the newest/most-recent content ends up at the low-address end rather than
+the high-address end a normal top-to-bottom dump printout would suggest.
+The exact flip differs by region, so don't assume one region's convention
+applies to another — check this table first:
+
+| Region | Across registers, newest/forward is... | Within a register, forward is... |
+| --- | --- | --- |
+| Program Memory | Toward *lower* register numbers — continuing at the next lower register once you run off the bottom of the current one (see `docs/program.md`'s `address(reg, offset)` formula) | Left-to-right (offset increasing) — normal reading order |
+| Key Assignments (§3, Main Memory) | Toward *lower* register numbers — a brand-new assignment always lands in the lowest register, 0xC0, pushing everything else up | **Right-to-left** — the entry closest to the `F0` marker byte is always the newer of a register's two entries |
+| Extended Memory (§4) | Toward *lower* register numbers within a region — files pack from the region's top (highest address) downward in creation order | Left-to-right (normal) — see §4.2's "nearest-header-first" record packing |
+| Data Memory (Register 00, 01, 02...) | Toward *higher* register numbers — the one region that reads normally: Register 00 sits at R00, Register 01 at R00+1, etc. | Left-to-right (normal) |
+
+Key Assignments is the one region where the within-register direction also
+flips, not just the across-register one — see the Key Assignments entry in
+§3's Main Memory table below for the byte format this comes from.
+
 ## 2. Memory Register Structure and Data Formats
 
 ### Word Size:
@@ -105,13 +124,13 @@ reflected in the DM41L emulator.
 | O | Alpha characters 15-21 | 0x07 | 
 | P | Alpha characters 22-25: P[0:3], scratch: P[4-6] | 0x08 |
 | Q | scratch | 0x09 |
-| F | Different sources may call this register "F", "R", or "Append". unshifted key assign: F[3:6], scratch: F[0:2] | 0x0a |
+| F | Different sources may call this register "F", "R", or "Append". unshifted key assignment bitmask: F[3:6], scratch: F[0:2] | 0x0a |
 | Execution Stack | 2 registers that provide a 6-level address stack. Each entry in the stack is 2 bytes long. | 0x0b-0x0c |
 | a | return stack part 2 | 0x0b |
 | b | return stack part 1 | 0x0c | 
 | c | Contains ∑REG, R00, and ".END." | 0x0d |
 | d | User and System flags. | 0x0e | 
-| e | shifted key assign: e[3:6], scratch: e[2], LineNo e[0:1] | 0x0f |
+| e | shifted key assignment bitmask: e[3:6], scratch: e[2], LineNo e[0:1] | 0x0f |
 
 #### HP41 Alpha display:
 
@@ -124,7 +143,7 @@ comprised of 7-byte registers.
 
 | Main Memory Sub-Region | Description | Start | End |
 | ----------- | ----------- | ----------- | ----------- | 
-| Key assignments | User defined key assignments (note that the first key assignments may be stored in portions of Status Registers e and F. | 0xC0 | variable |
+| Key assignments | User defined key assignments to built-in/peripheral functions (see below) | 0xC0 | variable |
 | Alarms | User defined alarms. Detailed information is unknown. | After Key Assignments | variable |
 | User Programs | Space reserved for user programs. Programs begin at high addresses and proceed to lower addresses as they execute. | .END. | R00 |
 | Data Memory | Space reserved for user data. | R00 | 0x1FF |  
@@ -142,6 +161,14 @@ comprised of 7-byte registers.
   programs. The registers between ".END." and the last Alarm,
   Key Assignment, or address 0x0C0 are available for use by
   additional programs, alarms, or key assignments.
+
+#### Key Assignment Registers
+
+This is explained further in `docs/key_assignments.md`, a separate document
+(the same relationship this doc has with `docs/program.md` — see below):
+the exact register format, the key-byte formula, why registers F and e are
+existence-check bitmaps rather than a cache of the assignment data, and why
+a user-program assignment doesn't touch this region at all.
 
 ### Program Memory
 

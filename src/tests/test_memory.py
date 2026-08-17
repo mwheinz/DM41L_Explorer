@@ -1006,6 +1006,30 @@ def test_cold_start_signature_is_0x169_in_every_sample():
         assert cold_start == 0x169, path.name
 
 
+def test_key_assignments_end_detects_f0_marked_registers():
+    """keyassigns.dm41 has 8 real assignments packed two-per-register into
+    registers 0xc0-0xc3, each starting with the 0xf0 marker byte Wickes'
+    "Synthetic Programming on the HP-41C" (Section 2E) documents. Register
+    0xc4 is free/zeroed, so the scan should stop there."""
+    memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
+    assert memory.key_assignments_end() == 0xC4
+
+
+def test_key_assignments_end_is_start_when_no_assignments():
+    """Every other sample fixture predates key-assignment research and has
+    no assignments made, so register 0xc0 itself shouldn't carry the 0xf0
+    marker and the scan should report an empty region."""
+    for path in DATA_DIR.glob("*.dm41"):
+        if path.name == "keyassigns.dm41":
+            continue
+        memory = Memory.from_file(path)
+        assert memory.key_assignments_end() == 0xC0, path.name
+
+
+def test_key_assignments_end_on_fresh_memory():
+    assert Memory().key_assignments_end() == 0xC0
+
+
 def test_set_r00_rewrites_only_the_r00_field():
     memory = Memory.from_file(DATA_DIR / "empty.dm41")
     sigma_before = memory.SigmaReg()

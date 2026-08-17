@@ -11,7 +11,7 @@ from typing import Dict, Optional, Union
 from pathlib import Path
 
 from .registers import Register
-from .constants import PRIMARY_DATA_END
+from .constants import PRIMARY_DATA_END, KEY_ASSIGNMENTS_RANGE
 from .program_info import ProgramInfo
 
 
@@ -50,6 +50,14 @@ class Memory:
         self._special_registers["M"] = Register.from_hex("00011cd5ff73cb")
         self._special_registers["N"] = Register.from_hex("000000000000c0")
         self._special_registers["G"] = Register.from_hex("00")
+
+        # Address one past the last Key Assignments register (see
+        # key_assignments_end()'s docstring below). A freshly-constructed
+        # Memory has no dump loaded, so there's nothing to have scanned yet
+        # -- this defaults to KEY_ASSIGNMENTS_RANGE[0] (0xC0) itself, the
+        # same "no key assignments found" value _scan_key_assignments_end()
+        # returns for a real dump with an empty Key Assignments region.
+        self._key_assignments_end = KEY_ASSIGNMENTS_RANGE[0]
 
     def __eq__(self, other):
         if not isinstance(other, Memory):
@@ -132,6 +140,8 @@ class Memory:
                         raise ValueError(f"Malformed line {line}")
                     label = token[i][0]
                     memory._special_registers[label] = Register.from_hex(token[i + 1])
+
+        memory._key_assignments_end = memory._scan_key_assignments_end()
         return memory
 
     @classmethod
@@ -220,6 +230,55 @@ class Memory:
         nibbles[10] = addr & 0xF
         new_bytes = bytes((nibbles[i] << 4) | nibbles[i + 1] for i in range(0, 14, 2))
         self.set_register(self.REG_C_ADDR, Register(data=new_bytes))
+
+    # -- Key Assignments (starting at KEY_ASSIGNMENTS_RANGE[0] / 0xC0) --
+    #
+    # Each register holding user function key assignments starts with a
+    # 0xF0 marker byte, followed by up to two 3-byte assignment entries
+    # (function byte(s) + a key-designation byte). Reverse-engineered from
+    # William C. Wickes' "Synthetic Programming on the HP-41C" (Section
+    # 2E, "The Key Assignment Registers") and confirmed byte-for-byte
+    # against a real 8-assignment dump -- see
+    # docs/pdfs and the project's key-assignment research notes for the
+    # full derivation. Alarms and genuinely free registers occupy the
+    # remaining span up to .END.; telling those apart from each other
+    # isn't implemented yet (see regions.py's Alarms class).
+
+    def _scan_key_assignments_end(self) -> int:
+        """Scans upward from KEY_ASSIGNMENTS_RANGE[0] (0xC0) for as long as
+        each register's leading byte is the 0xF0 key-assignment marker,
+        and returns the address one past the last such register -- an
+        exclusive upper bound, suitable for e.g. `range(0xC0, end)`.
+        Returns KEY_ASSIGNMENTS_RANGE[0] itself if register 0xC0 doesn't
+        start a key-assignment register at all (no assignments made, or
+        no real dump loaded).
+
+        Bounded at PRIMARY_DATA_END as a hard backstop against a corrupt
+        dump wandering past the Key Assignments region entirely, rather
+        than trusting DotEnd()/R00() -- both of those are themselves
+        derived values that can be nonsense in a fresh or corrupt Memory,
+        so this scan deliberately doesn't depend on either.
+        """
+        addr = KEY_ASSIGNMENTS_RANGE[0]
+        while (
+            addr <= PRIMARY_DATA_END
+            and self.get_register(addr).get_bytes()[0] == 0xF0
+        ):
+            addr += 1
+        return addr
+
+    def key_assignments_end(self) -> int:
+        """Address one past the last Key Assignments register, as of the
+        last time this dump was loaded via from_string()/from_file() (see
+        _scan_key_assignments_end()). KEY_ASSIGNMENTS_RANGE[0] (0xC0)
+        itself if there are no key assignments.
+
+        This is cached at load time rather than recomputed on every call
+        (unlike R00()/DotEnd(), which are cheap single-register nibble
+        reads) -- a set_register() call after loading, e.g. from an edit
+        dialog, will NOT update this until the dump is reloaded.
+        """
+        return self._key_assignments_end
 
     # -- Register d (0x0E): the 56 user/system flags --
     #
