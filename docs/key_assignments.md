@@ -18,20 +18,22 @@ section at the end — everything above it is reference material.
 - **William C. Wickes, *Synthetic Programming on the HP-41C*** (`docs/pdfs/hp41-synthetic-prog.pdf`) — the primary source. Section 2E, "The Key Assignment Registers," and Section 4E, "The Key Assignment Flags," give full byte-level prose and worked examples, not just diagrams. Originally published as an article in the *PPC Calculator Journal*, November 1979, p.28.
 - **Keith Jarrett, *Synthetic Programming Made Easy*** (`docs/pdfs/hp41-synth-prog-easy.pdf`) — Section 6B and Figure 6.3 give the processor's actual USER-mode key-press lookup algorithm (see §4.7 below). Also references the *PPC ROM User's Manual* p.280, "Background for MK," for the same byte format Wickes describes — not yet independently checked against that source.
 - **"A programmers handbook v.2.07.pdf"** — covers the same ground as unexplained diagrams (Ch. 8 "Key assign flag registers & e," Ch. 39-42 "Key code maps," including a "Key assignment flag bits" keypad chart). Useful for cross-checking once you already know what the diagrams mean; not a good starting point on its own.
-- **`docs/pdfs/byte_table.html`** — a clean, already-extracted HTML table of all 256 byte values 0x00-0xFF with their Prefix/Suffix meanings (essentially Wickes' Table 2-1, "The HP-41C Byte Table," in directly-parseable form rather than a PDF diagram). Confirms every function byte code found in this document (see §4.8) and is the starting point for the full instruction-set table requirement (§6, item 5) — check here before re-deriving anything from the PDFs.
+- **`docs/pdfs/byte_table.html`** — a clean, already-extracted HTML table of all 256 byte values 0x00-0xFF with their Prefix/Suffix meanings (essentially Wickes' Table 2-1, "The HP-41C Byte Table," in directly-parseable form rather than a PDF diagram). Confirms every built-in function byte code found in this document (see §4.8) and is a starting point for the full instruction-set table requirement (§6, item 5) — check here before re-deriving anything from the PDFs.
+- **`docs/function_table.md`** — the DM41L's actual instruction set: a merged 256-row table (Dec, Hex, Instruction Prefix, Instruction Length, Function, Assignable?) covering every base byte value, plus separate Extended Functions ROM and Time ROM catalogs, built from "A programmers handbook v.2.07.pdf." The merge makes explicit that Prefix (program-byte meaning) and Function (key-assignment meaning) are the same for codes 064-224 but diverge for codes 000-015 (§5), and records for the first time which low-code functions can be key-assigned at all. Confirms every 2-byte peripheral function code found in this document (see §4.8) and, together with `byte_table.html`, is most of requirement 5 (§6) already done.
 - `docs/memory.md` §1.1 ("Reading Direction Quick Reference") and its "Key Assignment Registers" subsection under §3 Main Memory — the condensed version of §4 below, kept there for readers of the general memory map.
 - `docs/program.md` §5.2, "Decoding a Global Label's Name" — the format of a global label's header, whose 4th byte is a program's key assignment (see §4.6 below).
+- Not yet mined: `docs/pdfs/ppcrom-um.pdf` (PPC ROM User's Manual), `docs/pdfs/hp41-adv-prog-tips.pdf`, the CX/C41CV owner's manuals. `docs/pdfs/voyager_user_manual.pdf` is ruled out (wrong calculator family). `docs/pdfs/v11n4.pdf` (PPC Journal) has a minor SAVEK/GETK user program for backing up assignments to an XM file, not internal format detail.
 
 Everything in §4 below has been independently confirmed against real memory
-dumps captured by hand on a DM41L (`src/tests/data/keyassigns.dm41` and
-`src/tests/data/global-key-assignments.dm41`), not just derived from the
-PDFs.
+dumps captured by hand on a DM41L (`src/tests/data/keyassigns.dm41`,
+`src/tests/data/global-key-assignments.dm41`, and
+`src/tests/data/xrom-keyassignments.dm41`), not just derived from the PDFs.
 
 ## 2. Terminology
 
 - **Unshifted / shifted key** — every physical key on the keyboard can hold
   two independent assignments: one for a plain press, one for a press
-  preceded by the shift ("f") key. They're stored completely separately (see §4.2
+  preceded by the shift key. They're stored completely separately (see §4.2
   and §4.5).
 - **Key number** — a two-digit row/column identifier, `MN`, where `M` is the
   physical row (1-8) and `N` is the physical column. This is the notation
@@ -64,7 +66,7 @@ A key assignment can be recorded in one of two completely different places,
 depending on what it's assigned to:
 
 1. A built-in or peripheral function assignment is recorded as an entry in
-   the **Key Assignment Registers**, a variable-length buffer starting at `0x0C0` (§4.2).
+   the **Key Assignment Registers**, a buffer starting at `0x0C0` (§4.2).
 2. A user program assignment is recorded **inside that program's own global
    label header** (§4.6) and never touches the Key Assignment Registers at
    all.
@@ -81,13 +83,15 @@ displaying as a program line reading `""` for exactly this reason).
 Following the marker, up to **two** 3-byte entries are packed into the
 remaining 6 bytes of the register:
 
-    F0  [fn byte 1] [fn byte 2] [key byte]  [fn byte 1] [fn byte 2] [key byte]
-         \___________ entry 1 __________/    \__________ entry 2 __________/
+    F0  [fn byte 1] [fn byte 2 / filler] [key byte]  [fn byte 1] [fn byte 2 / filler] [key byte]
+        \_____________ entry 1 ______________/      \_____________ entry 2 ______________/
 
-A most built-in HP-41 function needs only one function byte; the second byte is
+A built-in HP-41 function needs only one function byte; the second byte is
 filler (`0x04`, which happens to read as "LBL 03" if the register is listed
 as a program). A peripheral/ROM function's XROM code uses both function
-bytes. An odd number of assignments, and deleting assignments, can leave a register half-full (Wickes' "KP" utility repacks these).
+bytes — confirmed against `xrom-keyassignments.dm41` (§4.8). An odd number
+of assignments leaves one register half-full (Wickes' "KP" utility repacks
+these).
 
 ### 4.3 Key Byte Encoding
 
@@ -100,11 +104,8 @@ For the **shifted** version of the same key:
     byte = 16*(N-1) + (M+8)
 
 carrying into the high nibble when `M+8 >= 16` (only possible for `M=8`
-rows). (Confirmed against `keyassigns.dm41`'s 14 assignments across
-8 different physical keys, both shift states, with zero mismatches. **TODO:**
-Perform a full suite of tests, evaluating all 35 assignable keys.)
-
-**Note:** The Key Byte encoding matches the original HP41's keypad layout. The DM41L's keypad is laid out in a different order. Any of the main keypad keys are re-assignable; the "ON", "USR", "PRGM"/"PGM" and "ALPHA"/"a" keys are not reassignable on either the HP41 or the DM41L.
+rows). Confirmed exactly against `keyassigns.dm41`'s 14 assignments across
+8 different physical keys, both shift states, with zero mismatches.
 
 ### 4.4 Insertion Order
 
@@ -162,10 +163,6 @@ Assignment Registers region (no `0xF0` marker anywhere from `0x0C0`
 onward) while both keys' KEYFLAGS bits were set, and `Memory.list_programs()`
 correctly reported each label's `key_assignment` byte.
 
-In addition to global assignments, a program may dynamically re-define keys A-E and "a-e". 
-- These definitions are only present while that program is active and do not alter the key assignment bitmask or key assignment registers. 
-- Actual user key assignments will take precedence over in-program assignments.
-
 ### 4.7 The Lookup Algorithm
 
 From Jarrett's SPME (Section 6B), when a USER-mode key is pressed:
@@ -193,18 +190,71 @@ functions use two bytes (an XROM-catalog prefix plus a selector byte — see
 the byte table's `A0`-`A7` "XROM n-n+3" rows). A full translation table is
 requirement 5 below.
 
+**Two-byte (XROM/peripheral) encoding, confirmed.** Given an XROM function's
+catalog number `xrom` (the number before the comma in `docs/function_table.md`,
+e.g. `25` for Extended Functions, `26` for Time) and its selector `fn` (the
+number after the comma):
+
+    byte1 = 0xA0 + floor(xrom / 4)
+    byte2 = ((xrom mod 4) << 6) | fn
+
+This matches Wickes' Table 5-1 examples (`CARD READER 30,00` → `A7 80`,
+`PRINTER 29,00` → `A7 40`, `LIST 29,07` → `A7 47`, `PRP 29,13` → `A7 4D`,
+`VER 30,05` → `A7 85`) and is independently confirmed against
+`src/tests/data/xrom-keyassignments.dm41`, whose two Key Assignment
+Registers decode as:
+
+    0xC0: F0 A6 82 31 A6 81 21  ->  (A6,82)=XROM 26,02=ALMCAT -> key 14
+                                    (A6,81)=XROM 26,01=ADATE  -> key 13
+    0xC1: F0 A6 42 11 A6 41 01  ->  (A6,42)=XROM 25,02=ANUM   -> key 12
+                                    (A6,41)=XROM 25,01=ALENG  -> key 11
+
+— exactly the four assignments (ALENG→11, ANUM→12, ADATE→13, ALMCAT→14) the
+dump was built to test, in the LIFO order §4.4 predicts, with both function
+bytes carrying real data (no `0x04` filler) as expected for a two-byte
+entry. `docs/function_table.md`'s Extended Functions ROM and Time ROM
+tables give the `xrom,fn` numbers for every function in these two modules.
+
 ## 5. Known Unknowns
 
 - The Alarms region's exact byte format (it sits immediately above the Key
   Assignment Registers, per Jarrett, with one "header" register declaring
   a count) hasn't been mined from the PDFs yet.
-- Whether a peripheral/XROM function assignment's key byte and register
-  packing behave identically to the built-in case once real 2-byte
-  entries are captured in a dump — only the *filler-byte* (1-byte
-  function) case has been directly confirmed so far (§4.2).
 - `Memory.key_assignments_end()` (see `src/memory/memory.py`) is only
   recomputed when a dump is loaded, not after a live edit — relevant once
   an editor exists (§6, item 4).
+- **Whether a low-code (`< 64`) built-in function's Key Assignment
+  Register byte literally equals its `function_table.md` decimal/hex
+  code is still untested on a real device.** `function_table.md` was
+  rebuilt as a single merged table with four columns per byte value:
+  Instruction Prefix (the program-byte meaning, from `byte_table.html`),
+  Instruction Length, Function (the ASN/key-assignment name), and
+  Assignable? (whether that function can be put on a key at all). For
+  codes 064 (`+`) through at least 224 (`XEQ`), Prefix and Function agree
+  — the program byte and the key-assignment byte are the same value —
+  and that range is already confirmed against a real dump (§4.8,
+  `keyassigns.dm41`). For codes 000-015, Prefix and Function genuinely
+  differ (`0x00`-`0x0F` mean `NULL`/`LBL 00`-`LBL 14` as program bytes,
+  but `CAT`/`DEL`/`COPY`/`CLP`/`R/S`/`SIZE`/`BST`/`SST`/`ON`/`PACK`/
+  `SHIFT`/`ASN` as functions) because those functions aren't FOCAL
+  program opcodes at all — the correction from an earlier pass here
+  confirms `005` is `R/S`, not a duplicate `STOP` (the real `STOP`
+  opcode is `132`/`0x84`, matching Prefix and Function exactly, and is
+  independently marked Assignable). The merged table also now records,
+  for the first time, *which* of these low-code functions can be
+  assigned to a key at all: `CAT`(000), `DEL`(002), `COPY`(003),
+  `CLP`(004), `SIZE`(006), `BST`(007), `SST`(008), `PACK`(010), and
+  `ASN`(015) are Assignable; `GTO..`(001), `R/S`(005), `ON`(009), and
+  `SHIFT`(014) are not. **What's still not known:** whether the raw byte
+  written into a Key Assignment Register's function-byte slot for one of
+  those nine assignable low-code functions is the literal decimal/hex
+  code shown (`0x00`-`0x0F`, which would collide with "TEXT 0"/"NULL"/
+  "LBL nn" if misread as a program byte) or something else (e.g. a
+  synthetic/2-byte encoding similar to the XROM case in §4.8). A small
+  test dump assigning a few of the nine Assignable low-code functions
+  (`CAT`, `SIZE`, `PACK`, `ASN` are good picks) to distinct keys would
+  settle this the same way `xrom-keyassignments.dm41` settled the 2-byte
+  case.
 
 ## 6. Requirements: Key Assignments Tab
 
@@ -245,23 +295,75 @@ should be all that's left once the tab is finished.
    importer must warn the user and skip that specific assignment rather
    than fail the whole import or silently drop it.
 
-4. **A keypad-shaped table for viewing/editing.** The tab's main view
-   needs to visually approximate the physical HP-41CX/DM41L keyboard
-   layout (§4.3's row/column grid), showing both the unshifted and
-   shifted assignment for each key. This requires a unified accessor that
-   merges both storage mechanisms (§4.1) into one "what is this key
-   currently assigned to" view — reading the Key Assignment Registers and
-   every global label's key-assignment byte together — since the two
-   sources need to be presented identically to the user despite being
-   stored completely differently.
+4. **Two synchronized keypad-shaped tables for viewing/editing.** The tab
+   shows **two** keypad grids, one above the other, both displaying the
+   same underlying assignment data — an edit made in either one must be
+   reflected immediately in the other. Both use the key-number notation
+   from §2 (`MN` as the user sees it engraved on the keyboard, *not* the
+   internal key-byte encoding of §4.3), and both need to show the
+   unshifted and shifted assignment for each key.
+
+   The **top table, "HP41"**, approximates the classic HP-41's physical
+   row layout — 8 rows, the first three holding 5 keys each and the rest
+   holding 4, with one gap in row 3 where key `31` would be — that
+   position is the physical **SHIFT** key itself, which can never hold an
+   assignment (consistent with `function_table.md`'s Assignable? column,
+   §5, which also lists the `SHIFT` *function*, code 014, as not
+   assignable):
+
+   | Row | Keys |
+   |--|--|
+   | 1 | 11, 12, 13, 14, 15 |
+   | 2 | 21, 22, 23, 24, 25 |
+   | 3 | *(shift)*, 32, 33, 34, 35 |
+   | 4 | 41, 42, 43, 44 |
+   | 5 | 51, 52, 53, 54 |
+   | 6 | 61, 62, 63, 64 |
+   | 7 | 71, 72, 73, 74 |
+   | 8 | 81, 82, 83, 84 |
+
+   The **bottom table, "DM41L"**, approximates the DM41L's actual physical
+   keyboard — a more compact 4-row-by-10-column arrangement of the exact
+   same 34 assignable keys, several of them relocated relative to the HP41
+   layout above (note key `42` in row 1, `43` in row 2, and `41`/`44` in
+   row 3 — not in row-4 order like the HP41 table). The remaining cells
+   are real physical keys too, just never assignable ones — mode-toggle
+   and system keys rather than FOCAL function keys: USR (row 3, col 1),
+   PGM (row 3, col 2), ON (row 4, col 1), SHIFT (row 4, col 2), ALPHA (row
+   4, col 3), and one blank/spare position (row 4, col 6):
+
+   | Row | Keys |
+   |--|--|
+   | 1 | 11, 12, 13, 14, 15, 42, 51, 52, 53, 54 |
+   | 2 | 21, 22, 23, 24, 25, 43, 61, 62, 63, 64 |
+   | 3 | *(USR)*, *(PGM)*, 32, 35, 44, 41, 71, 72, 73, 74 |
+   | 4 | *(ON)*, *(SHIFT)*, *(ALPHA)*, 33, 34, *(blank)*, 81, 82, 83, 84 |
+
+   Implementation-wise this means a single shared data model (a unified
+   accessor merging both storage mechanisms per §4.1, reading the Key
+   Assignment Registers and every global label's key-assignment byte
+   together into one "what is this key assigned to" view) driving two
+   independent grid layouts — a lookup table mapping each key number to
+   its `(row, column)` position in each of the two grids above, both
+   rendering from and writing back to the same model, with no assumption
+   that the two grids share a coordinate system.
 
 5. **A complete HP-41CX instruction byte table.** Needed both to display
    an existing assignment's function name and to translate a user's
-   chosen function back into the correct byte(s) when creating one.
-   `docs/pdfs/byte_table.html` (§1) already covers the base 256-byte
-   table and should be the starting point rather than re-deriving it from
-   the Wickes/QRG PDFs — what's still needed is extending it to the
-   HP-41CX-specific functions (time module, extended functions, X-Memory)
-   that live behind the XROM-catalog prefix bytes, and converting the
-   whole thing into a directly-usable data structure (e.g. JSON or a
-   Python dict) rather than parsing the HTML at runtime.
+   chosen function back into the correct byte(s) when creating one, and
+   to know which functions are even offerable in a key-assignment picker
+   UI. `docs/function_table.md` (§1) now covers most of this ground in
+   one merged table — Instruction Prefix, Length, Function name, and an
+   Assignable? column that directly answers the picker-UI question —
+   plus the Extended Functions and Time ROM catalogs (§4.8), derived from
+   "A programmers handbook." What's still needed: converting it into a
+   single directly-usable data structure (e.g. JSON or a Python dict,
+   keyed by the encodings in §4.8) rather than parsing the markdown table
+   at runtime; resolving the §5 open question about whether a low-code
+   (`<64`) function's Key Assignment Register byte equals its
+   `function_table.md` code, since the Assignable? column lists nine
+   such functions (`CAT`, `DEL`, `COPY`, `CLP`, `SIZE`, `BST`, `SST`,
+   `PACK`, `ASN`) that the picker will need to encode correctly; and
+   filling in any remaining HP-41CX-specific catalogs (X-Memory, Card
+   Reader/Printer, per Wickes' Table 5-1) not yet captured in
+   `function_table.md`.
