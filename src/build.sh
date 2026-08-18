@@ -19,7 +19,7 @@ cd "$(dirname "$0")"
 rm -rf build dist
 
 # Generate a version id for the about box.
-echo "_version = '$(git describe --tags --always)'" >dm41lversion.py
+echo "APP_VERSION = '$(git describe --tags --always)'" >dm41lversion.py
 
 # Make the icons
 bash ../resources/makeicon.sh

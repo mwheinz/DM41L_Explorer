@@ -37,9 +37,9 @@ from gui.program_tab import ProgramTab
 from gui.key_assignments_tab import KeyAssignmentsTab
 
 try:
-    from dm41lversion import _version
+    from dm41lversion import APP_VERSION
 except ImportError:
-    _version = "unknown"
+    APP_VERSION = "unknown"
 
 ENGINE_POLL_MS = 50
 
@@ -416,7 +416,7 @@ class DM41LExplorerApp(ctk.CTk):
         messagebox.showinfo(
             "About DM41L Explorer",
             f"Read and Write DM41L memory files\n\n"
-            f"Version:\n{_version}\n\n"
+            f"Version:\n{APP_VERSION}\n\n"
             "Written by Michael Heinz.\n",
         )
 
