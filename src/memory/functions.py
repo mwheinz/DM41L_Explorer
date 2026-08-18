@@ -16,16 +16,17 @@ rather than something parsed from the markdown table at runtime -- re-run
 the generation script (see CONTRIBUTING.md, or ask in the project's chat
 history) if function_table.md ever changes.
 
-CAVEAT (docs/key_assignments.md sec 5, still open as of this writing): for
-the nine low-code Assignable functions (CAT, DEL, COPY, CLP, SIZE, BST,
-SST, PACK, ASN -- codes 0x00-0x0F), SINGLE_BYTE_FUNCTIONS below assumes the
-Key Assignment Register byte equals the function's plain decimal/hex code
-from function_table.md -- e.g. CAT is assumed to be encoded as 0x00. This
-matches the one synthetic-looking test fixture found so far
-(keyassigntest.dm41) but has NOT been confirmed against a real device
-capture with real KEYFLAGS bits set. Everything from 0x40 ('+') through
-0xE0 (XEQ) is fully confirmed (docs sec 4.8); the XROM/peripheral entries
-are fully confirmed too (docs sec 4.8, xrom-keyassignments.dm41).
+CAVEAT (docs/key_assignments.md sec 5): for the nine low-code Assignable
+functions (CAT, DEL, COPY, CLP, SIZE, BST, SST, PACK, ASN -- codes
+0x00-0x0F), SINGLE_BYTE_FUNCTIONS below assumes the Key Assignment
+Register byte equals the function's plain decimal/hex code from
+function_table.md -- e.g. CAT is assumed to be encoded as 0x00. This was
+originally checked only against one synthetic-looking test fixture
+(keyassigntest.dm41); the user has since manually verified on 2026-08-18
+that low-code functions assign correctly on real hardware, confirming the
+assumption. Everything from 0x40 ('+') through 0xE0 (XEQ) is fully
+confirmed (docs sec 4.8); the XROM/peripheral entries are fully confirmed
+too (docs sec 4.8, xrom-keyassignments.dm41).
 """
 
 # Single raw function byte -> function name, for every built-in HP-41

@@ -253,10 +253,7 @@ class XMFilesTab(ctk.CTkFrame):
             )
             return
 
-        def save(name, file_type, kwargs):
-            self._save_new_or_edited_file(name, file_type, kwargs)
-
-        XMFileDialog(self, save)
+        XMFileDialog(self, self._save_new_or_edited_file)
 
     def _import_file(self):
         """Reads a plain-text file from disk and opens it pre-filled in
@@ -293,9 +290,7 @@ class XMFilesTab(ctk.CTkFrame):
         # whichever box wasn't showing.
         XMFileDialog(
             self,
-            lambda name, file_type, kwargs: self._save_new_or_edited_file(
-                name, file_type, kwargs
-            ),
+            self._save_new_or_edited_file,
             initial={
                 "name": default_name,
                 "file_type": guessed_type,
