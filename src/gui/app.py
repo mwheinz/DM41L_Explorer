@@ -99,7 +99,12 @@ def _setup_logging(config_store):
         # log to the default location instead. Logged as a warning (not
         # an error) once the fallback handler below is attached; nothing
         # is lost, just redirected.
-        logger.warning("Could not use log directory %s (%s); falling back to %s", log_dir, e, Path.home())
+        logger.warning(
+            "Could not use log directory %s (%s); falling back to %s",
+            log_dir,
+            e,
+            Path.home(),
+        )
         log_dir = Path.home()
     log_file = log_dir / "dm41l_explorer.log"
 
@@ -120,7 +125,9 @@ def _setup_logging(config_store):
         root_logger.removeHandler(handler)
     root_logger.setLevel(level)
     root_logger.addHandler(file_handler)
-    logger.info("Logging configured: level=%s, file=%s", config_store.logging_level, log_file)
+    logger.info(
+        "Logging configured: level=%s, file=%s", config_store.logging_level, log_file
+    )
 
 
 def _apply_font_prefs(config_store):
@@ -227,7 +234,9 @@ class DM41LExplorerApp(ctk.CTk):
         )
         self._calc_time_label.pack(side="right", padx=16, pady=6)
         self._source_label = ctk.CTkLabel(
-            status_bar, text="(new, unsaved buffer)", font=ctk.CTkFont(size=13),
+            status_bar,
+            text="(new, unsaved buffer)",
+            font=ctk.CTkFont(size=13),
             text_color="gray60",
         )
         self._source_label.pack(side="right", padx=16, pady=6)
@@ -324,7 +333,9 @@ class DM41LExplorerApp(ctk.CTk):
         )
         file_menu.add_separator()
         if PLATFORM_SYSTEM != "Darwin":
-            file_menu.add_command(label="About Box", command=self._show_about, underline=0)
+            file_menu.add_command(
+                label="About Box", command=self._show_about, underline=0
+            )
         file_menu.add_command(
             label="Preferences",
             command=self.show_preferences,
@@ -377,14 +388,19 @@ class DM41LExplorerApp(ctk.CTk):
         # View Menu
         view_menu = Menu(menubar, tearoff=0)
         view_menu.add_command(
-            label="Refresh Tabs", command=self._render_tabs, accelerator="F5", underline=0
+            label="Refresh Tabs",
+            command=self._render_tabs,
+            accelerator="F5",
+            underline=0,
         )
         menubar.add_cascade(label="View", menu=view_menu)
 
         # Help Menu
         help_menu = Menu(menubar, tearoff=0)
         if PLATFORM_SYSTEM != "Darwin":
-            help_menu.add_command(label="About DM41L Explorer", command=self._show_about)
+            help_menu.add_command(
+                label="About DM41L Explorer", command=self._show_about
+            )
         else:
             help_menu.add_command(label="Read Me", state="disabled")
         menubar.add_cascade(label="Help", menu=help_menu)
@@ -463,7 +479,9 @@ class DM41LExplorerApp(ctk.CTk):
         self._render_active_tab()
 
     def _update_source_label(self):
-        text = str(self.memory_source) if self.memory_source else "(new, unsaved buffer)"
+        text = (
+            str(self.memory_source) if self.memory_source else "(new, unsaved buffer)"
+        )
         self._source_label.configure(text=text)
 
     # -- Engine pump (drives CommandEngine off the Tk main loop) ---------
@@ -497,9 +515,11 @@ class DM41LExplorerApp(ctk.CTk):
 
     def _prompt_for_port(self, message: str):
         dialog = PortSelectionDialog(
-                    self, self.serial,
-                    default_port=self.config_store.serial_port,
-                    message=message,)
+            self,
+            self.serial,
+            default_port=self.config_store.serial_port,
+            message=message,
+        )
         self.wait_window(dialog)
         if dialog.result:
             self._connect_and_verify(dialog.result)
@@ -508,7 +528,8 @@ class DM41LExplorerApp(ctk.CTk):
             # untouched -- don't overwrite the status bar with "Not
             # connected".
             self._set_status(f"Connected to {self.serial.serial_inst.port}")
-        else: self._set_status("Not connected")
+        else:
+            self._set_status("Not connected")
 
     def show_connect_dialog(self):
         self._prompt_for_port(None)
@@ -604,7 +625,9 @@ class DM41LExplorerApp(ctk.CTk):
         self.after(
             10,
             lambda: self.engine.execute(
-                MemoryStringCommand(), self._on_auto_dump_received, self._on_command_error
+                MemoryStringCommand(),
+                self._on_auto_dump_received,
+                self._on_command_error,
             ),
         )
 
@@ -841,7 +864,8 @@ class DM41LExplorerApp(ctk.CTk):
             messagebox.showwarning("Not Connected", "Connect to the DM41L first.")
             return
         if self.dirty and not messagebox.askyesno(
-            "Unsaved Changes", "Discard unsaved changes and read the calculator's memory?"
+            "Unsaved Changes",
+            "Discard unsaved changes and read the calculator's memory?",
         ):
             return
         self._set_status("Reading memory dump...")
@@ -908,7 +932,7 @@ def main():
     app = DM41LExplorerApp()
     logger.info(
         "DM41L Explorer %s starting (Python %s, %s)",
-        _version,
+        APP_VERSION,
         platform.python_version(),
         platform.platform(),
     )

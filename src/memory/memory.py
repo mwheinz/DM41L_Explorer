@@ -181,7 +181,7 @@ class Memory:
     # empty-128.dm41, matching its filename). All three address fields are
     # plain 3-nibble hex integers (not BCD), packed back-to-back with no
     # byte alignment across register c's 14 nibbles (nibble 0 = MSB,
-    # matching Register._get_nibbles()):
+    # matching Register.get_nibbles()):
     #   nibbles[0:3]   SREG  (ΣREG) absolute address
     #   nibbles[3:5]   printer use (undecoded)
     #   nibbles[5:8]   cold-start signature -- always 0x169 in real dumps,
@@ -197,7 +197,7 @@ class Memory:
         return value
 
     def _reg_c_nibbles(self) -> list:
-        return self.get_register(self.REG_C_ADDR)._get_nibbles()
+        return self.get_register(self.REG_C_ADDR).get_nibbles()
 
     def SigmaReg(self) -> int:
         """Absolute address of ΣREG, decoded from register c."""

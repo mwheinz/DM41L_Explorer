@@ -52,7 +52,10 @@ class XMFilesTab(ctk.CTkFrame):
             button_kwargs={"text": "Add File", "width": 100, "command": self._add_file},
         )
         ctk.CTkButton(
-            header, text="Import File", width=110, command=self._import_file,
+            header,
+            text="Import File",
+            width=110,
+            command=self._import_file,
         ).pack(side="right", padx=(0, 8))
 
         self._table = ctk.CTkScrollableFrame(self)
@@ -60,6 +63,8 @@ class XMFilesTab(ctk.CTkFrame):
         for col, weight in enumerate([0, 0, 0, 0, 1, 0, 0, 0]):
             self._table.grid_columnconfigure(col, weight=weight)
         bind_touchpad_scroll(self._table)
+
+        self._stripe_bg = stripe_bg_color()
 
     def _notify_change(self):
         if self._on_change:
@@ -85,13 +90,12 @@ class XMFilesTab(ctk.CTkFrame):
             return
 
         self._header_label.configure(text=f"Extended-memory files: {len(files)}")
-        self._stripe_bg = stripe_bg_color()
 
         headers = ["Name", "Type", "Header", "Registers", "Preview", "", "", ""]
         for col, text in enumerate(headers):
-            ctk.CTkLabel(
-                self._table, text=text, font=ctk.CTkFont(weight="bold")
-            ).grid(row=0, column=col, sticky="w", padx=6, pady=4)
+            ctk.CTkLabel(self._table, text=text, font=ctk.CTkFont(weight="bold")).grid(
+                row=0, column=col, sticky="w", padx=6, pady=4
+            )
 
         for i, f in enumerate(files, start=1):
             self._render_row(f, row=i)
@@ -119,9 +123,9 @@ class XMFilesTab(ctk.CTkFrame):
 
         preview = self._preview_for(f)
 
-        ctk.CTkLabel(self._table, text=f.name.rstrip(), anchor="w", fg_color=row_bg).grid(
-            row=row, column=0, sticky="nsew", padx=6, pady=1
-        )
+        ctk.CTkLabel(
+            self._table, text=f.name.rstrip(), anchor="w", fg_color=row_bg
+        ).grid(row=row, column=0, sticky="nsew", padx=6, pady=1)
         ctk.CTkLabel(self._table, text=f.type_label, anchor="w", fg_color=row_bg).grid(
             row=row, column=1, sticky="nsew", padx=6, pady=1
         )
@@ -134,11 +138,17 @@ class XMFilesTab(ctk.CTkFrame):
         ).grid(row=row, column=2, sticky="nsew", padx=6, pady=1)
         span_note = " (spans regions)" if f.spans_regions else ""
         ctk.CTkLabel(
-            self._table, text=f"{f.num_registers}{span_note}", anchor="w", fg_color=row_bg
+            self._table,
+            text=f"{f.num_registers}{span_note}",
+            anchor="w",
+            fg_color=row_bg,
         ).grid(row=row, column=3, sticky="nsew", padx=6, pady=1)
         ctk.CTkLabel(
-            self._table, text=preview, font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
-            anchor="w", fg_color=row_bg,
+            self._table,
+            text=preview,
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+            anchor="w",
+            fg_color=row_bg,
         ).grid(row=row, column=4, sticky="nsew", padx=6, pady=1)
 
         # Export (like Edit) only makes sense for Data/ASCII -- Program
@@ -168,7 +178,9 @@ class XMFilesTab(ctk.CTkFrame):
             width=64,
             fg_color="#a03e3e",
             hover_color="#832f2f",
-            command=lambda addr=f.header_addr, name=f.name: self._remove_file(addr, name),
+            command=lambda addr=f.header_addr, name=f.name: self._remove_file(
+                addr, name
+            ),
         ).grid(row=row, column=7, sticky="e", padx=6, pady=1)
 
     @staticmethod
@@ -189,7 +201,9 @@ class XMFilesTab(ctk.CTkFrame):
             if f.file_type == ExtendedMemory.TYPE_PROGRAM:
                 checksum = f.checksum_valid
                 status = (
-                    "valid" if checksum else "INVALID" if checksum is False else "unknown"
+                    "valid"
+                    if checksum
+                    else "INVALID" if checksum is False else "unknown"
                 )
                 return f"{f.byte_length} instruction bytes, checksum {status}"
         except Exception as e:
@@ -234,7 +248,9 @@ class XMFilesTab(ctk.CTkFrame):
 
     def _add_file(self):
         if self._memory is None:
-            messagebox.showwarning("No Memory Loaded", "Load or start a memory buffer first.")
+            messagebox.showwarning(
+                "No Memory Loaded", "Load or start a memory buffer first."
+            )
             return
 
         def save(name, file_type, kwargs):
@@ -248,7 +264,9 @@ class XMFilesTab(ctk.CTkFrame):
         see registers.parse_data_line()) so the user can review/adjust the
         name and type before it's actually added. GitHub issue #11."""
         if self._memory is None:
-            messagebox.showwarning("No Memory Loaded", "Load or start a memory buffer first.")
+            messagebox.showwarning(
+                "No Memory Loaded", "Load or start a memory buffer first."
+            )
             return
 
         path = filedialog.askopenfilename(
@@ -314,7 +332,10 @@ class XMFilesTab(ctk.CTkFrame):
         files = xm.list_files()
         existing = next((f for f in files if f.header_addr == header_addr), None)
         if existing is None:
-            logger.warning("Edit requested for XM file at 0x%03x, but it no longer exists.", header_addr)
+            logger.warning(
+                "Edit requested for XM file at 0x%03x, but it no longer exists.",
+                header_addr,
+            )
             messagebox.showerror("Not Found", "That file no longer exists.")
             self.render(self._memory)
             return

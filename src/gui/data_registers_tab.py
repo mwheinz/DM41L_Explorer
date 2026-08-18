@@ -43,10 +43,16 @@ class DataRegistersTab(ctk.CTkFrame):
             },
         )
         ctk.CTkButton(
-            header, text="Export...", width=90, command=self._export_registers,
+            header,
+            text="Export...",
+            width=90,
+            command=self._export_registers,
         ).pack(side="right", padx=(0, 8))
         ctk.CTkButton(
-            header, text="Import...", width=90, command=self._import_registers,
+            header,
+            text="Import...",
+            width=90,
+            command=self._import_registers,
         ).pack(side="right", padx=(0, 8))
 
         table_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -97,7 +103,9 @@ class DataRegistersTab(ctk.CTkFrame):
             tree.column(col, width=width, anchor="w", stretch=stretch)
 
         vsb = ttk.Scrollbar(
-            parent, orient="vertical", command=tree.yview,
+            parent,
+            orient="vertical",
+            command=tree.yview,
             style="DM41L.Vertical.TScrollbar",
         )
         tree.configure(yscrollcommand=vsb.set)
@@ -149,10 +157,17 @@ class DataRegistersTab(ctk.CTkFrame):
         font = (MONOSPACE_FONT_FAMILY, ui_font["size"])
         heading_font = (ui_font["family"], ui_font["size"], "bold")
         style.configure(
-            "Treeview", background=field_bg, fieldbackground=field_bg,
-            foreground=fg, rowheight=22, borderwidth=0, font=font,
+            "Treeview",
+            background=field_bg,
+            fieldbackground=field_bg,
+            foreground=fg,
+            rowheight=22,
+            borderwidth=0,
+            font=font,
         )
-        style.configure("Treeview.Heading", background=bg, foreground=fg, font=heading_font)
+        style.configure(
+            "Treeview.Heading", background=bg, foreground=fg, font=heading_font
+        )
         style.map("Treeview", background=[("selected", "#1f6aa5")])
 
         # Approximate CTkScrollableFrame's own scrollbar look (a slim,
@@ -166,21 +181,28 @@ class DataRegistersTab(ctk.CTkFrame):
         thumb_active = "#6e7173" if dark else "#a6a6a6"
         style.layout(
             "DM41L.Vertical.TScrollbar",
-            [(
-                "Vertical.Scrollbar.trough",
-                {
-                    "sticky": "ns",
-                    "children": [(
-                        "Vertical.Scrollbar.thumb",
-                        {"expand": "1", "sticky": "nswe"},
-                    )],
-                },
-            )],
+            [
+                (
+                    "Vertical.Scrollbar.trough",
+                    {
+                        "sticky": "ns",
+                        "children": [
+                            (
+                                "Vertical.Scrollbar.thumb",
+                                {"expand": "1", "sticky": "nswe"},
+                            )
+                        ],
+                    },
+                )
+            ],
         )
         style.configure(
             "DM41L.Vertical.TScrollbar",
-            background=thumb, troughcolor=trough, bordercolor=trough,
-            relief="flat", borderwidth=0,
+            background=thumb,
+            troughcolor=trough,
+            bordercolor=trough,
+            relief="flat",
+            borderwidth=0,
         )
         style.map(
             "DM41L.Vertical.TScrollbar",
@@ -264,7 +286,12 @@ class DataRegistersTab(ctk.CTkFrame):
                 "",
                 "end",
                 iid=str(addr),
-                values=(f"R{i:02d}", f"0x{addr:03x}", register.get_hex(), str(register)),
+                values=(
+                    f"R{i:02d}",
+                    f"0x{addr:03x}",
+                    register.get_hex(),
+                    str(register),
+                ),
                 tags=("oddrow",) if pos % 2 else (),
             )
 
@@ -318,7 +345,10 @@ class DataRegistersTab(ctk.CTkFrame):
                 return
             logger.info(
                 "Exported %d data registers (R%02d-R%02d) to %s",
-                export_count, start, end, path,
+                export_count,
+                start,
+                end,
+                path,
             )
             messagebox.showinfo(
                 "Exported",
@@ -362,7 +392,9 @@ class DataRegistersTab(ctk.CTkFrame):
         # other bad line would.
         lines = content.rstrip("\n").split("\n") if content.strip("\n") else []
         if not lines:
-            messagebox.showerror("Empty File", f"{path} has no register data to import.")
+            messagebox.showerror(
+                "Empty File", f"{path} has no register data to import."
+            )
             return
 
         new_registers = []
@@ -389,7 +421,10 @@ class DataRegistersTab(ctk.CTkFrame):
                 self._memory.set_register(addr, reg)
             logger.info(
                 "Imported %d data registers (R%02d-R%02d) from %s",
-                import_count, start, end, path,
+                import_count,
+                start,
+                end,
+                path,
             )
             self._notify_change()
             self.render(self._memory)
@@ -420,8 +455,11 @@ class DataRegistersTab(ctk.CTkFrame):
             logger.info("Register 0x%03x edited: %s", addr, new_register)
             self._notify_change()
             self.render(self._memory)
-            tree = self._tree_left if str(addr) in \
-                    self._tree_left.get_children() else self._tree_right
+            tree = (
+                self._tree_left
+                if str(addr) in self._tree_left.get_children()
+                else self._tree_right
+            )
             tree.selection_set(str(addr))
             tree.see(str(addr))
 

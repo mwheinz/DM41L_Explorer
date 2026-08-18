@@ -149,13 +149,17 @@ class PreferencesDialog(ctk.CTkToplevel):
         size_col.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         ctk.CTkLabel(size_col, text="Size:").pack(anchor="w")
         sizes = [FONT_SIZE_DEFAULT_LABEL] + FONT_SIZES
-        current_size = str(self._config.font_size) if self._config.font_size \
-                else FONT_SIZE_DEFAULT_LABEL
+        current_size = (
+            str(self._config.font_size)
+            if self._config.font_size
+            else FONT_SIZE_DEFAULT_LABEL
+        )
         if current_size not in sizes:
             sizes.append(current_size)
         self._font_size_var = ctk.StringVar(value=current_size)
-        ctk.CTkOptionMenu(size_col, values=sizes, variable=self._font_size_var,
-                          width=90).pack(anchor="w", pady=(4, 0))
+        ctk.CTkOptionMenu(
+            size_col, values=sizes, variable=self._font_size_var, width=90
+        ).pack(anchor="w", pady=(4, 0))
 
         ctk.CTkLabel(
             tab,
@@ -223,7 +227,9 @@ class PreferencesDialog(ctk.CTkToplevel):
         self._config.logging_level = self._log_level_var.get()
         self._config.appearance_mode = self._appearance_var.get()
         family_choice = self._font_family_var.get()
-        self._config.font_family = "" if family_choice == FONT_DEFAULT_LABEL else family_choice
+        self._config.font_family = (
+            "" if family_choice == FONT_DEFAULT_LABEL else family_choice
+        )
         size_choice = self._font_size_var.get()
         try:
             self._config.font_size = (

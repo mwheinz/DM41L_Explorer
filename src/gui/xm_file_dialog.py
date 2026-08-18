@@ -80,7 +80,9 @@ class XMFileDialog(ctk.CTkToplevel):
             type_default = "Data"
         self._type_var = ctk.StringVar(value=type_default)
         type_menu = ctk.CTkOptionMenu(
-            self, values=["Data", "ASCII"], variable=self._type_var,
+            self,
+            values=["Data", "ASCII"],
+            variable=self._type_var,
             command=self._on_type_changed,
         )
         type_menu.pack(anchor="w", padx=16, fill="x")
@@ -170,15 +172,17 @@ class XMFileDialog(ctk.CTkToplevel):
         name = self._name_var.get().strip()
         if not name or len(name) > 7:
             logger.warning("Invalid XM file name %r: must be 1-7 characters.", name)
-            messagebox.showerror(
-                "Invalid Name", "File name must be 1-7 characters."
-            )
+            messagebox.showerror("Invalid Name", "File name must be 1-7 characters.")
             return
         for ch in name:
             if not NAME_MIN_CHAR <= ord(ch) <= NAME_MAX_CHAR:
                 logger.warning(
                     "Invalid XM file name %r: %r (code %d) outside %d-%d.",
-                    name, ch, ord(ch), NAME_MIN_CHAR, NAME_MAX_CHAR,
+                    name,
+                    ch,
+                    ord(ch),
+                    NAME_MIN_CHAR,
+                    NAME_MAX_CHAR,
                 )
                 messagebox.showerror(
                     "Invalid Name",

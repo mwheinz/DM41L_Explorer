@@ -53,7 +53,7 @@ def bind_touchpad_scroll(scrollable_frame):
         # area -- winfo_ismapped() is what limits the actual scrolling to
         # whichever tab is actually visible right now.
         if not scrollable_frame.winfo_ismapped():
-            return
+            return None
         _, delta_y = _decode_touchpad_delta(event.delta)
         if delta_y:
             scrollable_frame._parent_canvas.yview_scroll(-delta_y, "units")

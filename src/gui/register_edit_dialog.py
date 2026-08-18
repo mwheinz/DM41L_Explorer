@@ -76,7 +76,8 @@ class RegisterEditDialog(ctk.CTkToplevel):
             anchor="w", padx=8, pady=(12, 4)
         )
         ctk.CTkEntry(
-            tabs.tab("Number"), textvariable=self._number_var,
+            tabs.tab("Number"),
+            textvariable=self._number_var,
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).pack(anchor="w", padx=8, fill="x")
 
@@ -86,7 +87,8 @@ class RegisterEditDialog(ctk.CTkToplevel):
             anchor="w", padx=8, pady=(12, 4)
         )
         ctk.CTkEntry(
-            tabs.tab("Text"), textvariable=self._text_var,
+            tabs.tab("Text"),
+            textvariable=self._text_var,
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).pack(anchor="w", padx=8, fill="x")
 
@@ -95,7 +97,8 @@ class RegisterEditDialog(ctk.CTkToplevel):
             anchor="w", padx=8, pady=(12, 4)
         )
         ctk.CTkEntry(
-            tabs.tab("Hex"), textvariable=self._hex_var,
+            tabs.tab("Hex"),
+            textvariable=self._hex_var,
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).pack(anchor="w", padx=8, fill="x")
 

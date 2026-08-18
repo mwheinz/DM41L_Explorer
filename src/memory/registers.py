@@ -79,7 +79,7 @@ class Register:
         """
         return bytes(self._data)
 
-    def _get_nibbles(self) -> list[int]:
+    def get_nibbles(self) -> list[int]:
         """Returns the register data as a list of nibbles from MSB to LSB."""
         nibbles = []
         for byte in self._data:
@@ -94,7 +94,7 @@ class Register:
                 "BCD operations require a 7-byte register, " f"got {self.size} bytes."
             )
 
-        nibbles = self._get_nibbles()
+        nibbles = self.get_nibbles()
 
         # MS sign nibble at index 0. 1001=negative, 0000=positive.
         ms_nibble = nibbles[0]

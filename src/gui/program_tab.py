@@ -69,6 +69,8 @@ class ProgramTab(ctk.CTkFrame):
             self._table.grid_columnconfigure(col, weight=weight)
         bind_touchpad_scroll(self._table)
 
+        self._stripe_bg = stripe_bg_color()
+
     def render(self, memory: Memory):
         self._memory = memory
         for widget in self._table.winfo_children():
@@ -90,13 +92,12 @@ class ProgramTab(ctk.CTkFrame):
             return
 
         self._header_label.configure(text=f"Program memory entries: {len(programs)}")
-        self._stripe_bg = stripe_bg_color()
 
         headers = ["Type", "Name", "Header Address", "Distance", "Key Assignment"]
         for col, text in enumerate(headers):
-            ctk.CTkLabel(
-                self._table, text=text, font=ctk.CTkFont(weight="bold")
-            ).grid(row=0, column=col, sticky="w", padx=6, pady=4)
+            ctk.CTkLabel(self._table, text=text, font=ctk.CTkFont(weight="bold")).grid(
+                row=0, column=col, sticky="w", padx=6, pady=4
+            )
 
         for i, program in enumerate(programs, start=1):
             self._render_row(program, row=i)
@@ -110,7 +111,7 @@ class ProgramTab(ctk.CTkFrame):
         # top of it).
         row_bg = self._stripe_bg if (row - 1) % 2 == 1 else "transparent"
 
-        row_color = None #if program.is_named else "gray60"
+        row_color = None  # if program.is_named else "gray60"
 
         ctk.CTkLabel(
             self._table,
@@ -122,7 +123,10 @@ class ProgramTab(ctk.CTkFrame):
         ).grid(row=row, column=0, sticky="nsew", padx=6, pady=1)
 
         ctk.CTkLabel(
-            self._table, text=program.display_name, anchor="w", text_color=row_color,
+            self._table,
+            text=program.display_name,
+            anchor="w",
+            text_color=row_color,
             fg_color=row_bg,
         ).grid(row=row, column=1, sticky="nsew", padx=6, pady=1)
 

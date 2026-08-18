@@ -301,10 +301,11 @@ class ExtendedMemory(MemoryRegion):
         across all three header formats in docs/memory.md.
         """
         if len(raw) != 7:
-            return None
+            raise ValueError("Not a 7-byte register.")
+
         file_type = raw[0] >> 4
         if file_type not in (cls.TYPE_PROGRAM, cls.TYPE_DATA, cls.TYPE_ASCII):
-            return None
+            raise ValueError("Header does not have a valid file type.")
 
         register_length = ((raw[5] & 0x0F) << 8) | raw[6]
 
@@ -314,7 +315,8 @@ class ExtendedMemory(MemoryRegion):
             # of a packed ASCII record (which can also start with a nibble
             # of 1) would be misread as Program headers.
             if raw[0] != 0x10 or raw[1:4] != b"\x00\x00\x00":
-                return None
+                raise ValueError("Header is not a valid PROGRAM header.")
+
             byte_length = (raw[4] << 4) | (raw[5] >> 4)
             return {
                 "file_type": file_type,
@@ -393,13 +395,14 @@ class ExtendedMemory(MemoryRegion):
             addr -= 1
             segments = []
             header_addr = addr
-            header_register = self.get_register(addr)
-            header = ExtendedMemory._parse_header(addr, header_register.get_bytes())
-            if header is None:
+            try:
+                header_register = self.get_register(addr)
+                header = ExtendedMemory._parse_header(addr, header_register.get_bytes())
+            except Exception as e:
                 raise DM41LMemoryError(
                     "Detected invalid XM file header. "
                     f"0x{addr:x}: {header_register.get_hex()}"
-                )
+                ) from e
 
             addr -= header["register_length"] + 1
             if addr <= XM_REGIONS[current_region][0]:

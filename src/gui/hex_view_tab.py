@@ -135,7 +135,12 @@ class HexViewTab(ctk.CTkFrame):
             chip = ctk.CTkFrame(legend, fg_color="transparent")
             chip.pack(side="left", padx=(0, 14), pady=2)
             swatch = ctk.CTkLabel(
-                chip, text="", fg_color=color, width=14, height=14, corner_radius=3,
+                chip,
+                text="",
+                fg_color=color,
+                width=14,
+                height=14,
+                corner_radius=3,
             )
             swatch.pack(side="left", padx=(0, 5))
             ctk.CTkLabel(chip, text=label, font=ctk.CTkFont(size=11)).pack(side="left")
@@ -147,9 +152,7 @@ class HexViewTab(ctk.CTkFrame):
 
     def _build_tree(self, parent) -> ttk.Treeview:
         columns = ("addr", "hex", "ascii", "region")
-        tree = ttk.Treeview(
-            parent, columns=columns, show="headings", selectmode="none"
-        )
+        tree = ttk.Treeview(parent, columns=columns, show="headings", selectmode="none")
         for col, text, width, stretch in [
             ("addr", "Addr", 70, False),
             ("hex", "Hex", 240, False),
@@ -160,7 +163,9 @@ class HexViewTab(ctk.CTkFrame):
             tree.column(col, width=width, anchor="w", stretch=stretch)
 
         vsb = ttk.Scrollbar(
-            parent, orient="vertical", command=tree.yview,
+            parent,
+            orient="vertical",
+            command=tree.yview,
             style="DM41L.Vertical.TScrollbar",
         )
         tree.configure(yscrollcommand=vsb.set)
@@ -188,16 +193,24 @@ class HexViewTab(ctk.CTkFrame):
         field_bg = "#242424" if dark else "#ffffff"
         fg = "#e6e6e6" if dark else "#1a1a1a"
         self._region_bg = {
-            key: (dark_color if dark else light) for key, _, light, dark_color in REGIONS
+            key: (dark_color if dark else light)
+            for key, _, light, dark_color in REGIONS
         }
         ui_font = ctk.ThemeManager.theme["CTkFont"]
         font = (MONOSPACE_FONT_FAMILY, ui_font["size"])
         heading_font = (ui_font["family"], ui_font["size"], "bold")
         style.configure(
-            "Treeview", background=field_bg, fieldbackground=field_bg,
-            foreground=fg, rowheight=22, borderwidth=0, font=font,
+            "Treeview",
+            background=field_bg,
+            fieldbackground=field_bg,
+            foreground=fg,
+            rowheight=22,
+            borderwidth=0,
+            font=font,
         )
-        style.configure("Treeview.Heading", background=bg, foreground=fg, font=heading_font)
+        style.configure(
+            "Treeview.Heading", background=bg, foreground=fg, font=heading_font
+        )
 
         # No selection highlighting -- selectmode="none" above already
         # disables it functionally, but without this map a stray click can
@@ -211,21 +224,28 @@ class HexViewTab(ctk.CTkFrame):
         thumb_active = "#6e7173" if dark else "#a6a6a6"
         style.layout(
             "DM41L.Vertical.TScrollbar",
-            [(
-                "Vertical.Scrollbar.trough",
-                {
-                    "sticky": "ns",
-                    "children": [(
-                        "Vertical.Scrollbar.thumb",
-                        {"expand": "1", "sticky": "nswe"},
-                    )],
-                },
-            )],
+            [
+                (
+                    "Vertical.Scrollbar.trough",
+                    {
+                        "sticky": "ns",
+                        "children": [
+                            (
+                                "Vertical.Scrollbar.thumb",
+                                {"expand": "1", "sticky": "nswe"},
+                            )
+                        ],
+                    },
+                )
+            ],
         )
         style.configure(
             "DM41L.Vertical.TScrollbar",
-            background=thumb, troughcolor=trough, bordercolor=trough,
-            relief="flat", borderwidth=0,
+            background=thumb,
+            troughcolor=trough,
+            bordercolor=trough,
+            relief="flat",
+            borderwidth=0,
         )
         style.map(
             "DM41L.Vertical.TScrollbar",
@@ -254,14 +274,12 @@ class HexViewTab(ctk.CTkFrame):
 
     @staticmethod
     def _ascii_preview(register) -> str:
-        return "".join(
-            chr(b) if 32 <= b < 127 else "." for b in register.get_bytes()
-        )
+        return "".join(chr(b) if 32 <= b < 127 else "." for b in register.get_bytes())
 
     @staticmethod
     def _hex_spaced(register) -> str:
         raw = register.get_hex()
-        return " ".join(raw[i:i + 2] for i in range(0, len(raw), 2))
+        return " ".join(raw[i : i + 2] for i in range(0, len(raw), 2))
 
     def render(self, memory: Memory):
         self._memory = memory
@@ -290,7 +308,9 @@ class HexViewTab(ctk.CTkFrame):
 
         for addr in range(DISPLAY_START, DISPLAY_END + 1):
             register = memory.get_register(addr)
-            region_key = _classify(addr, r00, dot_end, has_partition, key_assignments_end)
+            region_key = _classify(
+                addr, r00, dot_end, has_partition, key_assignments_end
+            )
             self._tree.insert(
                 "",
                 "end",

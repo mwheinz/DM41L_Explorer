@@ -18,6 +18,7 @@ FLAG_COUNT = 56
 CARD_FG = ("gray92", "gray17")
 CARD_BORDER = ("gray80", "gray28")
 
+
 class FlagsTab(ctk.CTkFrame):
     """Renders the 56 flags as checkboxes. Call `render(memory)` whenever
     the buffer changes."""
@@ -32,12 +33,13 @@ class FlagsTab(ctk.CTkFrame):
 
         _, self._header_label = build_tab_header(self)
 
-        self._body = ctk.CTkScrollableFrame(self,
-                                            fg_color=CARD_FG,
-                                            border_width=1,
-                                            border_color=CARD_BORDER,
-                                            corner_radius=10,
-                                            )
+        self._body = ctk.CTkScrollableFrame(
+            self,
+            fg_color=CARD_FG,
+            border_width=1,
+            border_color=CARD_BORDER,
+            corner_radius=10,
+        )
         self._body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         bind_touchpad_scroll(self._body)
 
@@ -62,10 +64,12 @@ class FlagsTab(ctk.CTkFrame):
             self._header_label.configure(text=f"Could not decode flags: {e}")
             return
 
-        self._header_label.configure(text="HP41 Flags: Note that some flags" \
-                                     " will change value on calculator" \
-                                     " restart. Others have no effect on" \
-                                     " the emulator.")
+        self._header_label.configure(
+            text="HP41 Flags: Note that some flags"
+            " will change value on calculator"
+            " restart. Others have no effect on"
+            " the emulator."
+        )
 
         self._suspend_flag_callbacks = True
         columns = 4

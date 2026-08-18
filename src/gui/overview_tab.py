@@ -124,13 +124,16 @@ class OverviewTab(ctk.CTkScrollableFrame):
         """Creates a bordered/tinted 'card' frame at (row, column) with a
         bold title, used to visually separate sections from each other."""
         card = ctk.CTkFrame(
-            self, fg_color=CARD_FG, border_width=1, border_color=CARD_BORDER,
+            self,
+            fg_color=CARD_FG,
+            border_width=1,
+            border_color=CARD_BORDER,
             corner_radius=10,
         )
         card.grid(row=row, column=column, sticky="nsew", padx=8, pady=4)
-        ctk.CTkLabel(
-            card, text=title, font=ctk.CTkFont(weight="bold")
-        ).grid(row=0, column=0, columnspan=4, sticky="w", padx=10, pady=(10, 6))
+        ctk.CTkLabel(card, text=title, font=ctk.CTkFont(weight="bold")).grid(
+            row=0, column=0, columnspan=4, sticky="w", padx=10, pady=(10, 6)
+        )
         return card
 
     def _notify_change(self):
@@ -162,7 +165,10 @@ class OverviewTab(ctk.CTkScrollableFrame):
             cell.grid(row=start_row + r, column=c, sticky="w", padx=10, pady=2)
             ctk.CTkLabel(cell, text=f"{label}:", width=90, anchor="w").pack(side="left")
             ctk.CTkLabel(
-                cell, text=value, font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY), anchor="w"
+                cell,
+                text=value,
+                font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+                anchor="w",
             ).pack(side="left")
         return start_row + (-(-len(rows) // columns) if rows else 0)  # ceil div
 
@@ -184,17 +190,21 @@ class OverviewTab(ctk.CTkScrollableFrame):
             ("X", f"{sr.X().get_bcd_number():.8g}"),
             ("LastX", f"{sr.LastX().get_bcd_number():.8g}"),
         ]
-        next_row = self._render_grid_rows(self._stack_frame, stack_rows, start_row=1, columns=2)
+        next_row = self._render_grid_rows(
+            self._stack_frame, stack_rows, start_row=1, columns=2
+        )
 
-        ctk.CTkLabel(
-            self._stack_frame, text="Alpha (M-P, combined):", anchor="w"
-        ).grid(row=next_row, column=0, columnspan=4, sticky="w", padx=10, pady=(8, 0))
+        ctk.CTkLabel(self._stack_frame, text="Alpha (M-P, combined):", anchor="w").grid(
+            row=next_row, column=0, columnspan=4, sticky="w", padx=10, pady=(8, 0)
+        )
         ctk.CTkLabel(
             self._stack_frame,
             text=repr(str(sr.alpha)),
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             anchor="w",
-        ).grid(row=next_row + 1, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 4))
+        ).grid(
+            row=next_row + 1, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 4)
+        )
 
         mnop_rows = [
             ("M", repr(sr.M().get_ascii())),
@@ -230,7 +240,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
             ("d (56 flags)", sr.d().get_hex()),
             ("e", sr.e().get_hex()),
         ]
-        next_row = self._render_grid_rows(self._system_frame, rows, start_row=1, columns=2)
+        next_row = self._render_grid_rows(
+            self._system_frame, rows, start_row=1, columns=2
+        )
 
         ctk.CTkLabel(
             self._system_frame,
@@ -274,7 +286,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
         )
         self._r00_var = ctk.StringVar(value=f"0x{r00:03x}")
         entry = ctk.CTkEntry(
-            self._partition_frame, textvariable=self._r00_var, width=100,
+            self._partition_frame,
+            textvariable=self._r00_var,
+            width=100,
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         )
         entry.grid(row=1, column=1, sticky="w", padx=10, pady=(2, 10))
@@ -354,7 +368,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
             xm = ExtendedMemory(self._memory, address_range=[0x40, 0x2EF])
             xm_files = xm.list_files()
             xm_text = str(len(xm_files))
-            xm_used = sum(f.num_registers + XM_FILE_OVERHEAD_REGISTERS for f in xm_files)
+            xm_used = sum(
+                f.num_registers + XM_FILE_OVERHEAD_REGISTERS for f in xm_files
+            )
             # xm_used can legitimately exceed XM_TOTAL_REGISTERS: that
             # constant already has EMDIR's next-file reserve subtracted
             # out (see its definition above), and a real file's own
@@ -366,7 +382,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
             xm_free = max(0, XM_TOTAL_REGISTERS - xm_used)
             xm_used_pct = min(100, round(100 * xm_used / XM_TOTAL_REGISTERS))
             xm_used_text = f"{xm_used}/{XM_TOTAL_REGISTERS} registers ({xm_used_pct}%)"
-            xm_free_text = f"{xm_free}/{XM_TOTAL_REGISTERS} registers ({100 - xm_used_pct}%)"
+            xm_free_text = (
+                f"{xm_free}/{XM_TOTAL_REGISTERS} registers ({100 - xm_used_pct}%)"
+            )
         except DM41LMemoryError as e:
             logger.warning("Could not list XM files for summary: %s", e)
             xm_text = f"could not be listed ({e})"
@@ -378,7 +396,10 @@ class OverviewTab(ctk.CTkScrollableFrame):
             consumed = r00 - dot_end
             available = dot_end - LOW_MEMORY_START
             rows.append(
-                ("User memory locations", f"00-{reserved-1} (R00-0x{PRIMARY_DATA_END:03x})")
+                (
+                    "User memory locations",
+                    f"00-{reserved-1} (R00-0x{PRIMARY_DATA_END:03x})",
+                )
             )
             rows.append(("Program storage consumed", f"{consumed} registers"))
             rows.append(
@@ -396,7 +417,10 @@ class OverviewTab(ctk.CTkScrollableFrame):
                 row=i, column=0, sticky="nw", padx=10, pady=2
             )
             ctk.CTkLabel(
-                self._summary_frame, text=value, anchor="w", justify="left",
+                self._summary_frame,
+                text=value,
+                anchor="w",
+                justify="left",
                 wraplength=280,
                 font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             ).grid(row=i, column=1, sticky="w", padx=10, pady=2)

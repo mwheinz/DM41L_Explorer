@@ -121,13 +121,17 @@ class KeyAssignmentsTab(ctk.CTkFrame):
         bind_touchpad_scroll(self._scroll)
 
         ctk.CTkLabel(
-            self._scroll, text="HP41", font=ctk.CTkFont(weight="bold", size=14),
+            self._scroll,
+            text="HP41",
+            font=ctk.CTkFont(weight="bold", size=14),
         ).pack(anchor="w", padx=4, pady=(4, 2))
         self._hp41_frame = ctk.CTkFrame(self._scroll, fg_color="transparent")
         self._hp41_frame.pack(anchor="w", padx=4, pady=(0, 16))
 
         ctk.CTkLabel(
-            self._scroll, text="DM41L", font=ctk.CTkFont(weight="bold", size=14),
+            self._scroll,
+            text="DM41L",
+            font=ctk.CTkFont(weight="bold", size=14),
         ).pack(anchor="w", padx=4, pady=(4, 2))
         self._dm41l_frame = ctk.CTkFrame(self._scroll, fg_color="transparent")
         self._dm41l_frame.pack(anchor="w", padx=4, pady=(0, 4))
@@ -191,13 +195,18 @@ class KeyAssignmentsTab(ctk.CTkFrame):
 
     def _build_key_cell(self, parent, key_number: int, row: int, col: int):
         cell = ctk.CTkFrame(
-            parent, fg_color=CARD_FG, border_width=1, border_color=CARD_BORDER,
+            parent,
+            fg_color=CARD_FG,
+            border_width=1,
+            border_color=CARD_BORDER,
             corner_radius=6,
         )
         cell.grid(row=row, column=col, padx=2, pady=2, sticky="nsew")
 
         ctk.CTkLabel(
-            cell, text=f"{key_number:02d}", font=ctk.CTkFont(size=10, weight="bold"),
+            cell,
+            text=f"{key_number:02d}",
+            font=ctk.CTkFont(size=10, weight="bold"),
         ).pack(pady=(0, 0))
 
         for shifted in (False, True):
@@ -214,13 +223,20 @@ class KeyAssignmentsTab(ctk.CTkFrame):
 
     def _build_static_cell(self, parent, label: str, row: int, col: int):
         cell = ctk.CTkFrame(
-            parent, fg_color=CARD_FG, border_width=1, border_color=CARD_BORDER,
+            parent,
+            fg_color=CARD_FG,
+            border_width=1,
+            border_color=CARD_BORDER,
             corner_radius=6,
         )
         cell.grid(row=row, column=col, padx=2, pady=2, sticky="nsew")
         ctk.CTkLabel(
-            cell, text=label, text_color="gray50", font=ctk.CTkFont(size=10),
-            width=KEY_BUTTON_WIDTH, height=44,
+            cell,
+            text=label,
+            text_color="gray50",
+            font=ctk.CTkFont(size=10),
+            width=KEY_BUTTON_WIDTH,
+            height=44,
         ).pack(expand=True)
 
     # -- Refresh (every render) ----------------------------------------------
@@ -249,7 +265,9 @@ class KeyAssignmentsTab(ctk.CTkFrame):
             self._memory.set_key_assignment(key_number, shifted, function_bytes)
             logger.info(
                 "Key %02d (%s) assigned: %s",
-                key_number, "shifted" if shifted else "unshifted", function_bytes,
+                key_number,
+                "shifted" if shifted else "unshifted",
+                function_bytes,
             )
             self._notify_change()
             self._refresh_buttons()
@@ -261,7 +279,8 @@ class KeyAssignmentsTab(ctk.CTkFrame):
             self._memory.delete_key_assignment(key_number, shifted)
             logger.info(
                 "Key %02d (%s) assignment deleted",
-                key_number, "shifted" if shifted else "unshifted",
+                key_number,
+                "shifted" if shifted else "unshifted",
             )
             self._notify_change()
             self._refresh_buttons()

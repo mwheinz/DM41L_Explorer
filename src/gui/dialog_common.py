@@ -69,11 +69,17 @@ def build_dialog_button_row(
     row.pack(**(pack_kwargs or {"padx": 16, "pady": (12, 16), "fill": "x"}))
 
     ctk.CTkButton(
-        row, text=cancel_text, width=BUTTON_WIDTH, command=on_cancel or dialog.destroy,
+        row,
+        text=cancel_text,
+        width=BUTTON_WIDTH,
+        command=on_cancel or dialog.destroy,
     ).pack(side="left")
 
     primary_button = ctk.CTkButton(
-        row, text=primary_text, width=BUTTON_WIDTH, command=on_primary,
+        row,
+        text=primary_text,
+        width=BUTTON_WIDTH,
+        command=on_primary,
     )
     primary_button.pack(side="right")
 

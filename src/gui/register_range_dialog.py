@@ -73,7 +73,8 @@ class RegisterRangeDialog(ctk.CTkToplevel):
         except ValueError:
             logger.warning(
                 "Invalid export range entry: start=%r end=%r",
-                self._start_var.get(), self._end_var.get(),
+                self._start_var.get(),
+                self._end_var.get(),
             )
             messagebox.showerror(
                 "Invalid Range", "Enter whole register numbers (e.g. 0 and 34)."
@@ -84,7 +85,9 @@ class RegisterRangeDialog(ctk.CTkToplevel):
         if not (0 <= start <= end <= last):
             logger.warning(
                 "Export range R%02d-R%02d out of bounds (valid: R00-R%02d)",
-                start, end, last,
+                start,
+                end,
+                last,
             )
             messagebox.showerror(
                 "Invalid Range",
@@ -150,7 +153,9 @@ class RegisterImportLocationDialog(ctk.CTkToplevel):
         try:
             start = int(self._start_var.get())
         except ValueError:
-            logger.warning("Invalid import location entry: start=%r", self._start_var.get())
+            logger.warning(
+                "Invalid import location entry: start=%r", self._start_var.get()
+            )
             messagebox.showerror(
                 "Invalid Location", "Enter a whole register number (e.g. 5)."
             )
@@ -161,7 +166,9 @@ class RegisterImportLocationDialog(ctk.CTkToplevel):
         if not (0 <= start and end <= last):
             logger.warning(
                 "Import destination R%02d-R%02d out of bounds (valid: R00-R%02d)",
-                start, end, last,
+                start,
+                end,
+                last,
             )
             messagebox.showerror(
                 "Invalid Location",

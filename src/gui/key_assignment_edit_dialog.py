@@ -54,7 +54,9 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
     RegisterEditDialog.
     """
 
-    def __init__(self, master, key_number: int, shifted: bool, assignment, on_save, on_delete):
+    def __init__(
+        self, master, key_number: int, shifted: bool, assignment, on_save, on_delete
+    ):
         super().__init__(master)
         shift_label = "shifted" if shifted else "unshifted"
         self.title(f"Edit Key {key_number:02d} ({shift_label})")
@@ -74,8 +76,11 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
             else "Currently unassigned."
         )
         ctk.CTkLabel(
-            self, text=f"Key {key_number:02d} ({shift_label}) -- {current_text}",
-            font=ctk.CTkFont(weight="bold"), wraplength=340, justify="left",
+            self,
+            text=f"Key {key_number:02d} ({shift_label}) -- {current_text}",
+            font=ctk.CTkFont(weight="bold"),
+            wraplength=340,
+            justify="left",
         ).pack(padx=16, pady=(16, 4), anchor="w")
 
         tabs = ctk.CTkTabview(self, width=360)
@@ -94,8 +99,10 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
             anchor="w", padx=8, pady=(12, 4)
         )
         ctk.CTkComboBox(
-            tabs.tab("Function"), values=_ALL_FUNCTION_NAMES,
-            variable=self._function_var, width=300,
+            tabs.tab("Function"),
+            values=_ALL_FUNCTION_NAMES,
+            variable=self._function_var,
+            width=300,
         ).pack(anchor="w", padx=8, fill="x")
 
         # -- Raw Hex tab: 2 hex digits (single-byte) or 4 (XROM 2-byte) --
@@ -103,12 +110,14 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             tabs.tab("Raw Hex"),
             text="Raw function byte(s): 2 hex digits (e.g. 40) for a "
-                 "built-in function, or 4 (e.g. A681) for an XROM/"
-                 "peripheral function.",
-            wraplength=320, justify="left",
+            "built-in function, or 4 (e.g. A681) for an XROM/"
+            "peripheral function.",
+            wraplength=320,
+            justify="left",
         ).pack(anchor="w", padx=8, pady=(12, 4))
         ctk.CTkEntry(
-            tabs.tab("Raw Hex"), textvariable=self._hex_var,
+            tabs.tab("Raw Hex"),
+            textvariable=self._hex_var,
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).pack(anchor="w", padx=8, fill="x")
 
@@ -150,9 +159,7 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
                 elif len(text) == 4:
                     function_bytes = (int(text[0:2], 16), int(text[2:4], 16))
                 else:
-                    raise ValueError(
-                        f"Expected 2 or 4 hex digits, got {len(text)}."
-                    )
+                    raise ValueError(f"Expected 2 or 4 hex digits, got {len(text)}.")
         except ValueError as e:
             logger.warning("Invalid key assignment value on %s tab: %s", which, e)
             messagebox.showerror("Invalid Value", str(e))
