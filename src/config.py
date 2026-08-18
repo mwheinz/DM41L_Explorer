@@ -45,8 +45,8 @@ class ProjectConfig:
         except Exception as e:
             logger.warning("Could not load preferences from %s: %s", self.PREFS_FILE, e)
             raise Exception(
-                f"Warning: Could not load preferences from {self.PREFS_FILE}: {e}"
-            )
+                f"Warning: Could not load preferences from {self.PREFS_FILE}"
+            ) from e
 
         return prefs
 
@@ -61,8 +61,8 @@ class ProjectConfig:
         except Exception as e:
             logger.error("Could not save preferences to %s: %s", self.PREFS_FILE, e)
             raise Exception(
-                f"Error: Could not save preferences to {self.PREFS_FILE}: {e}"
-            )
+                f"Error: Could not save preferences to {self.PREFS_FILE}"
+                ) from e
 
     # --- Properties for clean access in other modules ---
 
