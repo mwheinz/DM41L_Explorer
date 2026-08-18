@@ -22,7 +22,7 @@ calculator is turned off and on.
 | 13 | lower case print | 41 | display ENG /FIX-ENG |
 | 14 | overwrite card protection | 42 | trig mode DEG / GRAD |
 | 15 | IL-printer MAN / NORM | 43 | trig mode RAD |
-| 16 | IL-printer TRACE | 44 | contiunuous ON |
+| 16 | IL-printer TRACE | 44 | Continuous ON |
 | 17 | end of record | 45 | system data entry |
 | 18 | TINTR enable | 46 | partial key sequence |
 | 19 | general use | 47 | SHIFT |
