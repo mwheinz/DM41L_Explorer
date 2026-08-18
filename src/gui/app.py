@@ -34,6 +34,7 @@ from gui.data_registers_tab import DataRegistersTab
 from gui.xm_files_tab import XMFilesTab
 from gui.hex_view_tab import HexViewTab
 from gui.program_tab import ProgramTab
+from gui.key_assignments_tab import KeyAssignmentsTab
 
 try:
     from dm41lversion import _version
@@ -236,6 +237,7 @@ class DM41LExplorerApp(ctk.CTk):
         self.tabview.add("Overview")
         self.tabview.add("Flags")
         self.tabview.add("Programs")
+        self.tabview.add("Key Assignments")
         self.tabview.add("Data Registers")
         self.tabview.add("XM Files")
         self.tabview.add("Hex View")
@@ -261,6 +263,11 @@ class DM41LExplorerApp(ctk.CTk):
         self.program_tab = ProgramTab(self.tabview.tab("Programs"))
         self.program_tab.pack(fill="both", expand=True)
 
+        self.key_assignments_tab = KeyAssignmentsTab(
+            self.tabview.tab("Key Assignments"), on_change=self._on_memory_changed
+        )
+        self.key_assignments_tab.pack(fill="both", expand=True)
+
         self.xm_files_tab = XMFilesTab(
             self.tabview.tab("XM Files"), on_change=self._on_memory_changed
         )
@@ -273,6 +280,7 @@ class DM41LExplorerApp(ctk.CTk):
             "Data Registers": self.data_registers_tab,
             "Hex View": self.hex_view_tab,
             "Programs": self.program_tab,
+            "Key Assignments": self.key_assignments_tab,
             "XM Files": self.xm_files_tab,
         }
         self._tabs_dirty = {name: True for name in self._tabs}
@@ -685,6 +693,10 @@ class DM41LExplorerApp(ctk.CTk):
     def save_dump_to_file(self):
         if self.memory_source is None:
             self.save_dump_as()
+            return
+        if not messagebox.askyesno(
+            "Overwrite File", f"Overwrite {self.memory_source} with your changes?"
+        ):
             return
         try:
             self.memory.to_file(self.memory_source)

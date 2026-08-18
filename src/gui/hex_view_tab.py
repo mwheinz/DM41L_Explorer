@@ -32,12 +32,10 @@ logger = logging.getLogger(__name__)
 # 3/4: Status Registers 0x000-0x00f, an unused/"void" gap 0x010-0x03f,
 # Extended Memory #0 0x040-0x0bf, Main Memory 0x0c0-0x1ff (itself split
 # further below, when a dump with a sane R00/.END. is loaded), Extended
-# Memory #1 0x200-0x2ef, and a final 0x2f0-0x2ff span the doc notes is
-# "non-existent" in the DM41L emulator. Shown anyway (as its own color) so
-# the view covers the full nominal address space rather than silently
-# stopping short of it.
+# Memory #1 0x200-0x2ef. This covers the full address space of the HP41CX
+# calculator and the DM41L emulator.
 DISPLAY_START = 0x000
-DISPLAY_END = 0x2FF
+DISPLAY_END = 0x2EF
 
 STATUS_END = 0x00F
 UNUSED_END = 0x03F

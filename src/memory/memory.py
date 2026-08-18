@@ -13,6 +13,7 @@ from pathlib import Path
 from .registers import Register
 from .constants import PRIMARY_DATA_END, KEY_ASSIGNMENTS_RANGE
 from .program_info import ProgramInfo
+from . import functions as key_functions
 
 
 class Memory:
@@ -25,6 +26,11 @@ class Memory:
     REG_C_ADDR = 0x0D  # SREG / printer-use / cold-start / R00 / .END.
     REG_D_ADDR = 0x0E  # Flags
     FLAG_COUNT = 56
+
+    # KEYFLAGS bitmaps (docs/key_assignments.md sec 4.5): register F holds
+    # the unshifted-key existence bits, register e the shifted-key ones.
+    KEYFLAGS_UNSHIFTED_ADDR = 0x0A  # F
+    KEYFLAGS_SHIFTED_ADDR = 0x0F  # e
 
     def __init__(self, header: str = "DM41"):
         self._header = header
@@ -234,15 +240,18 @@ class Memory:
     # -- Key Assignments (starting at KEY_ASSIGNMENTS_RANGE[0] / 0xC0) --
     #
     # Each register holding user function key assignments starts with a
-    # 0xF0 marker byte, followed by up to two 3-byte assignment entries
-    # (function byte(s) + a key-designation byte). Reverse-engineered from
-    # William C. Wickes' "Synthetic Programming on the HP-41C" (Section
-    # 2E, "The Key Assignment Registers") and confirmed byte-for-byte
-    # against a real 8-assignment dump -- see
-    # docs/pdfs and the project's key-assignment research notes for the
-    # full derivation. Alarms and genuinely free registers occupy the
-    # remaining span up to .END.; telling those apart from each other
-    # isn't implemented yet (see regions.py's Alarms class).
+    # 0xF0 marker byte, followed by up to two 3-byte assignment entries:
+    #   [fn byte 1] [fn byte 2] [key byte]
+    # A built-in single-byte HP-41 function stores its filler byte FIRST
+    # (fn byte 1 == 0x04) and the real function code second; a two-byte
+    # XROM/peripheral function uses both bytes for real data, no filler.
+    # Reverse-engineered from William C. Wickes' "Synthetic Programming on
+    # the HP-41C" (Section 2E, "The Key Assignment Registers") and
+    # confirmed byte-for-byte against real dumps -- see
+    # docs/key_assignments.md sec 4.2/4.8 for the full derivation. Alarms
+    # and genuinely free registers occupy the remaining span up to .END.;
+    # telling those apart from each other isn't implemented yet (see
+    # regions.py's Alarms class).
 
     def _scan_key_assignments_end(self) -> int:
         """Scans upward from KEY_ASSIGNMENTS_RANGE[0] (0xC0) for as long as
@@ -279,6 +288,300 @@ class Memory:
         dialog, will NOT update this until the dump is reloaded.
         """
         return self._key_assignments_end
+
+    # The 34 real assignable key positions on the physical keyboard (docs
+    # sec 6 item 4's "HP41" grid) as (M, N) pairs. Row 3 has no N=1 -- that
+    # position is the physical SHIFT key, which can never be assigned;
+    # rows 4-8 only go up to N=4. Validating against this (rather than
+    # just "1<=M<=8, 1<=N<=5") matters: an out-of-range pair like (8, 5)
+    # produces a *negative* raw bit number in _keyflags_bit()'s formula,
+    # which Python's divmod()/bytes indexing would silently wrap around to
+    # a real (but wrong) byte instead of raising -- corrupting an
+    # unrelated KEYFLAGS bit rather than failing loudly.
+    _VALID_KEY_POSITIONS = (
+        [(1, n) for n in range(1, 6)]
+        + [(2, n) for n in range(1, 6)]
+        + [(3, n) for n in range(2, 6)]
+        + [(m, n) for m in range(4, 9) for n in range(1, 5)]
+    )
+    _VALID_KEY_NUMBERS = [10 * m + n for m, n in _VALID_KEY_POSITIONS]
+
+    # Row 4's ENTER^ key is physically double-width -- on the real
+    # keyboard it occupies both the column-1 AND column-2 slots in the
+    # key-byte (sec 4.3) / KEYFLAGS (sec 4.5) column numbering, so there
+    # is no real key at physical column 2 for row 4 at all. Confirmed
+    # against Wickes' Figure 4-2 ("Key Assignment Flag Bits"): that
+    # diagram draws a single wide box spanning columns 1-2 in row 4, with
+    # no bit assigned to column 2 -- this is the "imaginary 42nd key
+    # under ENTER" mentioned in sec 4.5's flag-count note. Wickes' key-
+    # NUMBER notation (sec 2) still numbers row 4's three other keys
+    # sequentially -- 42, 43, 44, the same as every other row -- but they
+    # sit at physical column positions 3, 4, 5 in the formulas below, not
+    # 2, 3, 4. Every other row's key-number column digit equals its
+    # physical column directly; row 4 is the sole exception. Found
+    # 2026-08-18 from the user's real-hardware testing: assignments to
+    # key 42 showed up on the calculator as key 41 and didn't work, and
+    # real-calculator row-4 assignments came back missing/misplaced when
+    # read by this app -- both are exactly what using the wrong (N-1)
+    # column offset for row 4 would cause.
+    _ROW4_PHYSICAL_COLUMN = {1: 1, 2: 3, 3: 4, 4: 5}
+
+    @staticmethod
+    def _key_row_col(key_number: int) -> tuple:
+        """Splits a two-digit key number `MN` (docs/key_assignments.md sec
+        2 -- row M, column N) into (M, N). Raises ValueError unless
+        `key_number` is one of the 34 real assignable keyboard positions
+        (see _VALID_KEY_POSITIONS above) -- notably rejecting `31` (the
+        physical SHIFT key) and anything with M or N outside the real
+        keyboard's layout. `N` here is the key-NUMBER column (as printed
+        on the key, e.g. the `2` in `42`) -- see _physical_column() for
+        the column actually used by the byte/bit formulas, which differs
+        from this for row 4."""
+        m, n = divmod(key_number, 10)
+        if (m, n) not in Memory._VALID_KEY_POSITIONS:
+            raise ValueError(f"Invalid key number: {key_number!r}")
+        return m, n
+
+    @staticmethod
+    def _physical_column(m: int, n: int) -> int:
+        """Maps a key number's (M, N) -- N being the key-NUMBER column,
+        e.g. the `2` in key `42` -- to the physical column actually used
+        by the key-byte (sec 4.3) and KEYFLAGS bit (sec 4.5) formulas.
+        Identical to N for every row except row 4, whose double-width
+        ENTER^ key shifts the three keys after it over by one physical
+        column -- see _ROW4_PHYSICAL_COLUMN above."""
+        if m == 4:
+            return Memory._ROW4_PHYSICAL_COLUMN[n]
+        return n
+
+    @staticmethod
+    def key_byte_for(key_number: int, shifted: bool) -> int:
+        """The internal key-byte encoding for `key_number` (docs sec 4.3):
+        `16*(N-1) + M` unshifted, `16*(N-1) + (M+8)` shifted, where `N` is
+        the *physical* column (see _physical_column())."""
+        m, n = Memory._key_row_col(key_number)
+        n_phys = Memory._physical_column(m, n)
+        row = m + 8 if shifted else m
+        return 16 * (n_phys - 1) + row
+
+    @staticmethod
+    def _keyflags_bit(key_number: int) -> int:
+        """Bit position within the KEYFLAGS bitmap (register F or e) for
+        `key_number` (docs sec 4.5): `36 - M - 8*(N-1)`, where `N` is the
+        *physical* column (see _physical_column()). The same bit number
+        is used in both registers -- which register (F vs. e)
+        distinguishes unshifted from shifted, not the bit position."""
+        m, n = Memory._key_row_col(key_number)
+        n_phys = Memory._physical_column(m, n)
+        return 36 - m - 8 * (n_phys - 1)
+
+    def get_key_flag(self, key_number: int, shifted: bool) -> bool:
+        """Reads the KEYFLAGS existence bit for `key_number` -- True means
+        *some* assignment exists for this key/shift-state, in either the
+        Key Assignment Registers (sec 4.2) or a global label (sec 4.6);
+        it says nothing about which kind. See docs sec 4.5."""
+        addr = self.KEYFLAGS_SHIFTED_ADDR if shifted else self.KEYFLAGS_UNSHIFTED_ADDR
+        bit = self._keyflags_bit(key_number)
+        reg = self.get_register(addr)
+        byte_index, bit_in_byte = divmod(bit, 8)
+        return bool((reg.get_bytes()[byte_index] >> (7 - bit_in_byte)) & 1)
+
+    def set_key_flag(self, key_number: int, shifted: bool, value: bool):
+        """Sets or clears the KEYFLAGS existence bit for `key_number`
+        (docs sec 4.5). Callers writing an actual assignment should use
+        set_key_assignment()/delete_key_assignment() below instead of
+        calling this directly -- those keep the Key Assignment Registers
+        and KEYFLAGS in sync; this is the low-level primitive they (and
+        global-label assignment/deletion, once implemented) share."""
+        addr = self.KEYFLAGS_SHIFTED_ADDR if shifted else self.KEYFLAGS_UNSHIFTED_ADDR
+        bit = self._keyflags_bit(key_number)
+        reg = self.get_register(addr)
+        data = bytearray(reg.get_bytes())
+        byte_index, bit_in_byte = divmod(bit, 8)
+        mask = 1 << (7 - bit_in_byte)
+        if value:
+            data[byte_index] |= mask
+        else:
+            data[byte_index] &= ~mask & 0xFF
+        self.set_register(addr, Register(data=bytes(data)))
+
+    def _decode_key_assignment_entries(self) -> list:
+        """Returns every entry currently in the Key Assignment Registers,
+        in stored (newest-first, sec 4.4) order, as
+        `(fn_byte1, fn_byte2_or_None, key_byte)` tuples -- `fn_byte2` is
+        None for a single-byte built-in function entry (the register's
+        real filler-first storage, sec 4.2, is normalized away here so
+        every other method only deals with "1 byte" vs. "2 bytes")."""
+        entries = []
+        for addr in range(KEY_ASSIGNMENTS_RANGE[0], self.key_assignments_end()):
+            raw = self.get_register(addr).get_bytes()
+            for offset in (1, 4):
+                b0, b1, b2 = raw[offset], raw[offset + 1], raw[offset + 2]
+                if b0 == 0 and b1 == 0 and b2 == 0:
+                    continue  # register has an odd number of assignments
+                if b0 == 0x04:
+                    entries.append((b1, None, b2))
+                else:
+                    entries.append((b0, b1, b2))
+        return entries
+
+    def _encode_key_assignment_entries(self, entries: list):
+        """Repacks `entries` (same shape _decode_key_assignment_entries()
+        returns) canonically into the Key Assignment Registers, starting
+        at KEY_ASSIGNMENTS_RANGE[0] with no gaps, two entries per
+        register, re-adding the filler byte for a single-byte entry (sec
+        4.2). Clears every register between the new and old end (so a
+        shrinking edit doesn't leave stale F0-marked registers behind)
+        and updates key_assignments_end(). Entries are written in list
+        order -- callers control LIFO placement (sec 4.4) by ordering
+        `entries` themselves before calling this."""
+        base = KEY_ASSIGNMENTS_RANGE[0]
+        old_end = self.key_assignments_end()
+
+        addr = base
+        i = 0
+        while i < len(entries):
+            data = bytearray(7)
+            data[0] = 0xF0
+            for slot in range(2):
+                if i >= len(entries):
+                    break
+                fn1, fn2, key = entries[i]
+                offset = 1 + slot * 3
+                if fn2 is None:
+                    data[offset] = 0x04
+                    data[offset + 1] = fn1
+                else:
+                    data[offset] = fn1
+                    data[offset + 1] = fn2
+                data[offset + 2] = key
+                i += 1
+            self.set_register(addr, Register(data=bytes(data)))
+            addr += 1
+
+        new_end = addr
+        for stale in range(new_end, old_end):
+            self.set_register(stale, Register(size=7))
+        self._key_assignments_end = new_end
+
+    def set_key_assignment(self, key_number: int, shifted: bool, function_bytes):
+        """Assigns `key_number` (unshifted or shifted, per `shifted`) to a
+        built-in/peripheral function -- `function_bytes` is a single int
+        (a one-byte HP-41 function, e.g. 0x40 for `+`; see the sec-5
+        caveat in memory/functions.py for the low-code (<0x40) case) or a
+        2-item sequence of ints (an XROM/peripheral function's two bytes,
+        sec 4.8).
+
+        Any existing entry for the same key/shift-state is replaced (not
+        left as a stale duplicate): the old entry is removed and the new
+        one inserted at the front, so it lands in register 0xC0 exactly
+        as a brand-new assignment would (sec 4.4's LIFO order). Also sets
+        the corresponding KEYFLAGS bit (sec 4.5). Does NOT touch global
+        label assignments (sec 4.6) -- out of scope for this method.
+        """
+        key_byte = self.key_byte_for(key_number, shifted)
+
+        if isinstance(function_bytes, int):
+            fn1, fn2 = function_bytes, None
+        else:
+            fn1, fn2 = function_bytes
+            if fn2 is None:
+                raise ValueError("A 2-byte function's second byte can't be None")
+
+        for b in (fn1,) if fn2 is None else (fn1, fn2):
+            if not (0 <= b <= 0xFF):
+                raise ValueError(f"Function byte out of range: {b!r}")
+
+        entries = [e for e in self._decode_key_assignment_entries() if e[2] != key_byte]
+        entries.insert(0, (fn1, fn2, key_byte))
+        self._encode_key_assignment_entries(entries)
+        self.set_key_flag(key_number, shifted, True)
+
+    def delete_key_assignment(self, key_number: int, shifted: bool):
+        """Removes any Key Assignment Register entry for `key_number`/
+        `shifted` and clears its KEYFLAGS bit. A no-op (still clears the
+        flag) if the key currently has no entry there -- e.g. it's a
+        global-label assignment (sec 4.6, untouched by this method) or
+        simply unassigned."""
+        key_byte = self.key_byte_for(key_number, shifted)
+        entries = self._decode_key_assignment_entries()
+        filtered = [e for e in entries if e[2] != key_byte]
+        if len(filtered) != len(entries):
+            self._encode_key_assignment_entries(filtered)
+        self.set_key_flag(key_number, shifted, False)
+
+    def get_key_assignment(self, key_number: int, shifted: bool) -> Optional[dict]:
+        """Looks up the single Key Assignment Register entry (if any) for
+        `key_number`/`shifted` -- same dict shape as one entry from
+        list_key_assignments(), or None if that key/shift-state has no
+        entry there (unassigned, or assigned via a global label instead,
+        sec 4.6). Intended for a GUI rendering one keypad cell at a time
+        (docs sec 6 item 4), where scanning the full decoded list per cell
+        would be wasteful for a whole grid at once -- callers rendering
+        every key at once should use list_key_assignments() instead."""
+        key_byte = self.key_byte_for(key_number, shifted)
+        for fn1, fn2, kb in self._decode_key_assignment_entries():
+            if kb == key_byte:
+                return {
+                    "key_number": key_number,
+                    "shifted": shifted,
+                    "fn_byte1": fn1,
+                    "fn_byte2": fn2,
+                    "name": key_functions.function_name_for_bytes(fn1, fn2),
+                    "raw_key_byte": kb,
+                }
+        return None
+
+    def list_key_assignments(self) -> list:
+        """Returns every built-in/peripheral key assignment currently in
+        the Key Assignment Registers as a list of dicts:
+        `{"key_number": int, "shifted": bool, "fn_byte1": int,
+        "fn_byte2": int|None, "name": str}` -- `name` is the looked-up
+        function name (memory/functions.py), or a "0xNN"-style fallback
+        string if the byte(s) don't match any known function. Order
+        matches the buffer's own newest-first order (sec 4.4); global
+        label assignments (sec 4.6) are NOT included here -- see
+        list_programs()'s `key_assignment` field for those, per
+        docs/key_assignments.md sec 6 item 4's shared-data-model note."""
+        results = []
+        for fn1, fn2, key_byte in self._decode_key_assignment_entries():
+            try:
+                key_number, shifted = self._key_number_for_byte(key_byte)
+            except ValueError:
+                # Doesn't decode to any of the 34 real assignable keyboard
+                # positions -- seen so far only in a hand-crafted test
+                # fixture (keyassigntest.dm41), not a real device capture.
+                # Surfaced rather than silently dropped or crashing the
+                # whole listing, with enough raw detail (the key byte
+                # itself) that a caller/GUI can flag it distinctly.
+                key_number, shifted = None, None
+            results.append({
+                "key_number": key_number,
+                "shifted": shifted,
+                "fn_byte1": fn1,
+                "fn_byte2": fn2,
+                "name": key_functions.function_name_for_bytes(fn1, fn2),
+                "raw_key_byte": key_byte,
+            })
+        return results
+
+    @staticmethod
+    def _key_number_for_byte(key_byte: int) -> tuple:
+        """Inverts key_byte_for(): given a stored key byte, returns
+        (key_number, shifted). Tries every real assignable keyboard
+        position (_VALID_KEY_NUMBERS) rather than algebraically inverting
+        the formula, since the carry behavior for M=8 rows (sec 4.3) makes
+        a closed-form inverse easy to get subtly wrong; this is only ever
+        called on the small number of decoded entries in a dump, so the
+        brute-force cost is immaterial. Raises ValueError if `key_byte`
+        doesn't match any real key (e.g. a corrupt dump, or a hand-crafted
+        test fixture targeting a non-assignable position)."""
+        for key_number in Memory._VALID_KEY_NUMBERS:
+            if Memory.key_byte_for(key_number, False) == key_byte:
+                return key_number, False
+            if Memory.key_byte_for(key_number, True) == key_byte:
+                return key_number, True
+        raise ValueError(f"Key byte 0x{key_byte:02x} doesn't decode to a known key")
 
     # -- Register d (0x0E): the 56 user/system flags --
     #

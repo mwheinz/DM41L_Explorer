@@ -1007,20 +1007,33 @@ def test_cold_start_signature_is_0x169_in_every_sample():
 
 
 def test_key_assignments_end_detects_f0_marked_registers():
-    """keyassigns.dm41 has 8 real assignments packed two-per-register into
-    registers 0xc0-0xc3, each starting with the 0xf0 marker byte Wickes'
+    """keyassigns.dm41 has 14 real assignments packed two-per-register into
+    registers 0xc0-0xc6, each starting with the 0xf0 marker byte Wickes'
     "Synthetic Programming on the HP-41C" (Section 2E) documents. Register
-    0xc4 is free/zeroed, so the scan should stop there."""
+    0xc7 is free/zeroed, so the scan should stop there."""
     memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
-    assert memory.key_assignments_end() == 0xC4
+    assert memory.key_assignments_end() == 0xC7
 
 
 def test_key_assignments_end_is_start_when_no_assignments():
-    """Every other sample fixture predates key-assignment research and has
-    no assignments made, so register 0xc0 itself shouldn't carry the 0xf0
-    marker and the scan should report an empty region."""
+    """Every other sample fixture has no Key Assignment Register entries,
+    so register 0xc0 itself shouldn't carry the 0xf0 marker and the scan
+    should report an empty region. keyassigns.dm41, xrom-keyassignments.
+    dm41, keyassigntest.dm41, and assigntest.dm41 are excluded -- each was
+    purpose-built to exercise the Key Assignment Registers (see
+    memory/functions.py's module note on keyassigntest.dm41, and the
+    row-4 correction notes on assigntest.dm41 -- a real device capture the
+    user made while diagnosing the 2026-08-18 row-4 key-byte bug, see
+    docs/key_assignments.md sec 4.3) and has real 0xf0-marked entries.
+    global-key-assignments.dm41 is NOT excluded: its two assignments are
+    global-label ones (sec 4.6), which never touch the Key Assignment
+    Registers at all -- register 0xc0 there is correctly empty."""
+    excluded = {
+        "keyassigns.dm41", "xrom-keyassignments.dm41", "keyassigntest.dm41",
+        "assigntest.dm41",
+    }
     for path in DATA_DIR.glob("*.dm41"):
-        if path.name == "keyassigns.dm41":
+        if path.name in excluded:
             continue
         memory = Memory.from_file(path)
         assert memory.key_assignments_end() == 0xC0, path.name
@@ -1332,3 +1345,350 @@ def test_list_programs_terminates_on_every_sample_dump():
         for p in programs:
             assert p.header_addr >= 0xC0
             assert 0 <= p.header_offset <= 6
+
+
+# ---- Key Assignments (docs/key_assignments.md sec 4) ----
+#
+# key_byte_for()/_keyflags_bit() below are confirmed against three real
+# captured dumps (keyassigns.dm41, xrom-keyassignments.dm41,
+# global-key-assignments.dm41) -- see the key-assignment research notes for
+# the full derivation, including how an earlier (wrong) formula
+# (bit = 37 - M - 8*(N-1)) looked validated against a subset of the data
+# due to a numeric aliasing coincidence, and was only caught by testing
+# all three fixtures' independently-known key numbers simultaneously.
+
+
+def test_key_byte_for_matches_known_assignments():
+    """keyassigns.dm41's 14 assignments span 8 different physical keys in
+    both shift states; the formula must reproduce every stored key byte
+    exactly (docs sec 4.3)."""
+    cases = [
+        (11, False, 0x01), (21, True, 0x0A),
+        (12, False, 0x11), (22, True, 0x1A),
+        (13, False, 0x21), (23, True, 0x2A),
+        (14, False, 0x31), (24, True, 0x3A),
+        (53, False, 0x25), (52, False, 0x15),
+        (62, True, 0x1E), (54, False, 0x35),
+        (64, True, 0x3E), (63, True, 0x2E),
+    ]
+    for key_number, shifted, expected_byte in cases:
+        assert Memory.key_byte_for(key_number, shifted) == expected_byte, (
+            key_number, shifted
+        )
+
+
+def test_key_byte_for_row4_uses_physical_column_not_key_number():
+    """Row 4's ENTER^ key is physically double-width and eats the
+    physical-column-2 slot, so keys 42/43/44 sit at physical columns
+    3/4/5 -- NOT 2/3/4, unlike every other row where the key-number
+    column digit is the physical column directly (docs sec 4.3's row-4
+    correction). Found 2026-08-18 via real-hardware testing: the old
+    (unmapped) formula wrote key 42's assignment to the byte for the
+    unused phantom column-2 slot instead. Key 42's expected bytes here
+    are independently confirmed against a real device capture in
+    test_key_42_row4_matches_real_device_capture below; 41/43/44 are
+    hand-derived from the same corrected formula (Wickes' Figure 4-2
+    diagram), not yet independently cross-checked against a real capture
+    the way 42 is."""
+    cases = [
+        (41, False, 0x04), (41, True, 0x0C),
+        (42, False, 0x24), (42, True, 0x2C),
+        (43, False, 0x34), (43, True, 0x3C),
+        (44, False, 0x44), (44, True, 0x4C),
+    ]
+    for key_number, shifted, expected_byte in cases:
+        assert Memory.key_byte_for(key_number, shifted) == expected_byte, (
+            key_number, shifted
+        )
+
+
+def test_key_42_row4_matches_real_device_capture():
+    """assigntest.dm41 is a real dump the user captured while diagnosing
+    the row-4 bug: it has a genuine key-42 assignment made directly on
+    the calculator (TIME-module `T+X`/`TIME`, raw key byte 0x24/0x2C --
+    exactly what the corrected physical-column-3 formula predicts, see
+    test_key_byte_for_row4_uses_physical_column_not_key_number above),
+    plus a leftover key-less `COS`/`ACOS` entry at raw byte 0x14/0x1C --
+    the phantom physical-column-2 slot under `ENTER^` that a pre-fix
+    version of this app would have written for an attempted key-42
+    assignment (`16*(2-1)+M`, the unmapped/buggy formula). Both facts
+    independently confirm the fix: real hardware puts key 42 at physical
+    column 3, and the stray undecodable entry is exactly the byte the old
+    bug would have produced."""
+    memory = Memory.from_file(DATA_DIR / "assigntest.dm41")
+    all_entries = memory.list_key_assignments()
+    assignments = {
+        (a["key_number"], a["shifted"]): a
+        for a in all_entries
+        if a["key_number"] is not None
+    }
+
+    key42_unshifted = assignments[(42, False)]
+    assert key42_unshifted["raw_key_byte"] == 0x24
+    assert key42_unshifted["name"] == "T+X"
+
+    key42_shifted = assignments[(42, True)]
+    assert key42_shifted["raw_key_byte"] == 0x2C
+    assert key42_shifted["name"] == "TIME"
+
+    # The stray pre-fix-bug entries: undecodable (key_number/shifted come
+    # back None) since 0x14/0x1C don't match any of the 34 real keyboard
+    # positions -- exactly the phantom column-2 slot under row 4's ENTER^.
+    # Kept as a plain list (not deduped into the dict above) since both
+    # stray entries share the same (None, None) key_number/shifted pair.
+    stray_bytes = {a["raw_key_byte"] for a in all_entries if a["key_number"] is None}
+    assert stray_bytes == {0x14, 0x1C}
+
+
+def test_keyflags_bit_row4_matches_wickes_figure_4_2():
+    """Bit positions for row 4 read directly off Wickes' Figure 4-2 ("Key
+    Assignment Flag Bits") diagram, which draws a single wide box spanning
+    physical columns 1-2 for ENTER^ (labeled bit 33, 1-indexed -> 0-indexed
+    32) and separate boxes for the other three keys at physical columns
+    3/4/5 (labeled 17/9/1 1-indexed -> 0-indexed 16/8/0) -- with no box at
+    all for physical column 2, confirming that position is never a real
+    key (the "imaginary 42nd key under ENTER", docs sec 4.5)."""
+    cases = [(41, 32), (42, 16), (43, 8), (44, 0)]
+    for key_number, expected_bit in cases:
+        assert Memory._keyflags_bit(key_number) == expected_bit, key_number
+
+
+def test_keyflags_bit_matches_all_three_real_fixtures():
+    """The KEYFLAGS bit formula (docs sec 4.5, bit = 36 - M - 8*(N-1)) and
+    register mapping (F = unshifted, e = shifted) must reproduce exactly
+    the bits set in every real fixture -- no extra bits, no missing ones."""
+
+    def bits_set(register_bytes) -> set:
+        # Only the first 36 bits are the KEYFLAGS bitmap (docs sec 4.5) --
+        # the remaining 20 bits of the 56-bit register hold something else
+        # entirely (confirmed non-zero, e.g. bits 40-54, in real captures
+        # like keyassigns.dm41's register F), so comparing the whole
+        # register would spuriously fail against real, correct data.
+        bits = set()
+        for byte_index, byte in enumerate(register_bytes):
+            for bit_in_byte in range(8):
+                bit = byte_index * 8 + bit_in_byte
+                if bit >= 36:
+                    continue
+                if (byte >> (7 - bit_in_byte)) & 1:
+                    bits.add(bit)
+        return bits
+
+    cases = {
+        "keyassigns.dm41": {
+            "unshifted": [11, 12, 13, 14, 52, 53, 54],
+            "shifted": [21, 22, 23, 24, 62, 63, 64],
+        },
+        "xrom-keyassignments.dm41": {
+            "unshifted": [11, 12, 13, 14],
+            "shifted": [],
+        },
+        "global-key-assignments.dm41": {
+            "unshifted": [11, 12],
+            "shifted": [],
+        },
+    }
+    for filename, expected in cases.items():
+        memory = Memory.from_file(DATA_DIR / filename)
+        f_reg = memory.get_register(Memory.KEYFLAGS_UNSHIFTED_ADDR)
+        e_reg = memory.get_register(Memory.KEYFLAGS_SHIFTED_ADDR)
+
+        expected_f_bits = {Memory._keyflags_bit(k) for k in expected["unshifted"]}
+        expected_e_bits = {Memory._keyflags_bit(k) for k in expected["shifted"]}
+
+        assert bits_set(f_reg.get_bytes()) == expected_f_bits, filename
+        assert bits_set(e_reg.get_bytes()) == expected_e_bits, filename
+
+        for k in expected["unshifted"]:
+            assert memory.get_key_flag(k, False) is True, (filename, k)
+        for k in expected["shifted"]:
+            assert memory.get_key_flag(k, True) is True, (filename, k)
+
+
+def test_list_key_assignments_decodes_keyassigns_dm41():
+    """keyassigns.dm41's 14 real assignments, filler-first single-byte
+    entries only (docs sec 4.2/4.8) -- newest-first order (sec 4.4)."""
+    memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
+    assignments = memory.list_key_assignments()
+    assert len(assignments) == 14
+    for a in assignments:
+        assert a["fn_byte2"] is None
+        assert a["name"] in {"+", "-", "*", "/"}
+        # Every decoded assignment's KEYFLAGS bit must also be set.
+        assert memory.get_key_flag(a["key_number"], a["shifted"]) is True
+
+
+def test_list_key_assignments_decodes_xrom_two_byte_entries():
+    """xrom-keyassignments.dm41's four assignments are all real two-byte
+    XROM entries (docs sec 4.8) -- confirms fn_byte2 is populated (not
+    None) and the function names resolve via memory/functions.py."""
+    memory = Memory.from_file(DATA_DIR / "xrom-keyassignments.dm41")
+    assignments = memory.list_key_assignments()
+    by_key = {a["key_number"]: a for a in assignments}
+    assert by_key[11]["name"] == "ALENG"
+    assert by_key[12]["name"] == "ANUM"
+    assert by_key[13]["name"] == "ADATE"
+    assert by_key[14]["name"] == "ALMCAT"
+    for a in assignments:
+        assert a["fn_byte2"] is not None
+        assert a["shifted"] is False
+
+
+def test_set_key_assignment_single_byte_function():
+    memory = Memory()
+    memory.set_key_assignment(11, False, 0x40)  # '+'
+    assert memory.get_key_flag(11, False) is True
+    assignments = memory.list_key_assignments()
+    assert len(assignments) == 1
+    assert assignments[0] == {
+        "key_number": 11, "shifted": False,
+        "fn_byte1": 0x40, "fn_byte2": None, "name": "+",
+        "raw_key_byte": Memory.key_byte_for(11, False),
+    }
+    # Filler-first storage in the actual register (sec 4.2).
+    reg = memory.get_register(0xC0)
+    assert reg.get_bytes()[1] == 0x04
+    assert reg.get_bytes()[2] == 0x40
+    assert reg.get_bytes()[3] == Memory.key_byte_for(11, False)
+
+
+def test_set_key_assignment_xrom_function():
+    memory = Memory()
+    memory.set_key_assignment(13, False, (0xA6, 0x81))  # ADATE
+    assert memory.get_key_flag(13, False) is True
+    assignments = memory.list_key_assignments()
+    assert assignments[0]["name"] == "ADATE"
+    reg = memory.get_register(0xC0)
+    assert reg.get_bytes()[1:4] == bytes([0xA6, 0x81, Memory.key_byte_for(13, False)])
+
+
+def test_set_key_assignment_overwrites_existing_entry_for_same_key():
+    """Re-assigning an already-assigned key/shift-state replaces the old
+    entry rather than leaving a stale duplicate -- and the new entry lands
+    at the front (register 0xc0), same as a brand-new assignment would
+    (sec 4.4's LIFO order)."""
+    memory = Memory()
+    memory.set_key_assignment(11, False, 0x40)  # '+'
+    memory.set_key_assignment(12, True, 0x41)  # '-'
+    memory.set_key_assignment(11, False, 0x42)  # '*' replaces '+'
+
+    assignments = memory.list_key_assignments()
+    assert len(assignments) == 2
+    by_key = {(a["key_number"], a["shifted"]): a["name"] for a in assignments}
+    assert by_key[(11, False)] == "*"
+    assert by_key[(12, True)] == "-"
+    # The replaced entry is newest -- front of the buffer.
+    assert assignments[0]["key_number"] == 11
+
+
+def test_set_key_assignment_rejects_out_of_range_bytes():
+    memory = Memory()
+    with pytest.raises(ValueError):
+        memory.set_key_assignment(11, False, 0x100)
+    with pytest.raises(ValueError):
+        memory.set_key_assignment(11, False, (0x100, 0x00))
+
+
+def test_delete_key_assignment_removes_entry_and_clears_flag():
+    memory = Memory()
+    memory.set_key_assignment(11, False, 0x40)
+    memory.set_key_assignment(12, True, 0x41)
+
+    memory.delete_key_assignment(11, False)
+
+    assert memory.get_key_flag(11, False) is False
+    assignments = memory.list_key_assignments()
+    assert len(assignments) == 1
+    assert assignments[0]["key_number"] == 12
+
+
+def test_delete_key_assignment_shrinks_buffer_back_to_empty():
+    memory = Memory()
+    memory.set_key_assignment(11, False, 0x40)
+    assert memory.key_assignments_end() == 0xC1
+
+    memory.delete_key_assignment(11, False)
+
+    assert memory.list_key_assignments() == []
+    assert memory.key_assignments_end() == 0xC0
+    # The now-stale register must be cleared, not left with 0xf0 marker.
+    assert memory.get_register(0xC0).get_hex() == "00000000000000"
+
+
+def test_delete_key_assignment_on_unassigned_key_is_a_noop():
+    memory = Memory()
+    memory.delete_key_assignment(11, False)  # never assigned
+    assert memory.list_key_assignments() == []
+    assert memory.get_key_flag(11, False) is False
+
+
+def test_key_assignment_round_trip_through_from_string_to_string():
+    """A dump built entirely through set_key_assignment() must reload
+    identically via to_string()/from_string(), same as every other region
+    of memory."""
+    memory = Memory()
+    memory.set_key_assignment(11, False, 0x40)
+    memory.set_key_assignment(11, True, (0xA6, 0x81))
+    memory.set_key_assignment(84, False, 0x0F)  # ASN, low-code (sec 5 caveat)
+
+    reloaded = Memory.from_string(memory.to_string())
+    assert reloaded.list_key_assignments() == memory.list_key_assignments()
+    for key_number, shifted in [(11, False), (11, True), (84, False)]:
+        assert reloaded.get_key_flag(key_number, shifted) == memory.get_key_flag(
+            key_number, shifted
+        )
+
+
+def test_key_number_for_byte_inverts_key_byte_for():
+    for key_number in Memory._VALID_KEY_NUMBERS:
+        for shifted in (False, True):
+            byte = Memory.key_byte_for(key_number, shifted)
+            assert Memory._key_number_for_byte(byte) == (key_number, shifted)
+
+
+def test_key_row_col_rejects_non_assignable_positions():
+    """The physical SHIFT key (`31`) and anything outside the real
+    keyboard's row/column layout (e.g. `85` -- row 8 only has 4 columns)
+    must be rejected, not silently accepted with a nonsensical bit/byte
+    computed from an out-of-range (M, N)."""
+    for bad_key in (31, 85, 45, 90, 0, 100):
+        with pytest.raises(ValueError):
+            Memory.key_byte_for(bad_key, False)
+        with pytest.raises(ValueError):
+            Memory._keyflags_bit(bad_key)
+
+
+def test_get_key_assignment_single_key_lookup():
+    """get_key_assignment() -- the per-cell lookup a keypad-grid GUI would
+    call -- must agree with list_key_assignments() for both assigned and
+    unassigned keys."""
+    memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
+    assert memory.get_key_assignment(11, False) == {
+        "key_number": 11, "shifted": False,
+        "fn_byte1": 0x41, "fn_byte2": None, "name": "-",
+        "raw_key_byte": Memory.key_byte_for(11, False),
+    }
+    # Key 11 has no *shifted* assignment in this fixture (key 21 shifted
+    # does, per docs sec 4.3's example decode).
+    assert memory.get_key_assignment(11, True) is None
+    assert memory.get_key_assignment(84, False) is None
+
+
+def test_list_key_assignments_matches_all_real_fixtures_key_flags():
+    """Every fixture with real key-assignment-register content: every
+    decoded entry's KEYFLAGS bit must be set, and conversely every set
+    KEYFLAGS bit not backed by a global label must be explained by a
+    decoded entry. (global-key-assignments.dm41 sets flags for two
+    global-label assignments with nothing in the Key Assignment
+    Registers -- excluded here, see sec 4.6.)"""
+    for filename in ("keyassigns.dm41", "xrom-keyassignments.dm41"):
+        memory = Memory.from_file(DATA_DIR / filename)
+        assignments = memory.list_key_assignments()
+        flagged = {
+            (k, s)
+            for k in Memory._VALID_KEY_NUMBERS
+            for s in (False, True)
+            if memory.get_key_flag(k, s)
+        }
+        decoded = {(a["key_number"], a["shifted"]) for a in assignments}
+        assert flagged == decoded, filename

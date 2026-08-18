@@ -110,10 +110,13 @@ def test_save_as_prompt_writes_new_file_and_updates_source(app, tmp_path):
     assert app.dirty is False
 
 
-def test_save_to_already_loaded_file_does_not_prompt(app, tmp_path):
+def test_save_to_already_loaded_file_confirms_then_saves(app, tmp_path):
     """Normal case, for contrast: saving back to a file you just opened
-    (no calculator dump in between) should NOT prompt -- it's expected to
-    write straight back to that same file."""
+    (no calculator dump in between) should NOT fall through to Save As --
+    it's expected to write straight back to that same file. But per the
+    user's 2026-08-18 report (saw a plain overwrite with no prompt at all
+    for this exact sequence), it must still confirm with the user before
+    writing over the file on disk."""
     path = tmp_path / "already-open.dm41"
     Memory().to_file(path)
 
@@ -122,11 +125,33 @@ def test_save_to_already_loaded_file_does_not_prompt(app, tmp_path):
 
     with mock.patch.object(app, "save_dump_as") as save_as, mock.patch(
         "gui.app.messagebox.showinfo"
+    ), mock.patch(
+        "gui.app.messagebox.askyesno", return_value=True
+    ) as confirm:
+        app.save_dump_to_file()
+
+    confirm.assert_called_once()
+    save_as.assert_not_called()
+    assert app.memory_source == path
+
+
+def test_save_to_already_loaded_file_declined_does_not_write(app, tmp_path):
+    """Answering "No" to the overwrite confirmation must leave the file on
+    disk untouched -- the whole point of asking first."""
+    path = tmp_path / "already-open.dm41"
+    Memory().to_file(path)
+    original_bytes = path.read_bytes()
+
+    app._load_dump_into_buffer(str(path))
+    app.memory.set_flag(0, True)  # make an in-memory change to try to save
+
+    with mock.patch.object(app, "save_dump_as") as save_as, mock.patch(
+        "gui.app.messagebox.askyesno", return_value=False
     ):
         app.save_dump_to_file()
 
     save_as.assert_not_called()
-    assert app.memory_source == path
+    assert path.read_bytes() == original_bytes
 
 
 def test_new_memory_buffer_also_clears_source(app, tmp_path):
