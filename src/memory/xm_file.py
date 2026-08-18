@@ -339,14 +339,14 @@ class ExtendedMemory(MemoryRegion):
         # "Non-normalized data".)
         aaa = ((raw[0] & 0x0F) << 8) | raw[1]
         if aaa != addr:
-            return None
+            raise ValueError("Invalid file header.")
         if file_type == cls.TYPE_DATA:
             if raw[2:4] != b"\x00\x00":
-                return None
+                raise ValueError("Invalid DATA file header.")
         else:  # TYPE_ASCII -- nibble 4-5 is byte 2 in full; nibble 6-7
             # (byte 3) is the CC field and isn't required to be zero.
             if raw[2] != 0x00:
-                return None
+                raise ValueError("Invalid ASCII file header.")
 
         return {
             "file_type": file_type,

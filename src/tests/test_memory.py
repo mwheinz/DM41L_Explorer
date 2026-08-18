@@ -595,11 +595,14 @@ def test_xm_3x_purxm_program_detected():
 def test_xm_program_header_rejects_non_signature_type1_nibble():
     """A register merely starting with a 0x1 nibble (e.g. packed ASCII
     record bytes) must not be mistaken for a Program header -- only the
-    fixed 0x10 00 00 00 signature counts."""
-    try:
-        assert ExtendedMemory._parse_header(0x62, bytes.fromhex("18444546474849")) is None
-    except:
-        pass
+    fixed 0x10 00 00 00 signature counts. _parse_header() actually reports
+    the mismatch by raising ValueError (not by returning None -- its own
+    docstring's "Returns None if raw doesn't match a known header shape"
+    is inaccurate for this branch; the caller in list_files() only ever
+    catches the exception, it never checks for a None return), so that's
+    what we assert here."""
+    with pytest.raises(ValueError):
+        ExtendedMemory._parse_header(0x62, bytes.fromhex("18444546474849"))
     assert ExtendedMemory._parse_header(0x263, bytes.fromhex("10000000014003")) is not None
 
 
@@ -609,10 +612,12 @@ def test_xm_header_requires_aaa_match_own_address():
     dump."""
     real_header = bytes.fromhex("20580000020020")  # 6x-xm.dm41's XM4.000, AAA=0x058
     assert ExtendedMemory._parse_header(0x058, real_header) is not None
-    assert ExtendedMemory._parse_header(0x059, real_header) is None
+    with pytest.raises(ValueError):
+        ExtendedMemory._parse_header(0x059, real_header)
 
     phantom_header = bytes.fromhex("20555004574152")  # false header.
-    assert ExtendedMemory._parse_header(0x0ba, phantom_header) is None
+    with pytest.raises(ValueError):
+        ExtendedMemory._parse_header(0x0ba, phantom_header)
 
 
 def test_xm_register_length_reads_full_three_nibble_field():
@@ -1009,24 +1014,25 @@ def test_cold_start_signature_is_0x169_in_every_sample():
 
 
 def test_key_assignments_end_detects_f0_marked_registers():
-    """keyassigns.dm41 has 14 real assignments packed two-per-register into
-    registers 0xc0-0xc6, each starting with the 0xf0 marker byte Wickes'
+    """keyassigns.dm41 has 22 real assignments packed two-per-register into
+    registers 0xc0-0xca, each starting with the 0xf0 marker byte Wickes'
     "Synthetic Programming on the HP-41C" (Section 2E) documents. Register
-    0xc7 is free/zeroed, so the scan should stop there."""
+    0xcb (203) is free/zeroed, so the scan should stop there."""
     memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
-    assert memory.key_assignments_end() == 203
+    assert memory.key_assignments_end() == 0xCB
 
 
 def test_key_assignments_end_is_start_when_no_assignments():
     """Every other sample fixture has no Key Assignment Register entries,
     so register 0xc0 itself shouldn't carry the 0xf0 marker and the scan
-    should report an empty region. keyassigns.dm41, xrom-keyassignments.
-    dm41, keyassigntest.dm41, and assigntest.dm41 are excluded -- each was
-    purpose-built to exercise the Key Assignment Registers (see
-    memory/functions.py's module note on keyassigntest.dm41, and the
-    row-4 correction notes on assigntest.dm41 -- a real device capture the
-    user made while diagnosing the 2026-08-18 row-4 key-byte bug, see
-    docs/key_assignments.md sec 4.3) and has real 0xf0-marked entries.
+    should report an empty region. keyassigns.dm41 and xrom-
+    keyassignments.dm41 are excluded -- both were purpose-built to
+    exercise the Key Assignment Registers and have real 0xf0-marked
+    entries there. (Two other fixtures once needed the same exclusion --
+    keyassigntest.dm41, referenced in memory/functions.py's module note,
+    and assigntest.dm41, a real device capture used while diagnosing the
+    2026-08-18 row-4 key-byte bug -- but both have since been retired from
+    tests/data/, so they're no longer in this set at all.)
     global-key-assignments.dm41 is NOT excluded: its two assignments are
     global-label ones (sec 4.6), which never touch the Key Assignment
     Registers at all -- register 0xc0 there is correctly empty."""
@@ -1394,18 +1400,23 @@ def test_key_byte_for_row4_uses_physical_column_not_key_number():
 
 
 def test_key_42_row4_matches_real_device_capture():
-    """assigntest.dm41 is a real dump the user captured while diagnosing
-    the row-4 bug: it has a genuine key-42 assignment made directly on
-    the calculator (TIME-module `T+X`/`TIME`, raw key byte 0x24/0x2C --
-    exactly what the corrected physical-column-3 formula predicts, see
-    test_key_byte_for_row4_uses_physical_column_not_key_number above),
-    plus a leftover key-less `COS`/`ACOS` entry at raw byte 0x14/0x1C --
-    the phantom physical-column-2 slot under `ENTER^` that a pre-fix
-    version of this app would have written for an attempted key-42
-    assignment (`16*(2-1)+M`, the unmapped/buggy formula). Both facts
-    independently confirm the fix: real hardware puts key 42 at physical
-    column 3, and the stray undecodable entry is exactly the byte the old
-    bug would have produced."""
+    """xrom-keyassignments.dm41 has real two-byte XROM assignments on all
+    four row-4 keys (41-44), both shift states -- decoding all eight and
+    checking their raw_key_byte against the corrected physical-column-3
+    formula (see test_key_byte_for_row4_uses_physical_column_not_key_
+    number above) confirms row 4 decodes correctly end-to-end, not just
+    at the formula level.
+
+    Historical note: this test originally cross-checked assigntest.dm41,
+    a real device capture the user made while diagnosing the row-4 bug --
+    it had a genuine key-42 assignment (TIME-module `T+X`/`TIME`, raw key
+    byte 0x24/0x2C) plus a leftover `COS`/`ACOS` entry at raw byte
+    0x14/0x1C, the phantom physical-column-2 slot under `ENTER^` that the
+    pre-fix buggy formula would have produced. That fixture was retired
+    when tests/data/ was pared down, so the stray-phantom-byte check no
+    longer has data to run against; test_key_byte_for_row4_uses_physical_
+    column_not_key_number is the test that still directly proves the
+    formula rejects the old column-2 mapping."""
     memory = Memory.from_file(DATA_DIR / "xrom-keyassignments.dm41")
     all_entries = memory.list_key_assignments()
     assignments = {
@@ -1415,35 +1426,35 @@ def test_key_42_row4_matches_real_device_capture():
     }
 
     key_unshifted = assignments[(41, False)]
-    assert key_unshifted["raw_key_byte"] == 4
+    assert key_unshifted["raw_key_byte"] == 0x04
     assert key_unshifted["name"] == "ALENG"
 
     key_shifted = assignments[(41, True)]
-    assert key_shifted["raw_key_byte"] == 12
+    assert key_shifted["raw_key_byte"] == 0x0C
     assert key_shifted["name"] == "APPCHR"
 
     key_unshifted = assignments[(42, False)]
-    assert key_unshifted["raw_key_byte"] == 36
+    assert key_unshifted["raw_key_byte"] == 0x24
     assert key_unshifted["name"] == "ANUM"
 
     key_shifted = assignments[(42, True)]
-    assert key_shifted["raw_key_byte"] == 44
+    assert key_shifted["raw_key_byte"] == 0x2C
     assert key_shifted["name"] == "APPREC"
 
     key_unshifted = assignments[(43, False)]
-    assert key_unshifted["raw_key_byte"] == 52
+    assert key_unshifted["raw_key_byte"] == 0x34
     assert key_unshifted["name"] == "ADATE"
 
     key_shifted = assignments[(43, True)]
-    assert key_shifted["raw_key_byte"] == 60
+    assert key_shifted["raw_key_byte"] == 0x3C
     assert key_shifted["name"] == "ALMCAT"
 
     key_unshifted = assignments[(44, False)]
-    assert key_unshifted["raw_key_byte"] == 68
+    assert key_unshifted["raw_key_byte"] == 0x44
     assert key_unshifted["name"] == "TIME"
 
     key_shifted = assignments[(44, True)]
-    assert key_shifted["raw_key_byte"] == 76
+    assert key_shifted["raw_key_byte"] == 0x4C
     assert key_shifted["name"] == "CLOCK"
 
 
@@ -1483,12 +1494,12 @@ def test_keyflags_bit_matches_all_three_real_fixtures():
 
     cases = {
         "keyassigns.dm41": {
-            "unshifted": [11, 12, 13, 14, 15, 21, 22, 23, 24, 25, 84 ],
-            "shifted": [11, 12, 13, 14, 15, 21, 22, 23, 24, 25, 84 ],
+            "unshifted": [11, 12, 13, 14, 15, 21, 22, 23, 24, 25, 84],
+            "shifted": [11, 12, 13, 14, 15, 21, 22, 23, 24, 25, 84],
         },
         "xrom-keyassignments.dm41": {
-            "unshifted": [41, 42, 43, 44 ], 
-            "shifted": [ 41, 42, 43, 44 ],
+            "unshifted": [41, 42, 43, 44],
+            "shifted": [41, 42, 43, 44],
         },
         "global-key-assignments.dm41": {
             "unshifted": [11, 12],
@@ -1503,9 +1514,6 @@ def test_keyflags_bit_matches_all_three_real_fixtures():
         expected_f_bits = {Memory._keyflags_bit(k) for k in expected["unshifted"]}
         expected_e_bits = {Memory._keyflags_bit(k) for k in expected["shifted"]}
 
-        print(f"f: {expected_f_bits}, {bits_set(f_reg.get_bytes())}")
-        print(f"e: {expected_e_bits}, {bits_set(e_reg.get_bytes())}")
-
         assert bits_set(f_reg.get_bytes()) == expected_f_bits, filename
         assert bits_set(e_reg.get_bytes()) == expected_e_bits, filename
 
@@ -1516,7 +1524,7 @@ def test_keyflags_bit_matches_all_three_real_fixtures():
 
 
 def test_list_key_assignments_decodes_keyassigns_dm41():
-    """keyassigns.dm41's 18 real assignments, filler-first single-byte
+    """keyassigns.dm41's 22 real assignments, filler-first single-byte
     entries only (docs sec 4.2/4.8) -- newest-first order (sec 4.4)."""
     memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
     assignments = memory.list_key_assignments()
@@ -1536,7 +1544,6 @@ def test_list_key_assignments_decodes_xrom_two_byte_entries():
     memory = Memory.from_file(DATA_DIR / "xrom-keyassignments.dm41")
     assignments = memory.list_key_assignments()
     by_key = {a["key_number"]: a for a in assignments}
-    print(by_key)
 
     assert by_key[41]["name"] == "ALENG"
     assert by_key[42]["name"] == "ANUM"
@@ -1668,6 +1675,26 @@ def test_key_row_col_rejects_non_assignable_positions():
             Memory.key_byte_for(bad_key, False)
         with pytest.raises(ValueError):
             Memory._keyflags_bit(bad_key)
+
+
+def test_get_key_assignment_single_key_lookup():
+    """get_key_assignment() -- the per-cell lookup a keypad-grid GUI would
+    call -- must agree with list_key_assignments() for both assigned and
+    unassigned keys. keyassigns.dm41 assigns key 11 in both shift states
+    (see test_list_key_assignments_decodes_keyassigns_dm41's 22-entry
+    fixture); key 42 has no assignment there at all."""
+    memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
+    assert memory.get_key_assignment(11, False) == {
+        "key_number": 11, "shifted": False,
+        "fn_byte1": 0x4C, "fn_byte2": None, "name": "%",
+        "raw_key_byte": Memory.key_byte_for(11, False),
+    }
+    assert memory.get_key_assignment(11, True) == {
+        "key_number": 11, "shifted": True,
+        "fn_byte1": 0x4C, "fn_byte2": None, "name": "%",
+        "raw_key_byte": Memory.key_byte_for(11, True),
+    }
+    assert memory.get_key_assignment(42, False) is None
 
 
 def test_list_key_assignments_matches_all_real_fixtures_key_flags():
