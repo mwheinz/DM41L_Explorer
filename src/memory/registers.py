@@ -179,7 +179,9 @@ class Register:
             stored_exp = t_val + 9
 
             # Clamp to hardware's 2-digit exponent range.
-            stored_exp = max(-99, min(99, stored_exp))
+            if stored_exp < -99 or stored_exp > 99:
+                raise ValueError("Exponent is too large for conversion.")
+
             if stored_exp < 0:
                 xs_sign_nibble = 9
                 exp_val = 100 + stored_exp
@@ -351,10 +353,14 @@ class Register:
         return self._data.hex()
 
     def __getitem__(self, index: int) -> int:
+        if index >= self.size or index < 0:
+            raise IndexError(f"{index} out of range.")
         # The LSB of the data is the last byte in the array.
         return self._data[self.size - index - 1]
 
     def __setitem__(self, index: int, value: int):
+        if index >= self.size or index < 0:
+            raise IndexError(f"{index} out of range.")
         # The LSB of the data is the last byte in the array.
         self._data[self.size - index - 1] = value
 
