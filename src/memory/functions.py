@@ -29,6 +29,8 @@ confirmed (docs sec 4.8); the XROM/peripheral entries are fully confirmed
 too (docs sec 4.8, xrom-keyassignments.dm41).
 """
 
+import re
+
 # Single raw function byte -> function name, for every built-in HP-41
 # function function_table.md marks Assignable with a one-byte encoding.
 # The low-code entries (< 0x40) carry the sec-5 caveat above.
@@ -282,3 +284,73 @@ def bytes_for_function_name(name: str):
     if name in XROM_NAMES:
         return XROM_NAMES[name]
     raise ValueError(f"Unknown assignable function: {name!r}")
+
+
+# -- Typed-input normalization (GitHub issue #17) ---------------------------
+#
+# Several assignable function names use characters that don't exist on a
+# standard keyboard: Sigma (Σ), an up arrow (↑), a right arrow (→), and
+# "less than or equal" (≤). gui/key_assignment_edit_dialog.py's Function
+# field lets the user type a name directly rather than only picking from
+# the dropdown, so normalize_function_name_input() below turns an ordinary
+# ASCII approximation into the exact spelling SINGLE_BYTE_NAMES/XROM_NAMES
+# use, case-insensitively.
+
+# Every known function name, keyed by its own uppercased spelling, so an
+# exact (case-insensitive) match can be tried before any symbol
+# substitution -- see the docstring below for why that order matters.
+_ALL_NAMES_BY_UPPER = {
+    name.upper(): name for name in list(SINGLE_BYTE_NAMES) + list(XROM_NAMES)
+}
+
+# ASCII sequence -> special character. Checked in this order, but the order
+# amongst themselves doesn't actually matter: none of the search patterns
+# share a character with any other pattern's replacement, so one
+# substitution can never accidentally create or destroy a match for
+# another. "sigma" is matched case-insensitively and as a substring, so it
+# composes into compound names too (e.g. "clsigma" -> "CLΣ", "sigmareg" ->
+# "ΣREG"), not just as a standalone word.
+_SYMBOL_SUBSTITUTIONS = [
+    (re.compile(r"->"), "→"),
+    (re.compile(r"<="), "≤"),
+    (re.compile(r"\^"), "↑"),
+    (re.compile(r"sigma", re.IGNORECASE), "Σ"),
+]
+
+
+def normalize_function_name_input(text: str) -> str:
+    """Turns what a user typed on a standard keyboard into the exact
+    spelling memory/functions.py's tables use. Never raises -- an input
+    that still doesn't match anything after normalizing is passed through
+    as best-effort uppercased/substituted text, and it's on the caller
+    (bytes_for_function_name) to reject it as unknown.
+
+    Two passes:
+
+    1. Try an exact, case-insensitive match against every known function
+       name as-is, before any symbol substitution. This has to come
+       first: a few names are already spelled with plain ASCII --
+       'X<=NN?' and 'X>=NN?' (the Extended Functions ROM catalog's own
+       names) sit right next to 'X≤Y?' and 'X≤0?' (the built-in
+       single-byte functions, spelled with the real ≤ glyph). Applying
+       the "<=" -> "≤" substitution unconditionally would make 'X<=NN?'
+       impossible to type as itself. Trying the literal input first means
+       it still matches directly, with no substitution needed.
+    2. If nothing matched literally, apply the symbol substitutions in
+       _SYMBOL_SUBSTITUTIONS and uppercase every remaining ASCII letter
+       (every function name in the tables is already all-uppercase).
+       Typing "x<=y?" therefore doesn't match anything in pass 1, becomes
+       "X≤Y?" after pass 2, and does match.
+    """
+    if not text:
+        return text
+    stripped = text.strip()
+
+    exact = _ALL_NAMES_BY_UPPER.get(stripped.upper())
+    if exact is not None:
+        return exact
+
+    result = stripped
+    for pattern, replacement in _SYMBOL_SUBSTITUTIONS:
+        result = pattern.sub(replacement, result)
+    return result.upper()

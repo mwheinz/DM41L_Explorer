@@ -17,6 +17,7 @@ from memory.functions import (
     SINGLE_BYTE_NAMES,
     XROM_NAMES,
     bytes_for_function_name,
+    normalize_function_name_input,
 )
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,10 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
                 name = self._function_var.get().strip()
                 if not name:
                     raise ValueError("Choose a function.")
+                # GitHub issue #17: typed input doesn't have to match the
+                # display name's exact spelling/case -- "sigma", "x<=y?",
+                # "e^x", "p->r" all resolve to the real function this way.
+                name = normalize_function_name_input(name)
                 function_bytes = bytes_for_function_name(name)
             else:  # Raw Hex
                 text = self._hex_var.get().strip().replace(" ", "")
