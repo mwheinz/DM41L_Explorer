@@ -262,16 +262,6 @@ def test_xm_import_file_prefills_dialog_and_adds_on_save(root, tmp_path, monkeyp
 # above) so switching the type dropdown to correct a wrong guess doesn't
 # lose the imported text either.
 #
-# These tests originally used tests/data/AS1.005.txt, an export the user
-# had made from tests/data/manyfiles.dm41's "AS1.005" XM file -- but it was
-# never actually committed (untracked, and not gitignored either) and later
-# went missing from disk entirely, so the tests failed -- and, worse, one
-# of them hung the whole suite: with the file gone, _import_file() below
-# hit a real, unmocked messagebox.showerror() that blocks forever under
-# headless Xvfb. ALLCHRS.txt (already tracked in git, exported from
-# tests/data/allchrs.dm41's "ALLCHRS" XM file the same way) reproduces the
-# same "not valid DATA content" property and won't go missing again.
-
 
 def test_guess_file_type_prose_text_is_ascii():
     """The exact scenario reported: long, punctuated lines from a real XM
