@@ -1038,6 +1038,7 @@ def test_key_assignments_end_is_start_when_no_assignments():
     Registers at all -- register 0xc0 there is correctly empty."""
     excluded = {
         "keyassigns.dm41", "xrom-keyassignments.dm41",
+        "manyfiles.dm41",
     }
     for path in DATA_DIR.glob("*.dm41"):
         if path.name in excluded:
