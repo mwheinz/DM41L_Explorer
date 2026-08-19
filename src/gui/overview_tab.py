@@ -29,11 +29,6 @@ PRIMARY_DATA_END = 0x1FF
 # and programs are all optional - they may not exist.
 LOW_MEMORY_START = 0xC0
 
-FUTURE_STATS = (
-    "Does not include key assignments or alarms. These will be included"
-    " in a future release."
-)
-
 # Raw structural XM capacity, in registers: each region's usable span is
 # (lo, hi] -- lo itself is that region's reserved link/pointer register
 # (0x40 for region 0, 0x201 for region 1), not available for file storage
@@ -112,13 +107,6 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self._future_frame.grid(
             row=2, column=0, columnspan=2, sticky="nsew", padx=8, pady=(4, 12)
         )
-        ctk.CTkLabel(
-            self._future_frame,
-            text=FUTURE_STATS,
-            wraplength=760,
-            justify="left",
-            text_color="gray60",
-        ).pack(anchor="w")
 
     def _make_card(self, row, column, title):
         """Creates a bordered/tinted 'card' frame at (row, column) with a

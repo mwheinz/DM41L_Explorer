@@ -45,12 +45,29 @@ class XMFile:
         segments: list,
         declared_length: int,
         byte_length: Optional[int] = None,
+        name_bytes: Optional[bytes] = None,
     ):
         self._memory = memory
         self.header_addr = header_addr
         self.name_addr = header_addr + 1
         self.file_type = file_type
         self.name = name
+        # The exact 7 raw bytes the name register holds, independent of
+        # `name` (which is get_ascii()'s lossy '.'-for-unprintable display
+        # form -- see ExtendedMemory.list_files() and _looks_like_name()).
+        # A real DM41L directory entry's name can contain bytes outside
+        # the printable-ASCII range that get_ascii() collapses to '.', so
+        # two structurally distinct files can share an identical `.name`
+        # while having different `name_bytes` -- see the note on
+        # ExtendedMemory._place_file()/remove_file() for why this
+        # distinction matters (a lossy `.name` was previously the only
+        # identity a file had, which could make unrelated files collide as
+        # "duplicates" and corrupt extended memory on remove/edit).
+        # Falls back to a same-length re-encode of `name` for callers that
+        # don't have the original raw bytes on hand.
+        self.name_bytes = name_bytes if name_bytes is not None else name.encode(
+            "ascii", errors="replace"
+        )
         # segments is a list of inclusive (start, end) address ranges, in
         # record order: the first segment is in the header's own region and
         # starts at data_end == header_addr-1 (the register directly below
@@ -391,7 +408,9 @@ class ExtendedMemory(MemoryRegion):
             )
 
         while self.get_register(addr) != EOM_REGISTER:
-            name = self.get_register(addr).get_ascii()
+            name_register = self.get_register(addr)
+            name = name_register.get_ascii()
+            name_bytes = name_register.get_bytes()
             addr -= 1
             segments = []
             header_addr = addr
@@ -422,6 +441,7 @@ class ExtendedMemory(MemoryRegion):
             file = XMFile(
                 memory=self._memory,
                 name=name,
+                name_bytes=name_bytes,
                 header_addr=header_addr,
                 file_type=header["file_type"],
                 declared_length=header["register_length"],
@@ -635,16 +655,24 @@ class ExtendedMemory(MemoryRegion):
                     "content, names don't support trigraphs."
                 )
         padded_name = name.ljust(7)
+        padded_name_bytes = padded_name.encode("ascii")
 
         # A real DM41L rejects a duplicate directory entry name -- caught
         # here (rather than left for the emulator to reject later) so a
         # dump built by this tool can't be created in a state real
         # hardware wouldn't accept. This also naturally allows editing a
         # file "in place" under its own unchanged name: the GUI's Edit
-        # flow (and remove_file()'s own rebuild) always removes the old
-        # entry *before* calling add_file(), so by the time this check
-        # runs, that name is no longer in list_files().
-        if any(f.name == padded_name for f in self.list_files()):
+        # flow (and remove_file()'s own rebuild -- see _place_file()) always
+        # removes the old entry *before* calling add_file(), so by the time
+        # this check runs, that name is no longer in list_files().
+        #
+        # Compared against raw name_bytes, not the lossy `.name` display
+        # string: get_ascii() collapses every unprintable byte to '.', so
+        # two files with genuinely different raw names (e.g. a dump with
+        # non-ASCII/control bytes in its directory entries) could share an
+        # identical `.name` without being duplicates at all. Comparing
+        # `.name` here would falsely flag them as colliding.
+        if any(f.name_bytes == padded_name_bytes for f in self.list_files()):
             raise DM41LMemoryError(
                 f"A file named {name!r} already exists in extended memory "
                 "-- duplicate names aren't allowed (the real DM41L would "
@@ -736,15 +764,43 @@ class ExtendedMemory(MemoryRegion):
                 "register-length field (max 4095 registers)."
             )
 
+        return self._place_file(padded_name_bytes, file_type, data_registers, byte_length)
+
+    def _place_file(
+        self,
+        name_bytes: bytes,
+        file_type: int,
+        data_registers: list,
+        byte_length: Optional[int] = None,
+    ) -> XMFile:
+        """
+        Writes a file's name/header/data registers into the next free slot
+        and returns the resulting XMFile -- the actual on-disk placement
+        logic shared by add_file() (which validates and builds
+        data_registers from user-supplied content first) and remove_file()
+        rebuilding a surviving file verbatim from its own already-on-disk
+        name_bytes/data_registers (see remove_file()).
+
+        Deliberately skips add_file()'s name-length/character-range and
+        duplicate-name checks: those only make sense for a *new* name a
+        caller is asking to create, not for a file that already legitimately
+        exists in extended memory (its name_bytes were already valid when
+        the file was created -- possibly by real hardware, which isn't
+        bound by this tool's own NAME_MIN_CHAR/NAME_MAX_CHAR restriction).
+        Re-running those checks during a remove_file() rebuild is what used
+        to corrupt extended memory: get_ascii()'s lossy '.'-for-unprintable
+        display form let two files with different raw names collide as a
+        false "duplicate", aborting the rebuild partway through with
+        several already-wiped, not-yet-rebuilt files gone for good.
+        """
         name_addr, region_index, needs_bootstrap = self._next_slot()
+        register_length = len(data_registers)
         segments, next_name_addr, ending_region = self._allocate_segments(
             name_addr, region_index, register_length
         )
         header_addr = name_addr - 1
 
-        name_reg = Register(size=7)
-        name_reg.set_ascii(padded_name)
-        self.set_register(name_addr, name_reg)
+        self.set_register(name_addr, Register(data=name_bytes))
         self.set_register(
             header_addr,
             self._build_header(file_type, header_addr, register_length, byte_length),
@@ -820,7 +876,8 @@ class ExtendedMemory(MemoryRegion):
             memory=self._memory,
             header_addr=header_addr,
             file_type=file_type,
-            name=padded_name,
+            name=Register(data=name_bytes).get_ascii(),
+            name_bytes=name_bytes,
             segments=segments,
             declared_length=register_length,
             byte_length=byte_length,
@@ -834,48 +891,52 @@ class ExtendedMemory(MemoryRegion):
         space in place, so this works by removing the target from
         list_files()'s result, wiping every register either XM region can
         touch (plus both region pointer registers) back to the "extended
-        memory has never been used" state, and re-adding every surviving
-        file from scratch, in its original address order, via add_file().
-        This reuses add_file()'s already-tested packing/pointer logic
-        instead of re-deriving the rules for an in-place delete, at the
-        cost of rewriting every file that comes after the one being
-        removed (their register addresses will change).
+        memory has never been used" state, and re-writing every surviving
+        file from scratch, in its original address order, via _place_file().
+        This reuses the same packing/pointer logic add_file() uses instead
+        of re-deriving the rules for an in-place delete, at the cost of
+        rewriting every file that comes after the one being removed (their
+        register addresses will change).
 
         Raises DM41LMemoryError if no file has a header at header_addr.
+
+        Rebuilds go through _place_file() directly, NOT add_file(): a
+        surviving file's raw name_bytes and data_registers() are written
+        back byte-for-byte, bypassing add_file()'s name-length/character-
+        range and duplicate-name checks (see _place_file()'s docstring).
+        Those checks exist for *new* names a caller is asking to create,
+        not for files that already legitimately exist -- running them
+        during a rebuild used to be a real (confirmed) bug: get_ascii()'s
+        lossy '.'-for-unprintable display name was, until recently, a
+        file's only recorded identity, so two files with different raw
+        names but the same sanitized display name would collide as a false
+        "duplicate" mid-rebuild, after registers were already wiped --
+        losing every not-yet-rebuilt file (not just the intended edit or
+        removal) with no rollback.
         """
         files = self.list_files()
         if not any(f.header_addr == header_addr for f in files):
             raise DM41LMemoryError(f"No XM file with a header at 0x{header_addr:03x}")
 
-        # Snapshot each surviving file's content *before* clearing anything
-        # -- get_numbers()/get_records()/get_instruction_bytes() all read
-        # live from self._memory, so this has to happen while the original
-        # layout is still intact.
+        # Snapshot each surviving file's raw name bytes, type, and actual
+        # data Register objects *before* clearing anything -- data_registers()
+        # reads live from self._memory, so this has to happen while the
+        # original layout is still intact. The Register objects returned
+        # here are unaffected by the wipe below (set_register() replaces
+        # each address's dict entry with a brand-new Register rather than
+        # mutating the existing one in place), so holding onto them is
+        # enough to preserve exact original content, verbatim -- including
+        # any raw bytes get_data_lines()/get_records()/get_instruction_bytes()
+        # would have had to (lossily) re-encode as text.
         rebuild = []
         for f in files:
             if f.header_addr == header_addr:
                 continue
-            if f.file_type == self.TYPE_DATA:
-                # get_data_lines() (not get_numbers()) so a Data file
-                # containing alpha-text or raw-hex registers -- not just
-                # plain numbers -- survives rebuilding correctly.
-                rebuild.append((f.name, f.file_type, {"data_lines": f.get_data_lines()}))
-            elif f.file_type == self.TYPE_ASCII:
-                rebuild.append((f.name, f.file_type, {"records": f.get_records()}))
-            elif f.file_type == self.TYPE_PROGRAM:
-                rebuild.append(
-                    (
-                        f.name,
-                        f.file_type,
-                        {"instruction_bytes": f.get_instruction_bytes()},
-                    )
-                )
-            else:
-                raise DM41LMemoryError(f"Unknown file type for {f.name!r}: {f.file_type}")
+            rebuild.append((f.name_bytes, f.file_type, f.data_registers(), f.byte_length))
 
         for lo, hi in XM_REGIONS:
             for addr in range(lo, hi + 1):
                 self.set_register(addr, Register(size=7))
 
-        for name, file_type, kwargs in rebuild:
-            self.add_file(name, file_type, **kwargs)
+        for name_bytes, file_type, data_registers, byte_length in rebuild:
+            self._place_file(name_bytes, file_type, data_registers, byte_length)

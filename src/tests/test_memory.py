@@ -721,6 +721,65 @@ def test_xm_edit_file_keeping_same_name_does_not_self_collide():
     assert edited.get_records() == ["hello", "world"]
 
 
+def test_xm_list_files_preserves_raw_name_bytes_even_when_display_collides():
+    """manyfiles.dm41 has five ASCII files whose raw directory-entry names
+    differ only in an unprintable byte (0x01, 0x02, 0x03, 0x04, 0x06) --
+    Register.get_ascii() (which produces the display-only `.name`) renders
+    any byte outside 0x20-0x7E as '.', so all five show the identical
+    'XMA.   ' display name. `.name_bytes` (the raw 7 bytes, unaffected by
+    that sanitization) must still tell them apart -- add_file()'s
+    duplicate check and remove_file()'s rebuild both depend on this to
+    avoid mistaking these for the same file (see the tests below)."""
+    xm = _load_xm("manyfiles.dm41")
+    xma_files = [f for f in xm.list_files() if f.name == "XMA.   "]
+    assert len(xma_files) == 5
+    assert all(f.file_type == xm.TYPE_ASCII for f in xma_files)
+    assert {f.name_bytes for f in xma_files} == {
+        b"XMA\x01   ",
+        b"XMA\x02   ",
+        b"XMA\x03   ",
+        b"XMA\x04   ",
+        b"XMA\x06   ",
+    }
+
+
+def test_xm_edit_file_with_colliding_display_name_does_not_corrupt_dump():
+    """Regression (user-reported, manyfiles.dm41): several XM files in
+    this dump have raw names that differ only in an unprintable byte, so
+    they all show the same '.'-sanitized display name (see
+    test_xm_list_files_preserves_raw_name_bytes_even_when_display_collides).
+    Editing one of them -- remove-then-add, same as the GUI's Edit flow
+    (xm_files_tab.py's _save_new_or_edited_file()) -- used to raise a
+    false "duplicate file name" DM41LMemoryError from *inside*
+    remove_file()'s rebuild, once it reached a second survivor whose
+    display name collided with one already rebuilt. That happened after
+    every register had already been wiped, so every file from the
+    collision point onward (not just the one being edited) vanished for
+    good, with no rollback -- matching the reported symptom of unrelated
+    special-character-named files disappearing from the XM Files tab."""
+    xm = _load_xm("manyfiles.dm41")
+    before = xm.list_files()
+    assert len(before) == 30
+
+    target = next(f for f in before if f.name_bytes == b"XMA\x01   ")
+
+    # Same sequence the GUI's Edit flow runs.
+    xm.remove_file(target.header_addr)
+    edited = xm.add_file("XMA1", xm.TYPE_ASCII, records=target.get_records())
+
+    after = xm.list_files()
+    assert len(after) == 30, "no file should be lost"
+    assert edited.name == "XMA1   "
+    # The other four originally-colliding files must have survived intact.
+    remaining_xma_bytes = {f.name_bytes for f in after if f.name == "XMA.   "}
+    assert remaining_xma_bytes == {
+        b"XMA\x02   ",
+        b"XMA\x03   ",
+        b"XMA\x04   ",
+        b"XMA\x06   ",
+    }
+
+
 def test_xm_add_file_appends_after_existing_files():
     """Adding a file to an already-populated region must place it after
     (below) the current last file, and must not disturb any existing
@@ -1186,6 +1245,31 @@ def test_xm_remove_file_preserves_mixed_data_file():
     files = xm.list_files()
     assert {f.name for f in files} == {"MIXED  "}
     assert files[0].get_data_lines() == ["1.5", "HI", "0x50000000000000"]
+
+
+def test_xm_remove_unrelated_file_preserves_colliding_display_name_survivors():
+    """Same root cause as
+    test_xm_edit_file_with_colliding_display_name_does_not_corrupt_dump,
+    but via a plain Remove (no rename involved): removing a file that has
+    nothing to do with the collision must not disturb XM files whose raw
+    names happen to collapse to the same '.'-sanitized display name (see
+    test_xm_list_files_preserves_raw_name_bytes_even_when_display_collides)."""
+    xm = _load_xm("manyfiles.dm41")
+    before = xm.list_files()
+    unrelated = next(f for f in before if f.name.rstrip() == "XMBCD")
+
+    xm.remove_file(unrelated.header_addr)
+
+    after = xm.list_files()
+    assert len(after) == len(before) - 1
+    remaining_xma_bytes = {f.name_bytes for f in after if f.name == "XMA.   "}
+    assert remaining_xma_bytes == {
+        b"XMA\x01   ",
+        b"XMA\x02   ",
+        b"XMA\x03   ",
+        b"XMA\x04   ",
+        b"XMA\x06   ",
+    }
 
 
 def test_xm_remove_last_file_leaves_extended_memory_empty():
