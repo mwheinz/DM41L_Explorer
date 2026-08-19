@@ -7,6 +7,7 @@ Requires a real Tk display (Xvfb in CI/sandboxes) -- same requirement as
 test_app.py.
 """
 
+import time
 from unittest import mock
 
 import pytest
@@ -34,6 +35,30 @@ def _buttons_by_text(widget) -> dict:
     return found
 
 
+def _show(window, timeout: float = 5.0) -> bool:
+    """Maps `window` and pumps the event loop until it is really on screen.
+
+    Needed because of a Windows-only detour inside customtkinter: every new
+    CTkToplevel runs _windows_set_titlebar_color(), which calls withdraw()
+    to hide the window while it recolors the titlebar and only re-shows it
+    later from an after(5, _revert_withdraw_after_windows_set_titlebar_color)
+    callback. A test that builds a dialog and immediately calls
+    update_idletasks() never lets that timer fire, so it is measuring an
+    *unmapped* window: every child's winfo_x() is 0 (so placement asserts
+    read `0 < 0`) and focus_force() has nothing to focus, which makes
+    <Return> land on the toplevel instead of the CTkTextbox. Linux and
+    macOS never take that code path -- hence Windows-only CI failures.
+    """
+    window.deiconify()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        window.update()
+        if window.winfo_viewable():
+            return True
+        time.sleep(0.01)
+    return False
+
+
 @pytest.fixture
 def root():
     r = ctk.CTk()
@@ -45,6 +70,12 @@ def root():
 @pytest.fixture
 def dialog(root):
     d = ctk.CTkToplevel(root)
+    if not _show(d):
+        d.destroy()
+        pytest.skip(
+            "dialog never became viewable -- this display cannot map windows, "
+            "so button geometry and keyboard focus are not measurable here"
+        )
     yield d
     if d.winfo_exists():
         d.destroy()
