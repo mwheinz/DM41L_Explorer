@@ -1716,3 +1716,160 @@ def test_list_key_assignments_matches_all_real_fixtures_key_flags():
         }
         decoded = {(a["key_number"], a["shifted"]) for a in assignments}
         assert flagged == decoded, filename
+
+
+# ---- Global label (program) key assignments (docs/key_assignments.md
+# sec 4.6) -- a completely separate storage mechanism from the Key
+# Assignment Registers above: the key byte lives in the program's own
+# global-label header rather than a shared buffer, and a label can hold
+# only one key assignment at a time (unlike a physical key's independent
+# unshifted/shifted slots). manyfiles.dm41 mixes both kinds of assignment
+# in one real dump -- three global labels (XMBCD/XMALPHA/PURXM, keys
+# 11/12/13 unshifted) plus two built-in/peripheral ones (EMROOM/XTOA,
+# keys 14/15 unshifted) -- so it's used below alongside
+# global-key-assignments.dm41 (AAA/BBB, program-only) and simple.dm41
+# (APPTEST, unassigned) for the synthetic move/mutual-exclusion cases.
+
+
+def test_get_program_for_key_decodes_global_key_assignments_dm41():
+    memory = Memory.from_file(DATA_DIR / "global-key-assignments.dm41")
+    assert memory.get_program_for_key(11, False).name == "AAA"
+    assert memory.get_program_for_key(12, False).name == "BBB"
+    assert memory.get_program_for_key(11, True) is None
+    assert memory.get_program_for_key(13, False) is None
+
+
+def test_get_program_for_key_decodes_manyfiles_dm41_mixed_dump():
+    memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
+    assert memory.get_program_for_key(11, False).name == "XMBCD"
+    assert memory.get_program_for_key(12, False).name == "XMALPHA"
+    assert memory.get_program_for_key(13, False).name == "PURXM"
+    # 14/15 are built-in/peripheral assignments (sec 4.2), not programs.
+    assert memory.get_program_for_key(14, False) is None
+    assert memory.get_program_for_key(15, False) is None
+
+
+def test_set_program_key_assignment_assigns_unassigned_program():
+    memory = Memory.from_file(DATA_DIR / "simple.dm41")
+    assert memory.list_programs()[0].key_assignment == 0x00  # APPTEST
+
+    memory.set_program_key_assignment("APPTEST", 21, False)
+
+    assert memory.get_program_for_key(21, False).name == "APPTEST"
+    assert memory.get_key_flag(21, False) is True
+    apptest = memory._find_program_by_name("APPTEST")
+    assert apptest.key_assignment == Memory.key_byte_for(21, False)
+
+
+def test_set_program_key_assignment_moves_existing_assignment():
+    """A program's header holds only one key byte -- reassigning it to a
+    new key moves it, clearing the old key's KEYFLAGS bit."""
+    memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
+
+    memory.set_program_key_assignment("XMBCD", 25, True)
+
+    assert memory.get_program_for_key(25, True).name == "XMBCD"
+    assert memory.get_key_flag(25, True) is True
+    assert memory.get_program_for_key(11, False) is None
+    assert memory.get_key_flag(11, False) is False
+
+
+def test_set_program_key_assignment_clears_conflicting_ka_register_entry():
+    """Assigning a program onto a key that currently holds a built-in/
+    peripheral assignment (sec 4.2) clears that entry -- the real lookup
+    order (sec 4.7) would otherwise let it silently shadow the program."""
+    memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
+    assert memory.get_key_assignment(14, False)["name"] == "EMROOM"
+
+    memory.set_program_key_assignment("PURXM", 14, False)
+
+    assert memory.get_key_assignment(14, False) is None
+    assert memory.get_program_for_key(14, False).name == "PURXM"
+    assert memory.get_key_flag(14, False) is True
+
+
+def test_set_program_key_assignment_clears_other_programs_own_conflict():
+    """Two programs can't both claim the same key -- assigning one onto a
+    key already held by a different program clears the other one."""
+    memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
+
+    memory.set_program_key_assignment("XMALPHA", 11, False)  # was XMBCD's key
+
+    assert memory.get_program_for_key(11, False).name == "XMALPHA"
+    xmbcd = memory._find_program_by_name("XMBCD")
+    assert xmbcd.key_assignment == 0x00
+
+
+def test_set_program_key_assignment_reassigning_to_same_key_is_a_noop_move():
+    memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
+
+    memory.set_program_key_assignment("XMBCD", 11, False)
+
+    assert memory.get_program_for_key(11, False).name == "XMBCD"
+    assert memory.get_key_flag(11, False) is True
+
+
+def test_set_program_key_assignment_unknown_name_raises():
+    memory = Memory.from_file(DATA_DIR / "simple.dm41")
+    with pytest.raises(ValueError):
+        memory.set_program_key_assignment("NOPE", 21, False)
+
+
+def test_set_key_assignment_clears_conflicting_program_assignment():
+    """The reverse direction of the mutual-exclusion rule: assigning a
+    built-in function onto a key that currently holds a global-label
+    assignment clears that program's assignment."""
+    memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
+    assert memory.get_program_for_key(11, False).name == "XMBCD"
+
+    memory.set_key_assignment(11, False, 0x40)  # '+'
+
+    assert memory.get_key_assignment(11, False)["name"] == "+"
+    assert memory.get_program_for_key(11, False) is None
+    xmbcd = memory._find_program_by_name("XMBCD")
+    assert xmbcd.key_assignment == 0x00
+    # The key's flag stays set -- now backed by the function assignment.
+    assert memory.get_key_flag(11, False) is True
+
+
+def test_clear_program_key_assignment_removes_assignment_and_flag():
+    memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
+
+    memory.clear_program_key_assignment("XMBCD")
+
+    assert memory.get_program_for_key(11, False) is None
+    assert memory.get_key_flag(11, False) is False
+    xmbcd = memory._find_program_by_name("XMBCD")
+    assert xmbcd.key_assignment == 0x00
+    # Unrelated programs/assignments untouched.
+    assert memory.get_program_for_key(12, False).name == "XMALPHA"
+    assert memory.get_key_assignment(14, False)["name"] == "EMROOM"
+
+
+def test_clear_program_key_assignment_on_unassigned_program_is_a_noop():
+    memory = Memory.from_file(DATA_DIR / "simple.dm41")
+    memory.clear_program_key_assignment("APPTEST")  # never assigned
+    assert memory._find_program_by_name("APPTEST").key_assignment == 0x00
+
+
+def test_clear_program_key_assignment_unknown_name_raises():
+    memory = Memory.from_file(DATA_DIR / "simple.dm41")
+    with pytest.raises(ValueError):
+        memory.clear_program_key_assignment("NOPE")
+
+
+def test_program_key_assignment_round_trip_through_from_string_to_string():
+    memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
+    memory.set_program_key_assignment("PURXM", 22, True)
+
+    reloaded = Memory.from_string(memory.to_string())
+
+    assert reloaded.get_program_for_key(22, True).name == "PURXM"
+    assert reloaded.get_key_flag(22, True) == memory.get_key_flag(22, True)
+    reloaded_names = {
+        (p.name, p.key_assignment) for p in reloaded.list_programs() if p.is_named
+    }
+    memory_names = {
+        (p.name, p.key_assignment) for p in memory.list_programs() if p.is_named
+    }
+    assert reloaded_names == memory_names

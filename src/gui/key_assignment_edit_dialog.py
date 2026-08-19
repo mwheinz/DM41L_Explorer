@@ -2,8 +2,20 @@
 Modal dialog for editing (or clearing) a single key's assignment, from
 gui/key_assignments_tab.py -- see that module's docstring for the overall
 tab design. This dialog itself never touches the Memory object; it hands
-the resolved function bytes back to the caller via `on_save`, and
-signals a delete via `on_delete`, exactly like RegisterEditDialog.
+the resolved assignment back to the caller via `on_save`, and signals a
+delete via `on_delete`, exactly like RegisterEditDialog.
+
+Three tabs, matching the two independent storage mechanisms docs/
+key_assignments.md sec 4.1 describes: "Function" and "Raw Hex" both write
+a built-in/peripheral function into the Key Assignment Registers (sec
+4.2), while "Program" assigns a user's global label instead (sec 4.6) --
+a completely different storage location (the label's own header) with
+different constraints (a program can hold only one key assignment at a
+time, so picking one here MOVES it if it's already on another key).
+Because the caller now has two different kinds of value to act on,
+`on_save(kind, value)` is called with `kind` = `"function"` (value: an
+int or (byte1, byte2) tuple, same shape as before) or `"program"` (value:
+the chosen global label's name).
 """
 
 import logging
@@ -46,17 +58,37 @@ def _hex_for_assignment(assignment) -> str:
 class KeyAssignmentEditDialog(ctk.CTkToplevel):
     """
     Blocking modal dialog to assign, reassign, or delete one key's
-    (unshifted or shifted) function. `on_save(function_bytes)` is called
-    with an int (single-byte function) or (byte1, byte2) tuple (XROM/
-    peripheral function) if the user saves; `on_delete()` is called
-    instead if the user clicks Delete. Neither callback is invoked on
-    Cancel. The dialog doesn't touch the Memory object itself -- callers
-    stay in control of when (and whether) the edit takes effect, same as
-    RegisterEditDialog.
+    (unshifted or shifted) function or global program. `on_save(kind,
+    value)` is called if the user saves -- `kind` is `"function"` (value:
+    an int or (byte1, byte2) tuple) or `"program"` (value: a global
+    label's name string); `on_delete()` is called instead if the user
+    clicks Delete. Neither callback is invoked on Cancel. The dialog
+    doesn't touch the Memory object itself -- callers stay in control of
+    when (and whether) the edit takes effect, same as RegisterEditDialog.
+
+    `assignment` is the Key Assignment Register entry currently on this
+    key (get_key_assignment()'s dict shape), or None. `program_assignment`
+    is the global label currently on this key instead (a ProgramInfo, per
+    get_program_for_key()), or None -- the two are mutually exclusive in
+    practice (sec 4.7's lookup order means a Key Assignment Register entry
+    always shadows a global-label one), but this dialog only ever receives
+    whichever one is actually authoritative for display purposes; callers
+    should pass `assignment` when it's set and only fall back to
+    `program_assignment` otherwise, matching the real lookup order.
+    `program_names` lists every assignable global label (from
+    list_programs()) for the Program tab's picker, alphabetical.
     """
 
     def __init__(
-        self, master, key_number: int, shifted: bool, assignment, on_save, on_delete
+        self,
+        master,
+        key_number: int,
+        shifted: bool,
+        assignment,
+        program_assignment,
+        program_names,
+        on_save,
+        on_delete,
     ):
         super().__init__(master)
         shift_label = "shifted" if shifted else "unshifted"
@@ -69,13 +101,17 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
 
         self._on_save = on_save
         self._on_delete = on_delete
-        self._has_existing_assignment = assignment is not None
-
-        current_text = (
-            f"Currently assigned: {assignment['name']}"
-            if assignment is not None
-            else "Currently unassigned."
+        self._has_existing_assignment = (
+            assignment is not None or program_assignment is not None
         )
+        self._program_names = sorted(program_names)
+
+        if assignment is not None:
+            current_text = f"Currently assigned: {assignment['name']}"
+        elif program_assignment is not None:
+            current_text = f'Currently assigned: program "{program_assignment.name}"'
+        else:
+            current_text = "Currently unassigned."
         ctk.CTkLabel(
             self,
             text=f"Key {key_number:02d} ({shift_label}) -- {current_text}",
@@ -87,6 +123,7 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
         tabs = ctk.CTkTabview(self, width=360)
         tabs.pack(padx=16, pady=8, fill="both", expand=True)
         tabs.add("Function")
+        tabs.add("Program")
         tabs.add("Raw Hex")
 
         # -- Function tab: pick a named built-in/peripheral function -----
@@ -122,6 +159,41 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).pack(anchor="w", padx=8, fill="x")
 
+        # -- Program tab: pick a global label (sec 4.6) -------------------
+        # A program can hold only one key assignment, so picking one here
+        # (if it's already on a different key) moves it -- worth saying up
+        # front rather than as a surprise after Save.
+        if self._program_names:
+            default_program = (
+                program_assignment.name
+                if program_assignment is not None
+                and program_assignment.name in self._program_names
+                else self._program_names[0]
+            )
+            self._program_var = ctk.StringVar(value=default_program)
+            ctk.CTkLabel(
+                tabs.tab("Program"),
+                text="Global program (a program can be on only one key -- "
+                "picking one already assigned elsewhere moves it here):",
+                wraplength=320,
+                justify="left",
+            ).pack(anchor="w", padx=8, pady=(12, 4))
+            ctk.CTkComboBox(
+                tabs.tab("Program"),
+                values=self._program_names,
+                variable=self._program_var,
+                width=300,
+            ).pack(anchor="w", padx=8, fill="x")
+        else:
+            self._program_var = None
+            ctk.CTkLabel(
+                tabs.tab("Program"),
+                text="This dump has no global programs to assign.",
+                text_color="gray50",
+                wraplength=320,
+                justify="left",
+            ).pack(anchor="w", padx=8, pady=(12, 4))
+
         # Whichever tab already matches the current assignment (if any)
         # opens first -- an unknown/raw-hex assignment (fn2 present but no
         # matching function name, or a name outside the known list) should
@@ -129,6 +201,8 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
         # unrelated function.
         if assignment is not None and assignment["name"] not in _ALL_FUNCTION_NAMES:
             tabs.set("Raw Hex")
+        elif assignment is None and program_assignment is not None:
+            tabs.set("Program")
         self._tabs = tabs
 
         extra_buttons = []
@@ -156,21 +230,28 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
                 # display name's exact spelling/case -- "sigma", "x<=y?",
                 # "e^x", "p->r" all resolve to the real function this way.
                 name = normalize_function_name_input(name)
-                function_bytes = bytes_for_function_name(name)
-            else:  # Raw Hex
+                kind, value = "function", bytes_for_function_name(name)
+            elif which == "Raw Hex":
                 text = self._hex_var.get().strip().replace(" ", "")
                 if len(text) == 2:
-                    function_bytes = int(text, 16)
+                    kind, value = "function", int(text, 16)
                 elif len(text) == 4:
-                    function_bytes = (int(text[0:2], 16), int(text[2:4], 16))
+                    kind, value = "function", (int(text[0:2], 16), int(text[2:4], 16))
                 else:
                     raise ValueError(f"Expected 2 or 4 hex digits, got {len(text)}.")
+            else:  # Program
+                if not self._program_names:
+                    raise ValueError("This dump has no global programs to assign.")
+                name = self._program_var.get().strip()
+                if not name or name not in self._program_names:
+                    raise ValueError("Choose a program.")
+                kind, value = "program", name
         except ValueError as e:
             logger.warning("Invalid key assignment value on %s tab: %s", which, e)
             messagebox.showerror("Invalid Value", str(e))
             return
 
-        self._on_save(function_bytes)
+        self._on_save(kind, value)
         self.destroy()
 
     def _on_delete_clicked(self):

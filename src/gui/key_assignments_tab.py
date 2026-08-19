@@ -1,21 +1,27 @@
 """
 Key Assignments tab: two synchronized keypad-shaped grids ("HP41" and
 "DM41L", docs/key_assignments.md sec 6 item 4) for viewing and editing
-built-in/peripheral key assignments. Both grids render the exact same 34
-assignable keys, just laid out to match a different physical keyboard --
-an edit made through either grid is immediately reflected in the other,
-since both are just two different arrangements of the same
-Memory.get_key_assignment()/set_key_assignment()/delete_key_assignment()
-calls.
+key assignments -- both the built-in/peripheral kind (sec 4.2, stored in
+the Key Assignment Registers) and global-label/program assignments (sec
+4.6, stored inside the program's own header instead). Both grids render
+the exact same 34 assignable keys, just laid out to match a different
+physical keyboard -- an edit made through either grid is immediately
+reflected in the other, since both are just two different arrangements of
+the same Memory calls: get_key_assignment()/set_key_assignment()/
+delete_key_assignment() for the first kind, get_program_for_key()/
+set_program_key_assignment()/clear_program_key_assignment() for the
+second (see gui/key_assignment_edit_dialog.py's "Program" tab).
 
-Scope for this first pass (explicitly out of scope, per the project's own
-request): import, export, and global-label (user program) key assignments
--- see docs/key_assignments.md sec 4.6 and sec 6 items 1-3. Only built-in/
-peripheral assignments (sec 4.2) are shown/editable here; a key assigned
-only via a global label (ASN "PROGNAME") shows as unassigned in this tab
-even though its KEYFLAGS bit is set -- Memory.list_programs()'s
-`key_assignment` field is the only place that's currently visible (the
-Programs tab).
+Per the real lookup order (docs sec 4.7), a Key Assignment Register entry
+always takes priority over a global-label one on the same key -- this
+tab's own writes never let both exist on one key at once (see
+Memory.set_key_assignment()/set_program_key_assignment()'s mutual-
+exclusion docstrings), but _resolve_key() below still checks the register
+first when deciding what to display, matching that real priority in case
+a dump imported from elsewhere is in an inconsistent state.
+
+Import/export of key assignments is still out of scope -- see
+docs/key_assignments.md sec 6 items 1-2.
 
 Unlike every other tab's render(), this one does NOT destroy and rebuild
 its widgets on every call. Every other tab's row count scales with actual
@@ -80,6 +86,24 @@ KEY_BUTTON_HEIGHT = 20
 KEY_BUTTON_FONT_SIZE = 14
 
 
+def _program_names(memory: Memory) -> list:
+    """Every assignable global label's name, alphabetical -- the Program
+    tab's picker list. A set first in case a dump has a duplicate label
+    name (list_programs() doesn't assume uniqueness)."""
+    return sorted({p.name for p in memory.list_programs() if p.is_named})
+
+
+def _count_all_assignments(memory: Memory) -> int:
+    """Total key assignments of both kinds (sec 4.1): Key Assignment
+    Register entries plus global labels that currently have a key
+    assignment -- the header count used to just be the first of these,
+    silently omitting any global-label assignments."""
+    program_count = sum(
+        1 for p in memory.list_programs() if p.is_named and p.key_assignment
+    )
+    return len(memory.list_key_assignments()) + program_count
+
+
 class KeyAssignmentsTab(ctk.CTkFrame):
     """Renders the HP41/DM41L key-assignment grids for a Memory object.
     Call `render(memory)` whenever the buffer changes."""
@@ -103,10 +127,9 @@ class KeyAssignmentsTab(ctk.CTkFrame):
             self,
             text=(
                 "Click a key's unshifted or shifted function to assign, "
-                "reassign, or delete it. This covers built-in/peripheral "
-                "assignments only (docs/key_assignments.md sec 4.2) -- "
-                "import, export, and program (global-label) assignments "
-                "aren't handled here yet."
+                "reassign, or delete it -- a built-in/peripheral function "
+                "or a global program (marked ▸). Import/export of key "
+                "assignments isn't handled here yet."
             ),
             font=ctk.CTkFont(size=12),
             text_color="gray60",
@@ -160,7 +183,7 @@ class KeyAssignmentsTab(ctk.CTkFrame):
             return
 
         try:
-            count = len(memory.list_key_assignments())
+            count = _count_all_assignments(memory)
         except Exception as e:
             logger.warning("Could not list key assignments: %s", e)
             self._header_label.configure(text=f"Could not list key assignments: {e}")
@@ -241,12 +264,32 @@ class KeyAssignmentsTab(ctk.CTkFrame):
 
     # -- Refresh (every render) ----------------------------------------------
 
+    def _resolve_key(self, key_number: int, shifted: bool):
+        """Returns (assignment, program) for key_number/shifted --
+        `assignment` is get_key_assignment()'s dict or None, `program` is
+        get_program_for_key()'s ProgramInfo or None. Only one is ever
+        non-None for a dump this tab itself wrote (memory.py's
+        set_key_assignment()/set_program_key_assignment() enforce mutual
+        exclusion on save), but the Key Assignment Register lookup is
+        still checked first -- matching the real priority order (docs sec
+        4.7) -- in case a dump from elsewhere has both."""
+        assignment = self._memory.get_key_assignment(key_number, shifted)
+        if assignment:
+            return assignment, None
+        return None, self._memory.get_program_for_key(key_number, shifted)
+
     def _refresh_buttons(self):
         for (key_number, shifted), btns in self._key_buttons.items():
-            assignment = self._memory.get_key_assignment(key_number, shifted)
+            assignment, program = self._resolve_key(key_number, shifted)
             prefix = "⇧" if shifted else ""
             if assignment:
                 text = f"{prefix}{assignment['name']}"
+                fg_color = self._default_fg_color
+                text_color = self._default_text_color
+            elif program:
+                # "▸" marks a global-program assignment, distinct from a
+                # built-in/peripheral function -- see the tab caption.
+                text = f"{prefix}▸{program.name}"
                 fg_color = self._default_fg_color
                 text_color = self._default_text_color
             else:
@@ -259,24 +302,44 @@ class KeyAssignmentsTab(ctk.CTkFrame):
     # -- Editing ------------------------------------------------------------
 
     def _edit_key(self, key_number: int, shifted: bool):
-        assignment = self._memory.get_key_assignment(key_number, shifted)
+        assignment, program = self._resolve_key(key_number, shifted)
+        program_names = _program_names(self._memory)
 
-        def save(function_bytes):
-            self._memory.set_key_assignment(key_number, shifted, function_bytes)
-            logger.info(
-                "Key %02d (%s) assigned: %s",
-                key_number,
-                "shifted" if shifted else "unshifted",
-                function_bytes,
+        def update_header():
+            self._header_label.configure(
+                text=f"Key assignments: {_count_all_assignments(self._memory)}"
             )
+
+        def save(kind, value):
+            if kind == "function":
+                self._memory.set_key_assignment(key_number, shifted, value)
+                logger.info(
+                    "Key %02d (%s) assigned function: %s",
+                    key_number,
+                    "shifted" if shifted else "unshifted",
+                    value,
+                )
+            else:  # "program"
+                self._memory.set_program_key_assignment(value, key_number, shifted)
+                logger.info(
+                    "Key %02d (%s) assigned program: %s",
+                    key_number,
+                    "shifted" if shifted else "unshifted",
+                    value,
+                )
             self._notify_change()
             self._refresh_buttons()
-            self._header_label.configure(
-                text=f"Key assignments: {len(self._memory.list_key_assignments())}"
-            )
+            update_header()
 
         def delete():
+            # Clear both storage mechanisms -- normally only one is ever
+            # actually populated (see _resolve_key()), but this is cheap
+            # and safe (both calls no-op when there's nothing to clear)
+            # and avoids leaving a stale assignment behind on a dump
+            # that's somehow in an inconsistent state.
             self._memory.delete_key_assignment(key_number, shifted)
+            if program is not None:
+                self._memory.clear_program_key_assignment(program.name)
             logger.info(
                 "Key %02d (%s) assignment deleted",
                 key_number,
@@ -284,8 +347,8 @@ class KeyAssignmentsTab(ctk.CTkFrame):
             )
             self._notify_change()
             self._refresh_buttons()
-            self._header_label.configure(
-                text=f"Key assignments: {len(self._memory.list_key_assignments())}"
-            )
+            update_header()
 
-        KeyAssignmentEditDialog(self, key_number, shifted, assignment, save, delete)
+        KeyAssignmentEditDialog(
+            self, key_number, shifted, assignment, program, program_names, save, delete
+        )

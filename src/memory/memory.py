@@ -476,8 +476,12 @@ class Memory:
         left as a stale duplicate): the old entry is removed and the new
         one inserted at the front, so it lands in register 0xC0 exactly
         as a brand-new assignment would (sec 4.4's LIFO order). Also sets
-        the corresponding KEYFLAGS bit (sec 4.5). Does NOT touch global
-        label assignments (sec 4.6) -- out of scope for this method.
+        the corresponding KEYFLAGS bit (sec 4.5), and clears any global
+        label (sec 4.6) currently assigned to the same key -- the real
+        lookup order (sec 4.7) would otherwise let this entry silently
+        shadow that program's assignment rather than genuinely replacing
+        it; see set_program_key_assignment() for the same precedent in
+        the other direction.
         """
         key_byte = self.key_byte_for(key_number, shifted)
 
@@ -495,6 +499,7 @@ class Memory:
         entries = [e for e in self._decode_key_assignment_entries() if e[2] != key_byte]
         entries.insert(0, (fn1, fn2, key_byte))
         self._encode_key_assignment_entries(entries)
+        self._clear_program_assignments_for_key_byte(key_byte)
         self.set_key_flag(key_number, shifted, True)
 
     def delete_key_assignment(self, key_number: int, shifted: bool):
@@ -803,6 +808,133 @@ class Memory:
         ]
         programs.reverse()
         return programs
+
+    # -- Global label (program) key assignments (docs/key_assignments.md
+    # sec 4.6) -- a completely separate storage mechanism from the Key
+    # Assignment Registers above (sec 4.2): the key byte lives in the
+    # program's own global-label header (ProgramInfo.key_assignment, the
+    # 4th header byte, docs/program.md sec 5.2) rather than in a shared
+    # buffer. A label's header has room for exactly one key byte, so a
+    # program can hold only one key assignment at a time -- unlike a
+    # physical key, which has independent unshifted/shifted slots.
+
+    def _find_program_by_name(self, name: str) -> Optional[ProgramInfo]:
+        """First named global label matching `name` (oldest-created, i.e.
+        list_programs()' own order, in the rare case of a duplicate name)
+        -- shared by set_program_key_assignment()/
+        clear_program_key_assignment()/get_program_for_key()."""
+        for program in self.list_programs():
+            if program.is_named and program.name == name:
+                return program
+        return None
+
+    def _write_program_key_byte(self, header_addr: int, header_offset: int, value: int):
+        """Overwrites the key-assignment byte (the 4th byte, sec 4.2/5.2)
+        of the global-label header starting at (header_addr,
+        header_offset) -- the write-side counterpart to
+        _decode_label_name() reading it. `_addr_for`/`_pos_for` convert to
+        and from the linear address space so this doesn't need its own
+        register-boundary-crossing loop (see _read_bytes_forward for why
+        register offset and address run in opposite directions)."""
+        reg, offset = self._pos_for(self._addr_for(header_addr, header_offset) - 3)
+        data = bytearray(self.get_register(reg).get_bytes())
+        data[offset] = value
+        self.set_register(reg, Register(data=bytes(data)))
+
+    def _clear_program_assignments_for_key_byte(
+        self, key_byte: int, except_name: Optional[str] = None
+    ):
+        """Writes 0x00 (unassigned) into the header of every global label
+        currently holding `key_byte`, except one named `except_name` (used
+        by set_program_key_assignment() while moving that program itself
+        onto this key -- its own old byte is handled separately there).
+        Does not touch KEYFLAGS -- callers own that, since the bit should
+        usually end up set (by whatever new assignment is replacing these)
+        rather than cleared."""
+        for program in self.list_programs():
+            if (
+                program.is_named
+                and program.key_assignment == key_byte
+                and program.name != except_name
+            ):
+                self._write_program_key_byte(program.header_addr, program.header_offset, 0x00)
+
+    def get_program_for_key(self, key_number: int, shifted: bool) -> Optional[ProgramInfo]:
+        """Looks up the global label (if any) assigned to `key_number`/
+        `shifted` via sec 4.6 -- the counterpart to get_key_assignment()
+        for the other storage mechanism (sec 4.1). Per the real lookup
+        order (sec 4.7), a Key Assignment Register entry on the same key
+        always takes priority over a global-label one, but this method
+        only checks global labels -- callers wanting "whatever's actually
+        assigned to this key" should check get_key_assignment() first and
+        fall back to this (see gui/key_assignments_tab.py)."""
+        key_byte = self.key_byte_for(key_number, shifted)
+        for program in self.list_programs():
+            if program.is_named and program.key_assignment == key_byte:
+                return program
+        return None
+
+    def set_program_key_assignment(self, name: str, key_number: int, shifted: bool):
+        """Assigns the global label `name` to `key_number`/`shifted` (sec
+        4.6) -- `ASN "name" [key]` on a real calculator. Unlike
+        set_key_assignment(), this never touches the Key Assignment
+        Registers; it writes directly into the label's own header.
+
+        Because that header holds only one key byte, reassigning a
+        program that's already on a different key MOVES it here rather
+        than creating a second assignment -- its previous key's KEYFLAGS
+        bit is cleared as part of the move. This also enforces mutual
+        exclusivity with the *other* storage mechanism on the target key:
+        any existing Key Assignment Register entry there is removed, and
+        any other program currently pointing at this key is cleared to
+        unassigned -- the real lookup order (sec 4.7) means a Key
+        Assignment Register entry would otherwise silently shadow a
+        global-label one on the same key, so letting both exist at once
+        would be misleading rather than a real dual assignment. Same
+        silent-overwrite precedent as set_key_assignment().
+
+        Raises ValueError if no global label named `name` exists."""
+        program = self._find_program_by_name(name)
+        if program is None:
+            raise ValueError(f"No global label named {name!r} found")
+
+        key_byte = self.key_byte_for(key_number, shifted)
+
+        # Moving this same program off whatever key it held before, if any
+        # (0x00 means "never assigned" -- nothing to move off of).
+        if program.key_assignment:
+            try:
+                old_key_number, old_shifted = self._key_number_for_byte(
+                    program.key_assignment
+                )
+                self.set_key_flag(old_key_number, old_shifted, False)
+            except ValueError:
+                pass  # didn't decode to a real key position; nothing to clear
+
+        # This key can only run one thing -- clear whatever else was there.
+        self.delete_key_assignment(key_number, shifted)
+        self._clear_program_assignments_for_key_byte(key_byte, except_name=name)
+
+        self._write_program_key_byte(program.header_addr, program.header_offset, key_byte)
+        self.set_key_flag(key_number, shifted, True)
+
+    def clear_program_key_assignment(self, name: str):
+        """Removes global label `name`'s key assignment (sec 4.6), if it
+        has one -- writes 0x00 back into its header and clears the
+        corresponding KEYFLAGS bit. No-op if the label has no key
+        assignment. Raises ValueError if no global label named `name`
+        exists."""
+        program = self._find_program_by_name(name)
+        if program is None:
+            raise ValueError(f"No global label named {name!r} found")
+        if not program.key_assignment:
+            return
+        try:
+            key_number, shifted = self._key_number_for_byte(program.key_assignment)
+            self.set_key_flag(key_number, shifted, False)
+        except ValueError:
+            pass
+        self._write_program_key_byte(program.header_addr, program.header_offset, 0x00)
 
     def to_string(self) -> str:
         lines = [self._header]

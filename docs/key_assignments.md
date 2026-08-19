@@ -349,9 +349,34 @@ deleting built-in/peripheral key assignments (§4.2) — backed by
 `Memory.set_key_assignment()`/`get_key_assignment()`/
 `delete_key_assignment()`/`list_key_assignments()` (§4.2/4.5,
 `src/memory/memory.py`), which keep the Key Assignment Registers and
-KEYFLAGS bits in sync on every edit. Global-label (program) assignments
-(§4.6) are read-only elsewhere (the Programs tab) and aren't touched by
-this tab yet — see items 1-2 below, still open.
+KEYFLAGS bits in sync on every edit.
+
+**Second pass implemented:** global-label (program) assignments (§4.6)
+are now also viewable and editable in the same tab/dialog, not just
+read-only via the Programs tab. The edit dialog gained a third "Program"
+tab (a picker over every named global label) alongside "Function" and
+"Raw Hex" rather than a separate screen, since it's the same "pick a key,
+pick what it does" interaction either way. Backed by three new
+`Memory` methods: `get_program_for_key()`, `set_program_key_assignment()`,
+and `clear_program_key_assignment()` — the write-side counterpart to
+`_decode_label_name()`, which previously only read the label header's key
+byte. Two behaviors worth knowing about, both driven by real constraints
+of the storage format rather than being arbitrary GUI choices:
+
+- A global label's header holds exactly one key byte (§4.6), unlike a
+  physical key's independent unshifted/shifted slots — so assigning a
+  program that's already on a different key *moves* it rather than
+  creating a second assignment.
+- The two storage mechanisms are made mutually exclusive on save: since
+  the real lookup order (§4.7) always checks the Key Assignment Registers
+  before global labels, letting both point at the same key at once would
+  mean the global-label one silently never fires. `set_key_assignment()`
+  now clears any global label pointing at the target key, and
+  `set_program_key_assignment()` clears any Key Assignment Register entry
+  (and any *other* program) there — same silent-overwrite precedent
+  `set_key_assignment()` already used for a same-kind conflict.
+
+Import and export are still not implemented — see items 1-2 below.
 
 1. **Import mode: overwrite vs. append.** The user needs a choice, at
    import time, between replacing the current dump's key assignments
@@ -363,15 +388,16 @@ this tab yet — see items 1-2 below, still open.
 2. **Export both kinds of assignment; warn and skip missing programs on
    import.** Export must include both built-in/peripheral assignments
    (from the Key Assignment Registers, §4.2) and global-label assignments
-   (from `Memory.list_programs()`'s `key_assignment` field, §4.6) —
-   tagged distinctly, since a program assignment needs to travel as a
-   *name* (program addresses aren't portable across dumps) while a
-   built-in assignment travels as a function identifier. On import, a
-   built-in/peripheral assignment can always be applied. A program
-   assignment requires first checking whether a same-named global label
-   exists in the *target* dump (via `list_programs()`); if not, the
-   importer must warn the user and skip that specific assignment rather
-   than fail the whole import or silently drop it.
+   (from `Memory.get_program_for_key()`/`list_programs()`'s
+   `key_assignment` field, §4.6) — tagged distinctly, since a program
+   assignment needs to travel as a *name* (program addresses aren't
+   portable across dumps) while a built-in assignment travels as a
+   function identifier. On import, a built-in/peripheral assignment can
+   always be applied. A program assignment requires first checking
+   whether a same-named global label exists in the *target* dump (via
+   `list_programs()`); if not, the importer must warn the user and skip
+   that specific assignment rather than fail the whole import or
+   silently drop it.
 
 3. **Remaining instruction-catalog gaps.** `src/memory/functions.py`
    (generated from `docs/function_table.md`, §1) now covers every
