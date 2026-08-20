@@ -24,6 +24,14 @@ from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_co
 
 logger = logging.getLogger(__name__)
 
+# Selected-row highlight, applied via the "selectedrow" tag (see
+# _on_tree_selected()). Fixed rather than dark/light-mode-dependent like
+# stripe_bg_color() -- CustomTkinter's own default accent blue reads fine
+# against either theme's row background, so the selected row matches the
+# rest of the app's UI instead of introducing a new color.
+SELECTED_ROW_BG = "#1f6aa5"
+SELECTED_ROW_FG = "#ffffff"
+
 
 class DataRegistersTab(ctk.CTkFrame):
     """Renders the main-data-memory register table for a Memory object.
@@ -77,6 +85,9 @@ class DataRegistersTab(ctk.CTkFrame):
         self._trees = (self._tree_left, self._tree_right)
         for tree in self._trees:
             tree.tag_configure("oddrow", background=self._stripe_bg)
+            tree.tag_configure(
+                "selectedrow", background=SELECTED_ROW_BG, foreground=SELECTED_ROW_FG
+            )
 
         for tree in self._trees:
             tree.bind("<Double-1>", lambda e: self._edit_selected())
@@ -96,7 +107,7 @@ class DataRegistersTab(ctk.CTkFrame):
         for col, text, width, stretch in [
             ("reg", "Reg", 55, False),
             ("addr", "Addr", 65, False),
-            ("hex", "Hex", 150, False),
+            ("hex", "Hex", 170, False),
             ("value", "Value", 170, True),
         ]:
             tree.heading(col, text=text)
@@ -139,7 +150,13 @@ class DataRegistersTab(ctk.CTkFrame):
         of a jarring stripe. Row tags are applied per-item in render(),
         once the tree widgets exist (an instance method, not @staticmethod
         like this used to be, purely so it has a `self` to stash that
-        color on for `_build_register_tree` to pick up)."""
+        color on for `_build_register_tree` to pick up).
+
+        See `_on_tree_selected()` for why the selected row's highlight is
+        applied by hand via a "selectedrow" tag (colored with the
+        module-level SELECTED_ROW_BG/FG) instead of relying solely on
+        the `style.map(..., background=[("selected", ...)])` call
+        below."""
         style = ttk.Style()
         try:
             style.theme_use("clam")
@@ -168,7 +185,17 @@ class DataRegistersTab(ctk.CTkFrame):
         style.configure(
             "Treeview.Heading", background=bg, foreground=fg, font=heading_font
         )
-        style.map("Treeview", background=[("selected", "#1f6aa5")])
+        # In principle this alone should color the selected row, but a
+        # per-item tag's background (e.g. "oddrow" below) silently wins
+        # over this "selected" state map in ttk.Treeview -- a long-
+        # standing Tk behavior, not specific to this app or platform.
+        # Since every row here carries either "oddrow" or the default
+        # (untagged) styling, that made the selection highlight
+        # invisible on every zebra-striped row and unreliable on the
+        # rest -- GitHub issue #22. Kept as a harmless fallback; the
+        # real fix is the hand-managed "selectedrow" tag in
+        # `_on_tree_selected()`.
+        style.map("Treeview", background=[("selected", SELECTED_ROW_BG)])
 
         # Approximate CTkScrollableFrame's own scrollbar look (a slim,
         # borderless thumb with no up/down arrow buttons) so this native
@@ -225,17 +252,62 @@ class DataRegistersTab(ctk.CTkFrame):
         self._style_treeview()
         for tree in self._trees:
             tree.tag_configure("oddrow", background=self._stripe_bg)
+            tree.tag_configure(
+                "selectedrow", background=SELECTED_ROW_BG, foreground=SELECTED_ROW_FG
+            )
 
     def _notify_change(self):
         if self._on_change:
             self._on_change()
 
     def _on_tree_selected(self, selected_tree: ttk.Treeview):
-        if not selected_tree.selection():
+        """Gives the selected row a visible highlight -- GitHub issue #22.
+
+        ttk.Treeview has a built-in "selected" state background (set via
+        `style.map()` in `_style_treeview()`), but a per-item tag's
+        background overrides it regardless of selection state, which is
+        why the highlight never showed: every row here carries either
+        the "oddrow" zebra-stripe tag or the default (untagged) style,
+        and the tag always won.
+
+        The fix is NOT to give "selectedrow" priority over "oddrow" by
+        listing it first -- an earlier version of this fix tried that,
+        and it turns out *which* tag wins when two tags on the same item
+        both set a background is itself inconsistent across Tk builds
+        (confirmed: reliably "selectedrow" on this project's Linux/Xvfb
+        dev environment, but reliably "oddrow" -- grey background, barely
+        readable white text -- on a real Mac). So this never lets the two
+        compete in the first place: while a row is selected it carries
+        *only* the "selectedrow" tag (no "oddrow" alongside it), and its
+        background matches the "selected" state color from `style.map()`
+        above, so it doesn't matter which of those two agreeing sources
+        wins either. "oddrow" is restored on deselect by recomputing that
+        row's position parity from its current index in the tree, rather
+        than caching it -- no state to go stale across a render()
+        teardown/rebuild.
+        """
+        selection = selected_tree.selection()
+        if not selection:
             return
+
+        # Clear "selectedrow" off whichever row currently has it (if
+        # any), on either table, restoring it to a *single* plain tag
+        # recomputed from its position -- cheaper than tracking it and
+        # always correct even right after a render() rebuilt every row.
+        for tree in self._trees:
+            for pos, iid in enumerate(tree.get_children()):
+                if "selectedrow" in tree.item(iid, "tags"):
+                    tree.item(iid, tags=("oddrow",) if pos % 2 else ())
+
+        # Keep selection exclusive across both tables -- selecting a row
+        # in one should clear whatever was selected in the other, so
+        # "Edit Selected" always has exactly one unambiguous target.
         for tree in self._trees:
             if tree is not selected_tree:
                 tree.selection_remove(*tree.selection())
+
+        new_iid = selection[0]
+        selected_tree.item(new_iid, tags=("selectedrow",))
 
     def render(self, memory: Memory):
         self._memory = memory
