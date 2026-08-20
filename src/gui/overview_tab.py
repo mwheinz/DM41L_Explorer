@@ -92,21 +92,17 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self.columnconfigure(0, weight=1, uniform="col")
         self.columnconfigure(1, weight=1, uniform="col")
 
-        # Row 0: status registers, split into two side-by-side cards so the
-        # tab makes use of the full window width instead of one narrow
-        # vertical stack.
         self._stack_frame = self._make_card(0, 0, "Stack & Alpha Registers")
-        self._system_frame = self._make_card(0, 1, "System & Pointer Registers")
+        self._summary_frame = self._make_card(0, 1, "Memory Summary")
+        self._system_frame = self._make_card(1, 0, "System & Pointer Registers")
+        self._partition_frame = self._make_card(1, 1, "Memory Partitions")
 
-        # Row 1: partition editor + usage summary, also side by side.
-        self._partition_frame = self._make_card(1, 0, "Memory Partitions")
-        self._summary_frame = self._make_card(1, 1, "Memory Summary")
-
-        # Row 2: placeholder for future stats, full width.
+        '''
         self._future_frame = ctk.CTkFrame(self, fg_color="transparent")
         self._future_frame.grid(
             row=2, column=0, columnspan=2, sticky="nsew", padx=8, pady=(4, 12)
         )
+        '''
 
     def _make_card(self, row, column, title):
         """Creates a bordered/tinted 'card' frame at (row, column) with a
@@ -150,7 +146,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         for i, (label, value) in enumerate(rows):
             r, c = divmod(i, columns)
             cell = ctk.CTkFrame(frame, fg_color="transparent")
-            cell.grid(row=start_row + r, column=c, sticky="w", padx=10, pady=2)
+            cell.grid(row=start_row + r, column=c, sticky="w", padx=10, pady=0)
             ctk.CTkLabel(cell, text=f"{label}:", width=90, anchor="w").pack(side="left")
             ctk.CTkLabel(
                 cell,
@@ -183,7 +179,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         )
 
         ctk.CTkLabel(self._stack_frame, text="Alpha (M-P, combined):", anchor="w").grid(
-            row=next_row, column=0, columnspan=4, sticky="w", padx=10, pady=(8, 0)
+            row=next_row, column=0, sticky="w", padx=10, pady=(8, 0)
         )
         ctk.CTkLabel(
             self._stack_frame,
@@ -191,7 +187,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
             anchor="w",
         ).grid(
-            row=next_row + 1, column=0, columnspan=4, sticky="w", padx=10, pady=(0, 4)
+            row=next_row, column=1, columnspan=4, sticky="w", padx=10,
+            pady=(8,0)
         )
 
         mnop_rows = [

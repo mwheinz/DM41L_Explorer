@@ -1094,10 +1094,19 @@ def test_key_assignments_end_is_start_when_no_assignments():
     tests/data/, so they're no longer in this set at all.)
     global-key-assignments.dm41 is NOT excluded: its two assignments are
     global-label ones (sec 4.6), which never touch the Key Assignment
-    Registers at all -- register 0xc0 there is correctly empty."""
+    Registers at all -- register 0xc0 there is correctly empty.
+
+    The alarmtest*.dm41/4alarmtest.dm41/repeater.dm41 fixtures are also
+    excluded: each one carries a real ALMCAT/XYZALM (and, in
+    4alarmtest.dm41, CLRALMS/TIME) Key Assignment Register pair captured
+    alongside their alarm data -- found 2026-08-20 while adding
+    Alarms-buffer-relocation tests, which is what first exercised this
+    check against them."""
     excluded = {
         "keyassigns.dm41", "xrom-keyassignments.dm41",
         "manyfiles.dm41",
+        "alarmtest.dm41", "alarmtest2.dm41", "alarmtest3.dm41",
+        "4alarmtest.dm41", "repeater.dm41",
     }
     for path in DATA_DIR.glob("*.dm41"):
         if path.name in excluded:
@@ -1724,6 +1733,113 @@ def test_delete_key_assignment_on_unassigned_key_is_a_noop():
     memory.delete_key_assignment(11, False)  # never assigned
     assert memory.list_key_assignments() == []
     assert memory.get_key_flag(11, False) is False
+
+
+# ---- Alarms region: bounds (alarms_end()) and relocation on Key
+# Assignments edits (docs/alarms.md sec 3/4) ----
+
+
+def test_alarms_end_reports_buffer_bounds_from_real_fixture():
+    """4alarmtest.dm41 has 2 Key Assignment registers (0xc0-0xc1) followed
+    immediately by a real 4-alarm buffer: a header at 0xc2 declaring 13
+    total registers (header + entries + delimiter), so the buffer runs
+    through 0xce inclusive -- alarms_end() should report 0xcf."""
+    memory = Memory.from_file(DATA_DIR / "4alarmtest.dm41")
+    assert memory.key_assignments_end() == 0xC2
+    header = memory.get_register(0xC2).get_bytes()
+    assert header[0] == Memory.ALARMS_HEADER_MARKER
+    assert header[1] == 0x0D
+    assert memory.alarms_end() == 0xCF
+
+
+def test_alarms_end_equals_key_assignments_end_when_no_alarms():
+    """keyassigns.dm41 has real Key Assignment Register entries but no
+    Alarms buffer above them -- the register right after Key Assignments
+    doesn't start with the 0xAA header marker, so alarms_end() should
+    report an empty Alarms region (same value as key_assignments_end())."""
+    memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
+    assert memory.alarms_end() == memory.key_assignments_end()
+
+
+def test_alarms_end_on_fresh_memory():
+    assert Memory().alarms_end() == Memory().key_assignments_end() == 0xC0
+
+
+def test_relocate_alarms_moves_buffer_on_key_assignment_growth_and_shrinkage():
+    """A hand-built Alarms buffer sitting right above a single Key
+    Assignment register must move up, byte-for-byte, when a third
+    assignment forces Key Assignments to grow to a second register --
+    and must move back down again when that third assignment is deleted
+    -- never getting overwritten and never leaving a gap between the two
+    regions either way."""
+    memory = Memory()
+    memory.set_key_assignment(11, False, 0x40)
+    memory.set_key_assignment(12, True, 0x41)
+    assert memory.key_assignments_end() == 0xC1  # 2 entries still fit in 1 register
+
+    # Hand-build a minimal 3-register Alarms buffer (header + 1 entry +
+    # delimiter) immediately above it, at 0xc1-0xc3.
+    memory.set_register(0xC1, Register.from_hex("aa030000000000"))
+    entry_bytes = "11223344556677"
+    memory.set_register(0xC2, Register.from_hex(entry_bytes))
+    memory.set_register(0xC3, Register.from_hex("f0000000000000"))
+    assert memory.alarms_end() == 0xC4
+
+    # A third assignment needs a second Key Assignment register --
+    # Key Assignments grows from 0xc1 to 0xc2, so the Alarms buffer must
+    # move up from 0xc1-0xc3 to 0xc2-0xc4.
+    memory.set_key_assignment(13, False, 0x42)
+    assert memory.key_assignments_end() == 0xC2
+    assert memory.alarms_end() == 0xC5
+    assert memory.get_register(0xC1).get_bytes()[0] == 0xF0  # real KA data now
+    moved_header = memory.get_register(0xC2).get_bytes()
+    assert moved_header[0] == Memory.ALARMS_HEADER_MARKER
+    assert moved_header[1] == 3
+    assert memory.get_register(0xC3).get_hex() == Register.from_hex(entry_bytes).get_hex()
+    assert memory.get_register(0xC4).get_bytes()[0] == 0xF0
+
+    # Deleting that third assignment shrinks Key Assignments back to 1
+    # register -- the Alarms buffer must move back down to 0xc1-0xc3,
+    # with 0xc4 (its old delimiter slot) cleared, not left stale.
+    memory.delete_key_assignment(13, False)
+    assert memory.key_assignments_end() == 0xC1
+    assert memory.alarms_end() == 0xC4
+    restored_header = memory.get_register(0xC1).get_bytes()
+    assert restored_header[0] == Memory.ALARMS_HEADER_MARKER
+    assert restored_header[1] == 3
+    assert memory.get_register(0xC2).get_hex() == Register.from_hex(entry_bytes).get_hex()
+    assert memory.get_register(0xC3).get_bytes()[0] == 0xF0
+    assert memory.get_register(0xC4).get_hex() == "00000000000000"
+
+
+def test_relocate_alarms_preserves_content_against_real_fixture():
+    """Same relocation, but against 4alarmtest.dm41's real 4-alarm, 13-
+    register buffer rather than a hand-built one -- every register's
+    exact bytes must survive the move unchanged, just shifted up by
+    however many registers Key Assignments grew by. None of 4alarmtest
+    .dm41's existing assignments use key 13, so this adds a genuinely
+    new one rather than replacing an existing entry."""
+    memory = Memory.from_file(DATA_DIR / "4alarmtest.dm41")
+    old_ka_end = memory.key_assignments_end()
+    old_alarms_end = memory.alarms_end()
+    before = {
+        addr: memory.get_register(addr).get_hex()
+        for addr in range(old_ka_end, old_alarms_end)
+    }
+
+    memory.set_key_assignment(13, False, 0x40)
+
+    new_ka_end = memory.key_assignments_end()
+    new_alarms_end = memory.alarms_end()
+    delta = new_ka_end - old_ka_end
+    assert delta > 0  # this fixture's 4 existing entries already fill both
+    #                   of its 2 KA registers, so a 5th forces growth
+    assert new_alarms_end - old_alarms_end == delta  # buffer size unchanged
+    for addr, hex_value in before.items():
+        assert memory.get_register(addr + delta).get_hex() == hex_value, hex(addr)
+    # And the vacated span right below the new buffer is real KA data,
+    # not leftover alarm bytes.
+    assert memory.get_register(new_ka_end - 1).get_bytes()[0] == 0xF0
 
 
 def test_key_assignment_round_trip_through_from_string_to_string():

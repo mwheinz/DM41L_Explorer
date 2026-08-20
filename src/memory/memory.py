@@ -248,10 +248,12 @@ class Memory:
     # Reverse-engineered from William C. Wickes' "Synthetic Programming on
     # the HP-41C" (Section 2E, "The Key Assignment Registers") and
     # confirmed byte-for-byte against real dumps -- see
-    # docs/key_assignments.md sec 4.2/4.8 for the full derivation. Alarms
-    # and genuinely free registers occupy the remaining span up to .END.;
-    # telling those apart from each other isn't implemented yet (see
-    # regions.py's Alarms class).
+    # docs/key_assignments.md sec 4.2/4.8 for the full derivation. The
+    # Alarms buffer (docs/alarms.md sec 3/4, see alarms_end() below)
+    # occupies the next span above this one; genuinely free registers
+    # take up whatever remains up to .END. Telling the Alarms buffer's
+    # own contents apart -- individual alarm entries, not just its outer
+    # bounds -- isn't implemented yet (see regions.py's Alarms class).
 
     def _scan_key_assignments_end(self) -> int:
         """Scans upward from KEY_ASSIGNMENTS_RANGE[0] (0xC0) for as long as
@@ -285,9 +287,129 @@ class Memory:
         This is cached at load time rather than recomputed on every call
         (unlike R00()/DotEnd(), which are cheap single-register nibble
         reads) -- a set_register() call after loading, e.g. from an edit
-        dialog, will NOT update this until the dump is reloaded.
+        dialog, will NOT update this until the dump is reloaded. The one
+        exception is a Key Assignments edit made through
+        set_key_assignment()/delete_key_assignment() themselves -- those
+        go through _encode_key_assignment_entries(), which keeps this
+        cached value (and the Alarms buffer immediately above it, see
+        alarms_end()) up to date as part of the edit.
         """
         return self._key_assignments_end
+
+    # -- Alarms (docs/alarms.md sec 3/4) --
+    #
+    # The Alarms buffer sits immediately above the Key Assignments
+    # registers, with no gap, and below whatever free/program-memory
+    # space follows: one header register (0xAA marker + a total register
+    # count that includes the header and the closing delimiter), that
+    # many alarm entries packed in ascending, time-sorted order, then a
+    # single 0xF0-marked delimiter register. Per-alarm content (the
+    # time/repeat/message registers) isn't decoded here yet -- see
+    # regions.py's Alarms class -- but the buffer's outer bounds are
+    # enough to (a) show it as its own region in the hex view and (b)
+    # keep it from being overwritten, or separated by a gap, whenever a
+    # Key Assignments edit changes how many registers that region needs
+    # (see _relocate_alarms() below).
+
+    ALARMS_HEADER_MARKER = 0xAA
+
+    def alarms_end(self) -> int:
+        """Address one past the last Alarms register (the header, every
+        entry, and the closing 0xF0 delimiter). Unlike
+        key_assignments_end(), this isn't cached -- there's no dedicated
+        set/delete-alarm API yet that would need to keep a cached value
+        in sync (edits so far only move the buffer as a block, see
+        _relocate_alarms()), and reading the one header register this
+        needs is cheap enough to just always recompute.
+
+        Returns key_assignments_end() unchanged -- i.e. reports an empty
+        Alarms buffer -- if the register immediately above Key
+        Assignments doesn't start with the 0xAA header marker (no alarms
+        set, or no real dump loaded), or if the header's declared count
+        is nonsensical (zero, or reaching past the addressable space):
+        that's treated as "not a real Alarms buffer" rather than trusted
+        at face value, the same defensive posture
+        _scan_key_assignments_end() takes against a corrupt dump.
+        """
+        return self._alarms_span_end(self.key_assignments_end())
+
+    def _alarms_span_end(self, start: int) -> int:
+        """Address one past the Alarms buffer starting at `start` (the
+        same header-marker/count check alarms_end() makes), or `start`
+        itself if there's no real Alarms buffer there. Factored out of
+        alarms_end() so _encode_key_assignment_entries() can ask "where
+        does the buffer end NOW, given it may have just been relocated
+        to start at the brand new key_assignments_end?" without going
+        through alarms_end() itself -- that method always calls
+        key_assignments_end() for `start`, which is a cached value not
+        yet updated to the new boundary at the point in that method
+        where this is needed (see its docstring)."""
+        header = self.get_register(start).get_bytes()
+        if header[0] != self.ALARMS_HEADER_MARKER:
+            return start
+        count = header[1]
+        end = start + count
+        if count <= 0 or end - 1 > PRIMARY_DATA_END:
+            return start
+        return end
+
+    def _relocate_alarms(self, old_key_assignments_end: int, new_key_assignments_end: int):
+        """Moves the Alarms buffer (if any) so it keeps starting exactly
+        at `new_key_assignments_end`, with no gap -- called from
+        _encode_key_assignment_entries() with the Key Assignments
+        region's boundary before and after an edit, since the Alarms
+        buffer (sec 2) always starts exactly at that boundary. Called
+        BEFORE any new Key Assignment register is written, so a growing
+        region can't clobber the Alarms header/entries currently sitting
+        right where it's about to write.
+
+        No-op if the two boundaries are equal (the edit didn't change how
+        many registers Key Assignments occupies) or if there's no real
+        Alarms buffer at `old_key_assignments_end` (same check
+        alarms_end() makes).
+
+        Copies the whole buffer -- header, entries, and delimiter -- as
+        one block, in whichever direction avoids overwriting a source
+        register before it's been read: reverse (highest address first)
+        when the buffer is moving up and the move distance is smaller
+        than the buffer itself, so the old and new spans overlap; forward
+        otherwise. Registers freed by the buffer moving down (Key
+        Assignments shrinking) are explicitly zeroed, since nothing else
+        is about to write there. Registers freed by the buffer moving up
+        (Key Assignments growing) are left alone -- the caller,
+        _encode_key_assignment_entries(), is about to overwrite that
+        entire span with real Key Assignment register data anyway.
+        """
+        delta = new_key_assignments_end - old_key_assignments_end
+        if delta == 0:
+            return
+
+        old_end = old_key_assignments_end
+        header = self.get_register(old_end).get_bytes()
+        if header[0] != self.ALARMS_HEADER_MARKER:
+            return  # no Alarms buffer here -- nothing to move
+
+        count = header[1]
+        old_alarms_end = old_end + count
+        if count <= 0 or old_alarms_end - 1 > PRIMARY_DATA_END:
+            return  # doesn't look like a real Alarms buffer -- leave it be
+
+        new_start = new_key_assignments_end
+        if new_start + count - 1 > PRIMARY_DATA_END:
+            # Nowhere to put it -- on real hardware this would be an
+            # out-of-memory condition this tool doesn't model; the
+            # safest thing to do here is decline to move the buffer
+            # rather than truncate or wrap it into an invalid address.
+            return
+
+        indices = range(count - 1, -1, -1) if delta > 0 else range(count)
+        for i in indices:
+            self.set_register(new_start + i, self.get_register(old_end + i))
+
+        if delta < 0:
+            new_alarms_end = new_start + count
+            for addr in range(new_alarms_end, old_alarms_end):
+                self.set_register(addr, Register(size=7))
 
     # The 34 real assignable key positions on the physical keyboard (docs
     # sec 6 item 4's "HP41" grid) as (M, N) pairs. Row 3 has no N=1 -- that
@@ -430,13 +552,25 @@ class Memory:
         returns) canonically into the Key Assignment Registers, starting
         at KEY_ASSIGNMENTS_RANGE[0] with no gaps, two entries per
         register, re-adding the filler byte for a single-byte entry (sec
-        4.2). Clears every register between the new and old end (so a
-        shrinking edit doesn't leave stale F0-marked registers behind)
-        and updates key_assignments_end(). Entries are written in list
-        order -- callers control LIFO placement (sec 4.4) by ordering
-        `entries` themselves before calling this."""
+        4.2). Clears every register between the new end and whatever now
+        comes right after it -- either the old end, or the end of a
+        just-relocated Alarms buffer if one is present and reaches past
+        the old end -- so a shrinking edit doesn't leave stale F0-marked
+        registers behind without also clobbering an Alarms buffer that
+        may have just been moved into part of that same span. Also
+        updates key_assignments_end(). See _relocate_alarms() for the
+        move itself. Entries are written in list order -- callers
+        control LIFO placement (sec 4.4) by ordering `entries` themselves
+        before calling this."""
         base = KEY_ASSIGNMENTS_RANGE[0]
         old_end = self.key_assignments_end()
+        new_end = base + (len(entries) + 1) // 2  # ceil(len/2), 2 entries/register
+
+        # Move the Alarms buffer out of the way BEFORE writing a single
+        # new Key Assignment register below -- see _relocate_alarms()'s
+        # docstring for why the order matters (a growing region would
+        # otherwise overwrite it before it could be moved).
+        self._relocate_alarms(old_end, new_end)
 
         addr = base
         i = 0
@@ -459,8 +593,16 @@ class Memory:
             self.set_register(addr, Register(data=bytes(data)))
             addr += 1
 
-        new_end = addr
-        for stale in range(new_end, old_end):
+        # Anything from new_end up to old_end is stale -- UNLESS the
+        # Alarms buffer was just relocated to start at new_end and
+        # reaches into (or past) that span, in which case it's real,
+        # just-moved Alarms data, not leftover Key Assignments bytes.
+        # _alarms_span_end(new_end) reflects the buffer's post-move
+        # position; alarms_end() can't be used here since it still goes
+        # through key_assignments_end(), which isn't updated to new_end
+        # until the line right after this loop.
+        clear_from = self._alarms_span_end(new_end)
+        for stale in range(clear_from, old_end):
             self.set_register(stale, Register(size=7))
         self._key_assignments_end = new_end
 
