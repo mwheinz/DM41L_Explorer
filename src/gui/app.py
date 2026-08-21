@@ -884,20 +884,22 @@ class DM41LExplorerApp(ctk.CTk):
     def _on_preferences_saved(self):
         ctk.set_appearance_mode(self.config_store.appearance_mode)
         _setup_logging(self.config_store)
-        # Hex View, Data Registers, and XM Files use native ttk.Treeview
-        # widgets, which CTk's theme engine has no hook into --
-        # set_appearance_mode() above does nothing for their region/stripe
-        # colors on its own, so they need to be told explicitly to
+        # Hex View, Data Registers, XM Files, and Programs use native
+        # ttk.Treeview widgets, which CTk's theme engine has no hook into
+        # -- set_appearance_mode() above does nothing for their region/
+        # stripe colors on its own, so they need to be told explicitly to
         # recompute and re-apply them (see each tab's refresh_theme() for
-        # why -- GitHub issue #21's Treeview conversion is what moved XM
-        # Files into this group; it used to be listed with Programs
-        # below). Programs doesn't need an equivalent call: its render()
-        # already recomputes stripe color fresh every time, so marking it
-        # stale and re-rendering the active tab below (the same thing F5/
-        # "Refresh Tabs" already does) is enough to pick up the new theme.
+        # why -- GitHub issues #21/#22's Treeview conversions are what
+        # grew this list from two tabs to four). Overview/Flags/Key
+        # Assignments don't need an equivalent call: their CTk-widget
+        # render()s already recompute stripe color fresh every time, so
+        # marking them stale and re-rendering the active tab below (the
+        # same thing F5/"Refresh Tabs" already does) is enough to pick up
+        # the new theme.
         self.hex_view_tab.refresh_theme()
         self.data_registers_tab.refresh_theme()
         self.xm_files_tab.refresh_theme()
+        self.program_tab.refresh_theme()
         self._render_tabs()
 
     # -- Shutdown -----------------------------------------------------------
