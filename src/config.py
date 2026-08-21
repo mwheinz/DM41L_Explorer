@@ -14,7 +14,7 @@ class ProjectConfig:
 
     # Persistent storage location in the user's home directory. Filename is
     # a holdover from the project's old name "Project Voyager".
-    PREFS_FILE = Path.home() / ".voyager_prefs.json"
+    PREFS_FILE = Path.home() / ".dm41l_explorer.json"
 
     # Default values
     DEFAULT_PREFS = {
