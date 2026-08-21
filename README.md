@@ -4,31 +4,24 @@ A Windows, MacOS, and Linux desktop GUI for reading, writing, and editing the
 memory of a [DM41L](https://www.swissmicros.com/) (HP‑41CX emulator) over its
 serial console.
 
-## Screenshots
-
-| Overview | Hex View | XM Files |
-| --- | --- | --- |
-| ![Overview](resources/screenshots/overview.png) | ![Hex View](resources/screenshots/hex_view.png) | ![XM Files tab](resources/screenshots/xm_files.png) |
-|  ![Flags](resources/screenshots/flags_view.png) | ![Register View](resources/screenshots/registers_view.png) | ![Programs](resources/screenshots/program_view.png) | 
-
-
 ## Features
 
 - **Overview** — A quick summary view of the contents of the DM41L's memory,
-  including the stack & alpha registers, main memory, and extended memory.
-  (R00/.END./ΣREG), and a memory-usage summary at a glance.
+  including the stack & alpha registers, main memory, and extended memory. Also
+  shows the current values of R00, .END., ΣREG, and a memory-usage summary at
+  a glance.
 - **Flags** — all 56 status flags, named and editable.
-- **Data Registers** — browse and edit the user memory registers as numbers,
-  text, or raw hex.
-- **Hex View** — a full, color-coded map of the entire memory space (status
-  registers, extended memory, program memory, data memory, and unused space).
 - **Programs** — a read-only catalog (for now) of the named programs and END
   markers found in program memory.
+- **Data Registers** — browse and edit the user memory registers as numbers,
+  text, or raw hex.
 - **XM Files** — list, add, edit, and remove files stored in extended memory
   (Data, ASCII, and Program types).
+- **Key Assignments** - view, add, edit, and remove user key assignments.
 - Connect directly to a DM41L over USB serial, or work entirely offline from a
   saved `.dm41` dump file (File > Open / Save Dump).
-- Double-click a `.dm41` file (or drag it onto the app) to open it directly.
+- **Hex View** — a full, color-coded map of the entire memory space (status
+  registers, extended memory, program memory, data memory, and unused space).
 
 ## Requirements
 
@@ -96,19 +89,102 @@ hobby project without an Apple or Microsoft developer account), so:
 Building and running from source, as above, doesn't trigger either of
 these.
 
+## Using DM41L_Explorer
+
+### Launching the app for the first time
+
+You can launch DM41L_Explorer either with or without your DM41L already
+connected via USB.
+
+To prepare your DM41L for connection, you must enable the serial console, which
+is activated by turning the calculator off, then pressing \<ON\> and "C" at the
+same time, then releasing them. 
+
+Once your calculator is in SERIAL CONSOLE mode and connected to your computer
+with a USB cable, launch DM41L_Explorer. You will see a dialog box similar to
+this one:
+
+![Connection](resources/screenshots/connection.png)
+
+Select the appropriate serial port and click connect. Once connected you will
+see the Overview tab.
+
+#### Which serial port do I use? 
+
+Good question. You may have to do some trial-and-error to figure this out. If
+you're not sure if the correct serial port is even listed, try clicking the
+"Rescan" button. Once you've successfully connected, however, DM41L Explorer
+will save the port you used and automatically select it the next time you
+launch.
+
+#### Launching without the DM41L
+
+If you want to work on an existing memory dump file (or create a new one) just
+click "Cancel" when the connection dialog appears. If, later, you decide to
+connect to the DM41L, just go to the Connect menu and select Connect/Reconnect.
+
+#### Loading and saving memory dump files
+
+During the initial launch of DM41L Explorer, it will try to automatically
+connect to the DM41L and, if it does connect it will load the current contents
+of the calculator's memory. If you want to load a dump from the calculator
+again later, use the Connect menu.
+
+To write a memory dump to the calculator, the Connect menu has you covered
+there, too.
+
+The File menu contains options to load an existing memory file from disk, to
+save the currently loaded dump, and for creating a blank one to work on.
+
+### Overview Tab
+
+![Overview](resources/screenshots/overview.png)
+
+The Overview tab shows a quick summary of either the state of the DM41L or the
+currently loaded memory dump. It is almost entirely read-only, except for the
+address of the R00 register, which you can adjust if you want to experiment
+with synthetic programming.
+
+### Flags Tab
+
+![Flags](resources/screenshots/flags_view.png)
+
+A complete list of the all the user and system flags and their current values.
+Please note that many of the system flags are used by the DM41L itself during
+normal operation, while others pertain to peripherals and will have no effect on the
+DM41L. Your Mileage May Vary.
+
+### Programs Tab
+
+![Programs](resources/screenshots/program_view.png) 
+
+The programs tab shows a scan of the DM41L's program memory. At the moment this
+is strictly read-only.
+
+### Key Assignments Tab
+
+| ![Overview](resources/screenshots/key_assigns.png)
+
+The Key Assignments tab allows you to view and edit the user key assignments in
+the loaded dump. It displays the keys both in the original HP41 layout and (if
+you scroll down) the DM41L layout. Clicking on a key will let you edit that
+key's current assignment - you can either select one of the built-in HP41CX
+functions, or one of the currently loaded programs, or enter in two hexadecimal
+bytes if you want to experiment with synthetic programming.
+
 ## Documentation
 
-- [`docs/memory.md`](docs/memory.md) — the DM41L memory map: status
-  registers, extended memory file format, and how this tool decodes them.
-- [`docs/flags.md`](docs/flags.md) — names for all 56 status flags.
-- [`docs/program.md`](docs/program.md) — the program-memory "global
-  chain" format (labels and END markers) used by the Programs tab.
+There are many markdown files in the [`docs`] directory. These represent my
+research notes from developing this project. Hopefully they will be useful to
+you if you are curious about the internals of the HP41 and the DM41L emulator.
 
-Most of this is derived from 40 year old memories and classic HP41 texts like
-"Synthetic Programming" by Jonathan Wickes, supplemented by reverse-engineering
-DM41L memory dumps rather than an official spec, so treat field meanings as
-well-tested hypotheses rather than certainties — see the docs for what's
-confirmed versus still under research.
+Most of my notes are derived from 40 year old memories and classic HP41 texts
+like *Synthetic Programming* by Jonathan Wickes, supplemented by
+reverse-engineering DM41L memory dumps. Other sources include *A Programmer's
+Handbook* by Poul Kaarup, *HP-41 Advanced Programming Tips* by Alan McCornack &
+Keith Jarett, and *Synthetic Programming Made Easy* by Keith Jarett. Other
+information came from conducting experiments and studying the resulting memory
+dumps
 
 ## Contributing
 
@@ -118,8 +194,7 @@ tests, and what makes a good bug report or PR.
 
 ## Known limitations
 
-- Key assignments and alarms aren't decoded yet (Overview shows a
-  placeholder note).
+- Alarms aren't decoded and cannot be altered yet.
 - Program memory is listed (names, END markers, raw chain distances) but
   not decoded into actual instructions, and can't be created or edited
   from this tool yet.
