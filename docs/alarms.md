@@ -54,7 +54,7 @@ haven't been captured yet.
 | 0x0C0 upward | **Key Assignments** — grows upward as entries are added |
 | immediately above Key Assignments | **Alarms** (this report) |
 | above Alarms, below `.END.` | Free registers, available for programs, alarms, or key assignments |
-| `.END.` down to R00 | User Programs |
+| `.END.` up to R00 | User Programs |
 | R00 up to 0x1FF | Data Memory |
 
 Confirmed directly in `alarmtest.dm41`: the one key assignment occupies
