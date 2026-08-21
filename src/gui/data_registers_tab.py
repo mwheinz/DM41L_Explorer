@@ -14,6 +14,7 @@ CTkScrollableFrame workaround in gui/scroll_support.py.
 import logging
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
+import tkinter
 import customtkinter as ctk
 
 from memory import Memory, Register, PRIMARY_DATA_END, format_data_line, parse_data_line
@@ -113,7 +114,7 @@ class DataRegistersTab(ctk.CTkFrame):
             tree.heading(col, text=text)
             tree.column(col, width=width, anchor="w", stretch=stretch)
 
-        vsb = ttk.Scrollbar(
+        vsb = tkinter.Scrollbar(
             parent,
             orient="vertical",
             command=tree.yview,
@@ -126,7 +127,7 @@ class DataRegistersTab(ctk.CTkFrame):
     def _style_treeview(self):
         """Rough dark/light theming so the native table (and its native
         scrollbar) don't clash too badly with CustomTkinter's look. This
-        table uses ttk.Treeview/ttk.Scrollbar instead of CTk widgets purely
+        table uses ttk.Treeview/tkinter.Scrollbar instead of CTk widgets purely
         for performance (see module docstring) -- CTk has no theme hook
         into ttk, so without this the scrollbar (and font) would default to
         the stock OS theme, which looks noticeably different from the

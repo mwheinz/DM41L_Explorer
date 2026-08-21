@@ -30,6 +30,7 @@ clicked" visual nicety, matching the other tabs' look for consistency.
 
 import logging
 from tkinter import ttk
+import tkinter
 import customtkinter as ctk
 
 from memory import Memory
@@ -105,7 +106,7 @@ class ProgramTab(ctk.CTkFrame):
             "selectedrow", background=SELECTED_ROW_BG, foreground=SELECTED_ROW_FG
         )
 
-        vsb = ttk.Scrollbar(
+        vsb = tkinter.Scrollbar(
             table_frame,
             orient="vertical",
             command=self._tree.yview,

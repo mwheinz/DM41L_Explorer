@@ -20,6 +20,7 @@ transition as you scroll through it.
 
 import logging
 from tkinter import ttk
+import tkinter
 import customtkinter as ctk
 
 from memory import Memory
@@ -167,7 +168,7 @@ class HexViewTab(ctk.CTkFrame):
             tree.heading(col, text=text)
             tree.column(col, width=width, anchor="w", stretch=stretch)
 
-        vsb = ttk.Scrollbar(
+        vsb = tkinter.Scrollbar(
             parent,
             orient="vertical",
             command=tree.yview,

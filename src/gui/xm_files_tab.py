@@ -22,6 +22,7 @@ which was specific to the CTkScrollableFrame/Canvas this tab used to use.
 import logging
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
+import tkinter
 import customtkinter as ctk
 
 from memory import Memory, ExtendedMemory, DM41LMemoryError, parse_data_line
@@ -46,9 +47,6 @@ _EDITABLE_FILE_TYPES = (ExtendedMemory.TYPE_DATA, ExtendedMemory.TYPE_ASCII)
 SELECTED_ROW_BG = "#1f6aa5"
 SELECTED_ROW_FG = "#ffffff"
 
-# Distinct ttk style names for this tab's Treeview/scrollbar -- see
-# _style_treeview()'s docstring for why these must NOT be the plain
-# "Treeview"/"DM41L.Vertical.TScrollbar" names data_registers_tab.py uses.
 _TREE_STYLE = "XMFiles.Treeview"
 
 
@@ -134,7 +132,7 @@ class XMFilesTab(ctk.CTkFrame):
             "selectedrow", background=SELECTED_ROW_BG, foreground=SELECTED_ROW_FG
         )
 
-        vsb = ttk.Scrollbar(
+        vsb = tkinter.Scrollbar(
             table_frame,
             orient="vertical",
             command=self._tree.yview,
@@ -171,7 +169,7 @@ class XMFilesTab(ctk.CTkFrame):
         """Rough dark/light theming for this tab's native table (font,
         colors, scrollbar look) -- see gui/data_registers_tab.py's own
         `_style_treeview()` for the original version of this and why a
-        native ttk.Treeview/ttk.Scrollbar is used here instead of CTk
+        native ttk.Treeview/tkinter.Scrollbar is used here instead of CTk
         widgets at all (performance).
 
         Uses the shared monospace font (gui/tab_common.py) for the whole
