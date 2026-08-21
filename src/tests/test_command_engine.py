@@ -7,6 +7,9 @@ from engine.commands import BatteryCheckCommand
 from engine.commands import ConsoleTimeoutCommand
 from engine.commands import GetTimeCommand
 from engine.commands import SetTimeCommand
+from engine.commands import MemoryStringCommand
+from engine.commands import LoadMemoryStringCommand
+from memory import Memory
 
 
 @pytest.fixture(autouse=True)
@@ -255,3 +258,138 @@ def test_set_time_command_failure(engine, mock_serial_manager):
     # Note that parse_response returns the help message string to our UI callback
     callback_mock.assert_called_once_with(help_message)
     assert engine.state == EngineState.IDLE
+
+
+# -- MemoryStringCommand / LoadMemoryStringCommand ---------------------
+#
+# These are the commands actually wired into the GUI's Get/Send Dump
+# features (gui/app.py's get_dump_from_calculator/send_dump_to_calculator).
+# They're the in-memory-string counterparts of the file-path-based
+# MemoryDumpCommand/LoadMemoryCommand tested in test_commands.py, which
+# are dead code in the running app (never imported by gui/app.py -- likely
+# leftover from the removed CLI). Until now those two were the only pair
+# with dedicated tests, despite not being the pair the app actually uses.
+
+
+def test_memory_string_command_success(engine, mock_serial_manager):
+    """Verifies a full dump round-trip through the engine: echo detection,
+    prompt detection, and parse_response()'s strip() are all exercised
+    with a real (empty) Memory dump, the same way the calculator's own
+    's' response gets turned into a Memory object in gui/app.py's
+    _on_dump_received."""
+    cmd = MemoryStringCommand()
+    expected_echo = "s\n"
+    dump_body = Memory().to_string()
+    prompt = "DM41 >> "
+
+    callback_mock = MagicMock()
+    error_mock = MagicMock()
+    mock_serial_manager.get_next_message.side_effect = [
+        expected_echo,  # Line 1: the echo
+        dump_body + "\n" + prompt,  # Line 2: dump body + termination prompt
+    ]
+
+    # Act part 1: Execute command
+    engine.execute(cmd, callback_mock, error_mock)
+    assert engine.state == EngineState.WAITING_FOR_REPLY
+    mock_serial_manager.send_command.assert_called_with("s")
+    # Act part 2: First iteration - receive echo
+    engine.process_incoming_data()
+    assert engine.state == EngineState.COLLECTING
+    # Act part 3: Second iteration - receive dump body + prompt
+    engine.process_incoming_data()
+    # Assertions
+    assert engine.state == EngineState.IDLE
+    callback_mock.assert_called_once_with(dump_body.strip())
+
+
+def test_load_memory_string_command_success(engine, mock_serial_manager):
+    """Verifies the engine round-trip for a successful 'Read OK' response."""
+    cmd = LoadMemoryStringCommand([Memory().to_string()])
+    expected_echo = "l\n"
+    response_body = "Read OK\n"
+    prompt = "DM41 >> "
+
+    callback_mock = MagicMock()
+    error_mock = MagicMock()
+    mock_serial_manager.get_next_message.side_effect = [
+        expected_echo,
+        response_body + prompt,
+    ]
+
+    # Act part 1: Execute command
+    engine.execute(cmd, callback_mock, error_mock)
+    assert engine.state == EngineState.WAITING_FOR_REPLY
+    mock_serial_manager.send_command.assert_called_with("l")
+    # Act part 2: First iteration - receive echo
+    engine.process_incoming_data()
+    assert engine.state == EngineState.COLLECTING
+    # Act part 3: Second iteration - receive response + prompt
+    engine.process_incoming_data()
+    # Assertions
+    assert engine.state == EngineState.IDLE
+    callback_mock.assert_called_once_with("Read OK")
+
+
+def test_load_memory_string_command_failure(engine, mock_serial_manager, caplog):
+    """A 'Read FAILED' response should raise inside parse_response(), which
+    the engine must catch, route to the error callback, and log -- and
+    must never reach the success callback."""
+    cmd = LoadMemoryStringCommand(["some dump text"])
+    expected_echo = "l\n"
+    response_body = "Read FAILED\n"
+    prompt = "DM41 >> "
+
+    callback_mock = MagicMock()
+    error_mock = MagicMock()
+    mock_serial_manager.get_next_message.side_effect = [
+        expected_echo,
+        response_body + prompt,
+    ]
+
+    # Act part 1: Execute command
+    engine.execute(cmd, callback_mock, error_mock)
+    engine.process_incoming_data()  # Echo line
+    engine.process_incoming_data()  # Response + prompt
+
+    # Assertions
+    assert engine.state == EngineState.IDLE
+    assert "Error parsing response for LoadMemoryStringCommand" in caplog.text
+    callback_mock.assert_not_called()
+    error_mock.assert_called_once()
+
+
+def test_load_memory_string_command_no_args():
+    """Constructing without data should fail fast, the same way
+    LoadMemoryCommand rejects a missing file argument in
+    tests/test_commands.py."""
+    with pytest.raises(Exception) as excinfo:
+        LoadMemoryStringCommand(args=[])
+    assert "No data provided" in str(excinfo.value)
+
+
+def test_load_memory_string_command_trigger_transfer_sends_data():
+    """trigger_transfer() should hand the raw source string to the serial
+    manager's send_data() as-is. Unlike LoadMemoryCommand, there's no
+    Memory.from_string() validation here -- the GUI is the one holding a
+    valid in-memory Memory object it's already serialized via
+    memory.to_string()."""
+    mock_serial = MagicMock()
+    dump_body = Memory().to_string()
+    cmd = LoadMemoryStringCommand([dump_body], serial=mock_serial)
+
+    cmd.trigger_transfer()
+
+    mock_serial.send_data.assert_called_once_with(dump_body)
+
+
+def test_load_memory_string_command_trigger_transfer_no_serial(caplog):
+    """Without a serial manager, trigger_transfer() should log and return
+    rather than raising."""
+    cmd = LoadMemoryStringCommand(["some dump text"])  # serial defaults to None
+
+    cmd.trigger_transfer()  # must not raise
+
+    assert (
+        "No serial manager available for LoadMemoryStringCommand" in caplog.text
+    )
