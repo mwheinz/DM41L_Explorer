@@ -163,7 +163,7 @@ is strictly read-only.
 
 ### Key Assignments Tab
 
-| ![Overview](resources/screenshots/key_assigns.png)
+![Key Assigns](resources/screenshots/key_assigns.png)
 
 The Key Assignments tab allows you to view and edit the user key assignments in
 the loaded dump. It displays the keys both in the original HP41 layout and (if
@@ -171,6 +171,32 @@ you scroll down) the DM41L layout. Clicking on a key will let you edit that
 key's current assignment - you can either select one of the built-in HP41CX
 functions, or one of the currently loaded programs, or enter in two hexadecimal
 bytes if you want to experiment with synthetic programming.
+
+### Data Registers Tab
+
+![Data Registers](resources/screenshots/registers_view.png)
+
+The Data Registers view shows the contents of user memory, and allows you to
+import, export, and alter portions of it. It's broken into two halves (to make
+better use of space) and you can enter BCD, ASCII, or hexadecimal data into any
+register. Select a register with the mouse, then click on the desired action.
+
+### XM Files Tab
+
+![XM Files](resources/screenshots/xm_files.png)
+
+The XM Files view is organized similarly to the Data Registers view, and allows
+you to import, export, and alter files in Extended Memory. Unlike the Data
+Registers view, XM Files does limit you to either BCD or ASCII data, and
+Program files cannot be altered at this time.
+
+### Hex View Tab
+
+
+![Hex View](resources/screenshots/hex_view.png)
+
+The Hex view shows the raw contents of calculator memory, color-coded by the
+region. It is useful for studying how HP41 memory is organized.
 
 ## Documentation
 
