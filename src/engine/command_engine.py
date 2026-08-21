@@ -1,6 +1,6 @@
-"""
+'''
 Manages sending commands to the serial console and retrieving the responses.
-"""
+'''
 
 import logging
 import re
@@ -12,6 +12,13 @@ from .base_command import BaseCommand
 logger = logging.getLogger(__name__)
 
 class EngineState(Enum):
+    '''
+    Really simple state machine. Only 3 states, no decisions. Any
+    deviation from the pattern is an error. Most commands return an immediate
+    response, the only one that's more complex is sending a memory dump to the
+    calculator. That one requires a first reply, then sending data, then
+    another reply.
+    '''
     # Waiting for commands, just logging background data
     IDLE = auto()
     # Command sent, waiting for echo to start arriving
@@ -21,11 +28,13 @@ class EngineState(Enum):
 
 
 class CommandEngine:
-    """
+    '''
     Implements a simple state machine required to handle echoes and terminal
     prompts.
-    """
+    '''
 
+    # This is hardcoded to the DM41L. Other Voyager models will use different
+    # prompts.
     PROMPT_PATTERN = re.compile(r"\nDM41 >> $")
 
     def __init__(self, serial_manager):
@@ -38,10 +47,10 @@ class CommandEngine:
         self._error_callback: Optional[Callable[[Any], None]] = None
 
     def process_incoming_data(self) -> bool:
-        """
+        '''
         Drains data from the SerialManager queue and advances the state machine.
         Returns True if there may be more serial data to read.
-        """
+        '''
         new_data = self.serial.get_next_message()
         if not new_data:
             # Check for a timeout.
@@ -49,12 +58,14 @@ class CommandEngine:
                 if (
                     time.monotonic() - self._state_timeout
                 ) > self._current_command.timeout:
-                    logger.warning("Command timed out.")
+                    logger.error("Command timed out.")
                     self._handle_timeout()
             return False
 
         if self.state == EngineState.IDLE:
-            # Calculator has sent a status message of some kind.
+            # Calculator has sent an unexpected message of some kind.
+            # Not necessarily an error. The most common one is the calculator
+            # will send "Bye." if the connection times out and closes.
             logger.debug("Calculator sent: '%s'", new_data)
             return False
 
@@ -84,7 +95,7 @@ class CommandEngine:
         callback: Callable[[Any], None],
         error: Callable[[Any], None],
     ) -> bool:
-        """
+        '''
         The main entry point to issue commands from the CLI.
 
         Returns True if the command was actually queued for transmission,
@@ -92,7 +103,7 @@ class CommandEngine:
         progress. Callers that need to follow up an execute() call with
         something command-specific (e.g. LoadMemoryCommand.trigger_transfer())
         must check this return value first.
-        """
+        '''
         logger.info("execute (%s)", type(command).__name__)
 
         if self.state != EngineState.IDLE:
@@ -111,10 +122,10 @@ class CommandEngine:
         return True
 
     def _handle_completion(self, full_text: str, prompt_index: int):
-        """
+        '''
         Handles detection of the prompt sequence, indicating the current
         command has completed.
-        """
+        '''
         logger.info("_handle_completion(%s, %d)", full_text, prompt_index)
 
         # Extract data before the prompt match index

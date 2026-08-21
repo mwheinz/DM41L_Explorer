@@ -1,11 +1,11 @@
-"""
+'''
 MemoryRegion and its concrete subclasses -- named spans of registers
 within a Memory (status registers, primary/data memory, and the
 still-lightly-understood key-assignment/alarm/program-memory regions).
 
 Extended memory (XMFile/ExtendedMemory) lives in xm_file.py instead, since
 it has its own file-system-like structure built on top of a region.
-"""
+'''
 
 from typing import Dict, TYPE_CHECKING
 
@@ -17,13 +17,13 @@ if TYPE_CHECKING:
 
 
 class MemoryRegion:
-    """
+    '''
     Base class for a contiguous, addressable span of registers within a
     Memory. Subclasses represent the different kinds of memory (status
     registers, primary data, extended memory, etc.) and add whatever
     access is appropriate for that kind -- e.g. StatusRegisters exposes
     named accessors, DataMemory exposes BCD numbers.
-    """
+    '''
 
     key: str = "region"
     label: str = "Region"
@@ -56,22 +56,22 @@ class MemoryRegion:
             )
 
     def get_register(self, addr: int) -> Register:
-        """Reads a register at an absolute address within this region."""
+        '''Reads a register at an absolute address within this region.'''
         self._check_addr(addr)
         return self._memory.get_register(addr)
 
     def set_register(self, addr: int, register: Register):
-        """Writes a register at an absolute address within this region."""
+        '''Writes a register at an absolute address within this region.'''
         self._check_addr(addr)
         self._memory.set_register(addr, register)
 
     def registers(self) -> Dict[int, Register]:
-        """All registers in this region, keyed by absolute address."""
+        '''All registers in this region, keyed by absolute address.'''
         return {addr: self.get_register(addr) for addr in self}
 
 
 class StatusRegisters(MemoryRegion):
-    """The 16 named CPU/system registers, T through e."""
+    '''The 16 named CPU/system registers, T through e.'''
 
     key = "status_registers"
     label = "Status Registers"
@@ -138,7 +138,7 @@ class StatusRegisters(MemoryRegion):
         return self.get_register(14)
 
     def label_for(self, addr: int) -> str:
-        """The system-register name (e.g. 'X') for an address in this region."""
+        '''The system-register name (e.g. 'X') for an address in this region.'''
         if 0x00 <= addr <= 0x04:
             return (
                 f"{STATUS_REGISTER_LABELS[addr]}: "
@@ -158,36 +158,36 @@ class StatusRegisters(MemoryRegion):
 
 
 class KeyAssignments(MemoryRegion):
-    """Need more research."""
+    '''Need more research.'''
 
     key = "key_assignments"
     label = "Key Assignments"
 
 
 class Alarms(MemoryRegion):
-    """Need more research."""
+    '''Need more research.'''
 
     key = "alarms"
     label = "Alarms"
 
 
 class ProgramMemory(MemoryRegion):
-    """
+    '''
     Still needs more research for anything beyond listing what's here --
     decoding actual instruction bytes isn't implemented. See
     docs/program.md sec 5 for the global-label/END chain format, and
     Memory.list_programs() below for what that lets us report today.
-    """
+    '''
 
     key = "program_memory"
     label = "Program Memory"
 
 
 class PrimaryData(MemoryRegion):
-    """
+    '''
     Main data-register storage; registers here hold BCD-encoded numbers,
     0-6 characters of ASCII data, or packed binary data.
-    """
+    '''
 
     key = "primary_data"
     label = "Main Memory"

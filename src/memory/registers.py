@@ -1,4 +1,4 @@
-"""
+'''
 Register and AlphaRegister: fixed-length byte buffers representing HP41/
 DM41L hardware registers, plus the BCD/ASCII encode/decode logic for them.
 
@@ -8,7 +8,7 @@ data from MSB to LSB. That is, _data[0] contains the MSB of the register. and
 _data[6] contains the LSB. Care must be taken to remember this difference when
 comparing HP41 documentation with the implementation of the Register and
 Memory classes.
-"""
+'''
 
 import math
 import re
@@ -18,20 +18,20 @@ from .trigraphs import encode_trigraphs, decode_trigraphs
 
 
 class DM41LMemoryError(ValueError):
-    """
+    '''
     Raised when a register in the data dump contains an illegal value.
-    """
+    '''
 
 
 class Register:
-    """
+    '''
     Represents a hardware register with arbitrary byte length.
 
     Physical and emulated HP41 registers are always 7 bytes in length but,
     logically, some registers (such as the HP41 ALPHA register) are composed
     of parts of multiple physical registers. In addition, some status
     registers contain multiple smaller bitfields.
-    """
+    '''
 
     def __init__(
         self,
@@ -64,23 +64,23 @@ class Register:
             raise ValueError(f"Invalid hexadecimal data: {e}") from e
 
     def get_hex(self) -> str:
+        '''This returns the data in big-endian order.'''
         return self._data.hex()
 
     def get_bytes(self) -> bytes:
-        """
+        '''
         Returns this register's raw data as an immutable bytes copy, in
-        the same MSB-first storage order as get_hex() (byte 0 = the
+        the same big-endian storage order as get_hex() (byte 0 = the
         first/leftmost printed byte, matching how HP41 documentation and
         docs/memory.md address register bytes).
 
         Note this is NOT the same order as __getitem__/__setitem__, which
-        index LSB-first (see this class's docstring) -- get_bytes()[i]
-        and reg[i] refer to different bytes for the same register.
-        """
+        use little-endian format.
+        '''
         return bytes(self._data)
 
     def get_nibbles(self) -> list[int]:
-        """Returns the register data as a list of nibbles from MSB to LSB."""
+        '''Returns the register data as a list of nibbles from MSB to LSB.'''
         nibbles = []
         for byte in self._data:
             nibbles.append((byte >> 4) & 0x0F)  # High nibble
@@ -88,7 +88,7 @@ class Register:
         return nibbles
 
     def get_bcd_number(self) -> float:
-        """Reads the BCD-encoded number from this register."""
+        '''Reads the BCD-encoded number from this register.'''
         if self.size != 7:
             raise ValueError(
                 "BCD operations require a 7-byte register, " f"got {self.size} bytes."
@@ -143,7 +143,7 @@ class Register:
         return ms_sign * mantissa_val * (10 ** (total_exponent - 9))
 
     def set_bcd_number(self, number: float):
-        """Writes a float to this register in BCD format."""
+        '''Writes a float to this register in BCD format.'''
         if self.size != 7:
             raise ValueError(
                 "BCD operations require a 7-byte register, " f"got {self.size} bytes."
@@ -221,21 +221,21 @@ class Register:
     ALPHA_TEXT_MARKER = 0x10
 
     def is_alpha_text(self) -> bool:
-        """True if this looks like a data register holding short alpha
+        '''True if this looks like a data register holding short alpha
         text per the hardware convention (see ALPHA_TEXT_MARKER above),
         rather than a BCD number. Note a BCD register can never produce a
         false positive here: 0x10's high nibble (1) is not a legal BCD
-        sign nibble (only 0/9 are), so the two encodings can't collide."""
+        sign nibble (only 0/9 are), so the two encodings can't collide.'''
         return self.size == 7 and self._data[0] == self.ALPHA_TEXT_MARKER
 
     def get_alpha_bytes(self) -> bytes:
-        """Decodes this register as short alpha *bytes* -- the raw
+        '''Decodes this register as short alpha *bytes* -- the raw
         HP41/DM41L (FOCAL) character codes, not decoded to text. Raises
         ValueError if it isn't marked as an alpha-text register (see
         is_alpha_text()). Callers that know the content is safely plain
         ASCII can use get_alpha_text() instead; callers that need to
         handle FOCAL's non-ASCII characters (docs/trigraphs.md) should
-        work with these raw bytes and trigraphs.encode_trigraphs()."""
+        work with these raw bytes and trigraphs.encode_trigraphs().'''
         if not self.is_alpha_text():
             raise ValueError(
                 f"Register {self.get_hex()} is not alpha-marked "
@@ -248,11 +248,11 @@ class Register:
         return bytes(self._data[1:]).lstrip(b"\x00")
 
     def set_alpha_bytes(self, data: bytes):
-        """Writes `data` (1-6 raw HP41/DM41L character bytes -- not
+        '''Writes `data` (1-6 raw HP41/DM41L character bytes -- not
         necessarily plain ASCII, see get_alpha_bytes()) into this register
         using the hardware's alpha-text encoding (see ALPHA_TEXT_MARKER
         above). Requires a 7-byte register, matching every real data
-        register this format is used with."""
+        register this format is used with.'''
         if self.size != 7:
             raise ValueError(
                 f"Alpha-text encoding requires a 7-byte register, got {self.size} bytes."
@@ -266,10 +266,10 @@ class Register:
         self._data = new_data
 
     def get_alpha_text(self) -> str:
-        """Decodes this register as short *plain-ASCII* alpha text.
+        '''Decodes this register as short *plain-ASCII* alpha text.
         Raises ValueError if it isn't alpha-marked, or if its content
         includes a FOCAL character with no plain-ASCII meaning (use
-        get_alpha_bytes() + trigraphs.encode_trigraphs() for those)."""
+        get_alpha_bytes() + trigraphs.encode_trigraphs() for those).'''
         try:
             return self.get_alpha_bytes().decode("ascii")
         except UnicodeDecodeError as e:
@@ -279,10 +279,10 @@ class Register:
             ) from e
 
     def set_alpha_text(self, text: str):
-        """Writes `text` (1-6 plain-ASCII characters) into this register
+        '''Writes `text` (1-6 plain-ASCII characters) into this register
         using the hardware's alpha-text encoding (see ALPHA_TEXT_MARKER
         above). Use set_alpha_bytes() directly for FOCAL characters with
-        no plain-ASCII meaning (docs/trigraphs.md)."""
+        no plain-ASCII meaning (docs/trigraphs.md).'''
         try:
             encoded = text.encode("ascii")
         except UnicodeEncodeError as e:
@@ -290,7 +290,7 @@ class Register:
         self.set_alpha_bytes(encoded)
 
     def get_ascii(self) -> str:
-        """
+        '''
         Reads this register as raw ASCII text, one character per byte,
         MSB-byte first. Non-printable bytes (including 0x00 padding) are
         rendered as '.' so the string always has a fixed, predictable width.
@@ -298,18 +298,18 @@ class Register:
         Note that this converts the entire register, it does not respect the
         HP41 convention for formatting physical 7 byte registers to contain
         0-6 ASCII characters.
-        """
+        '''
         chars = []
         for byte in self._data:
             chars.append(chr(byte) if 0x20 <= byte <= 0x7E else ".")
         return "".join(chars)
 
     def set_ascii(self, text: str):
-        """
+        '''
         Writes raw ASCII text into this register, one character per byte,
         MSB-byte first. Text shorter than the register is padded with
         trailing 0x00 bytes; text longer than the register raises an error.
-        """
+        '''
         if len(text) > self.size:
             raise ValueError(
                 f"ASCII text is too long for a {self.size}-byte register "
@@ -332,11 +332,11 @@ class Register:
         )
 
     def __str__(self) -> str:
-        """
+        '''
         Note that this only works for PrimaryData. ASCII data in XM can be
         variable length and is byte-packed. The StatusRegisters.Alpha register
         is 25 bytes long and doesn't have the header byte.
-        """
+        '''
         if self._data[0] == 0x10:
             text = ""
             for b in self._data[1:]:
@@ -353,12 +353,14 @@ class Register:
         return self._data.hex()
 
     def __getitem__(self, index: int) -> int:
+        ''' NOTE: This returns bytes in little-endian order.'''
         if index >= self.size or index < 0:
             raise IndexError(f"{index} out of range.")
         # The LSB of the data is the last byte in the array.
         return self._data[self.size - index - 1]
 
     def __setitem__(self, index: int, value: int):
+        ''' NOTE: This returns bytes in little-endian order.'''
         if index >= self.size or index < 0:
             raise IndexError(f"{index} out of range.")
         # The LSB of the data is the last byte in the array.
@@ -398,9 +400,9 @@ _HEX_LINE_RE = re.compile(r"^0[xX]([0-9a-fA-F]{14})$")
 
 
 def format_data_line(register: "Register") -> str:
-    """Formats one register as a DATA line: a number if it holds a valid
+    '''Formats one register as a DATA line: a number if it holds a valid
     BCD value, trigraph-encoded alpha text if it's alpha-marked, or a
-    "0x"-prefixed raw-hex fallback otherwise (see the module note above)."""
+    "0x"-prefixed raw-hex fallback otherwise (see the module note above).'''
     try:
         number = register.get_bcd_number()
     except ValueError:
@@ -419,9 +421,9 @@ def format_data_line(register: "Register") -> str:
 
 
 def parse_data_line(line: str) -> "Register":
-    """Parses one DATA line (see the module note above) into a new 7-byte
+    '''Parses one DATA line (see the module note above) into a new 7-byte
     Register. Raises ValueError if `line` doesn't match any of the three
-    accepted forms."""
+    accepted forms.'''
     hex_match = _HEX_LINE_RE.match(line.strip())
     if hex_match:
         return Register.from_hex(hex_match.group(1))
@@ -456,7 +458,7 @@ def parse_data_line(line: str) -> "Register":
 
 
 class AlphaRegister(Register):
-    """Represents the HP41/DM41L alpha register."""
+    '''Represents the HP41/DM41L alpha register.'''
 
     def __str__(self):
         skip_nulls = True

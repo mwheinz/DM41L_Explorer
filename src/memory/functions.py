@@ -1,4 +1,4 @@
-"""
+'''
 The DM41L/HP-41CX instruction set, keyed by the byte encoding used inside a
 Key Assignment Register entry (docs/key_assignments.md sec 4.2/4.8) -- NOT
 by the program-byte ("Instruction Prefix") encoding, which differs for the
@@ -27,7 +27,7 @@ that low-code functions assign correctly on real hardware, confirming the
 assumption. Everything from 0x40 ('+') through 0xE0 (XEQ) is fully
 confirmed (docs sec 4.8); the XROM/peripheral entries are fully confirmed
 too (docs sec 4.8, xrom-keyassignments.dm41).
-"""
+'''
 
 import re
 
@@ -260,13 +260,13 @@ XROM_NAMES = {v: k for k, v in XROM_FUNCTIONS.items()}
 
 
 def function_name_for_bytes(fn_byte1: int, fn_byte2) -> str:
-    """Looks up the display name for a decoded Key Assignment Register
+    '''Looks up the display name for a decoded Key Assignment Register
     entry's function byte(s) (`fn_byte2` is None for a single-byte
     built-in function -- see memory.Memory._decode_key_assignment_entries).
     Returns a "0xNN" / "0xNN 0xNN" fallback string, never raises, if the
     byte(s) don't match any known function -- callers that want to
     distinguish "known function" from "raw hex" should check
-    SINGLE_BYTE_FUNCTIONS/XROM_FUNCTIONS directly instead."""
+    SINGLE_BYTE_FUNCTIONS/XROM_FUNCTIONS directly instead.'''
     if fn_byte2 is None:
         name = SINGLE_BYTE_FUNCTIONS.get(fn_byte1)
         return name if name is not None else f"0x{fn_byte1:02X}"
@@ -275,10 +275,10 @@ def function_name_for_bytes(fn_byte1: int, fn_byte2) -> str:
 
 
 def bytes_for_function_name(name: str):
-    """Looks up the Key Assignment Register byte encoding for a function
+    '''Looks up the Key Assignment Register byte encoding for a function
     name from either table above. Returns an int (single-byte function)
     or a (byte1, byte2) tuple (XROM/peripheral function). Raises
-    ValueError if `name` isn't a known assignable function."""
+    ValueError if `name` isn't a known assignable function.'''
     if name in SINGLE_BYTE_NAMES:
         return SINGLE_BYTE_NAMES[name]
     if name in XROM_NAMES:
@@ -319,7 +319,7 @@ _SYMBOL_SUBSTITUTIONS = [
 
 
 def normalize_function_name_input(text: str) -> str:
-    """Turns what a user typed on a standard keyboard into the exact
+    '''Turns what a user typed on a standard keyboard into the exact
     spelling memory/functions.py's tables use. Never raises -- an input
     that still doesn't match anything after normalizing is passed through
     as best-effort uppercased/substituted text, and it's on the caller
@@ -341,7 +341,7 @@ def normalize_function_name_input(text: str) -> str:
        (every function name in the tables is already all-uppercase).
        Typing "x<=y?" therefore doesn't match anything in pass 1, becomes
        "X≤Y?" after pass 2, and does match.
-    """
+    '''
     if not text:
         return text
     stripped = text.strip()

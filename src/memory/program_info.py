@@ -1,14 +1,14 @@
-"""
+'''
 ProgramInfo: one entry ("chain link") found while walking the global
 label/END chain in program memory. See Memory.list_programs() in
 memory.py, and docs/program.md sec 5, for the full derivation.
-"""
+'''
 
 from typing import Optional
 
 
 class ProgramInfo:
-    """
+    '''
     One entry found while walking the "global chain" -- the backward-
     linked list of every global alpha label and END marker in program
     memory, described in docs/program.md sec 5 (reverse-engineered from
@@ -46,7 +46,7 @@ class ProgramInfo:
     like any other entry, distinguished via `kind` (`".END."` rather than
     `"END"`) so it reads clearly as the top-of-memory marker, not a
     duplicate of a normal END.
-    """
+    '''
 
     def __init__(
         self,
@@ -74,9 +74,9 @@ class ProgramInfo:
 
     @property
     def kind(self) -> str:
-        """"LBL" for a global-label header, "END" for a plain END marker,
+        '''"LBL" for a global-label header, "END" for a plain END marker,
         or ".END." for the one permanent end-of-program-memory marker
-        (end_type == 2) -- the newest entry in the chain, when present."""
+        (end_type == 2) -- the newest entry in the chain, when present.'''
         if self.is_named:
             return "LBL"
         return ".END." if self.end_type == 2 else "END"
