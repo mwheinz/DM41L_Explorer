@@ -40,7 +40,7 @@ class SerialManager:
             logger.error("Hardware discovery failed: %s", (e))
             return []
 
-    def connect(self, port, baudrate=9600):
+    def connect(self, port, baudrate=38400):
         """Establishes connection and starts the communication thread."""
         try:
             if self.is_connected or (self._thread and self._thread.is_alive()):
@@ -120,6 +120,8 @@ class SerialManager:
                         if data:
                             self.incoming_queue.put(data)
 
+                    # 3. Yield the processor long enough to let the foreground
+                    # tasks have a chance to run.
                     time.sleep(0.01)
 
                 except Exception as e:
@@ -135,6 +137,6 @@ class SerialManager:
                 except Exception:
                     logger.exception("Failed to close serial port during cleanup.")
             self.is_connected = False
-            logger.error("Serial connection terminated.")
+            logger.info("Serial connection terminated.")
             if error_msg and self._error_callback:
                 self._error_callback(error_msg)
