@@ -117,7 +117,6 @@ class DataRegistersTab(ctk.CTkFrame):
             parent,
             orient="vertical",
             command=tree.yview,
-            style="DM41L.Vertical.TScrollbar",
         )
         tree.configure(yscrollcommand=vsb.set)
         tree.pack(side="left", fill="both", expand=True)
@@ -159,12 +158,9 @@ class DataRegistersTab(ctk.CTkFrame):
         below."""
         style = ttk.Style()
         try:
-            style.theme_use("clam")
+            style.theme_use("default")
         except Exception as e:
-            # "clam" ships with every Tcl/Tk this project supports; this
-            # is a defensive fallback, not something expected to fire --
-            # see the identical pattern in hex_view_tab.py.
-            logger.debug("Could not switch ttk theme to 'clam': %s", e)
+            logger.debug("Could not switch ttk theme to 'default': %s", e)
         dark = ctk.get_appearance_mode() == "Dark"
         bg = stripe_bg_color()
         field_bg = "#242424" if dark else "#ffffff"
@@ -196,45 +192,6 @@ class DataRegistersTab(ctk.CTkFrame):
         # real fix is the hand-managed "selectedrow" tag in
         # `_on_tree_selected()`.
         style.map("Treeview", background=[("selected", SELECTED_ROW_BG)])
-
-        # Approximate CTkScrollableFrame's own scrollbar look (a slim,
-        # borderless thumb with no up/down arrow buttons) so this native
-        # scrollbar doesn't stand out as a different widget kit. clam's
-        # stock Vertical.TScrollbar layout always includes arrow buttons,
-        # so this defines a trimmed-down layout without them, matching the
-        # trough to the table background.
-        trough = field_bg
-        thumb = "#565b5e" if dark else "#c0c0c0"
-        thumb_active = "#6e7173" if dark else "#a6a6a6"
-        style.layout(
-            "DM41L.Vertical.TScrollbar",
-            [
-                (
-                    "Vertical.Scrollbar.trough",
-                    {
-                        "sticky": "ns",
-                        "children": [
-                            (
-                                "Vertical.Scrollbar.thumb",
-                                {"expand": "1", "sticky": "nswe"},
-                            )
-                        ],
-                    },
-                )
-            ],
-        )
-        style.configure(
-            "DM41L.Vertical.TScrollbar",
-            background=thumb,
-            troughcolor=trough,
-            bordercolor=trough,
-            relief="flat",
-            borderwidth=0,
-        )
-        style.map(
-            "DM41L.Vertical.TScrollbar",
-            background=[("active", thumb_active), ("pressed", thumb_active)],
-        )
 
     def refresh_theme(self):
         """Re-applies theme-dependent ttk styling/colors after

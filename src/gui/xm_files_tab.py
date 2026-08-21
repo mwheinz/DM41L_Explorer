@@ -50,7 +50,6 @@ SELECTED_ROW_FG = "#ffffff"
 # _style_treeview()'s docstring for why these must NOT be the plain
 # "Treeview"/"DM41L.Vertical.TScrollbar" names data_registers_tab.py uses.
 _TREE_STYLE = "XMFiles.Treeview"
-_SCROLLBAR_STYLE = "XMFiles.Vertical.TScrollbar"
 
 
 def _guess_file_type(lines: list) -> str:
@@ -139,7 +138,6 @@ class XMFilesTab(ctk.CTkFrame):
             table_frame,
             orient="vertical",
             command=self._tree.yview,
-            style=_SCROLLBAR_STYLE,
         )
         self._tree.configure(yscrollcommand=vsb.set)
         self._tree.pack(side="left", fill="both", expand=True)
@@ -176,20 +174,6 @@ class XMFilesTab(ctk.CTkFrame):
         native ttk.Treeview/ttk.Scrollbar is used here instead of CTk
         widgets at all (performance).
 
-        This tab configures its OWN ttk style names (`_TREE_STYLE` /
-        `_SCROLLBAR_STYLE` above) instead of the plain "Treeview" /
-        "DM41L.Vertical.TScrollbar" names data_registers_tab.py uses.
-        ttk styles are global and shared by name, not per-widget-instance:
-        any ttk.Treeview that doesn't request a custom `style=` uses the
-        same "Treeview"/"Treeview.Heading" style application-wide, so two
-        *different* tabs each calling `style.configure("Treeview", ...)`
-        with their own font/color choices would silently fight over one
-        shared style -- whichever tab's styling method ran most recently
-        would win for BOTH tables, not just its own. Giving this tab its
-        own style names sidesteps that entirely, at the cost of it not
-        automatically picking up any future per-tab differences Data
-        Registers' styling might grow -- worth it for the isolation.
-
         Uses the shared monospace font (gui/tab_common.py) for the whole
         table, matching Data Registers -- half of this tab's original
         per-row labels (Header, Preview) already used it, and giving the
@@ -202,12 +186,9 @@ class XMFilesTab(ctk.CTkFrame):
         tag colors are per-widget-instance, not shared."""
         style = ttk.Style()
         try:
-            style.theme_use("clam")
+            style.theme_use("default")
         except Exception as e:
-            # "clam" ships with every Tcl/Tk this project supports; this
-            # is a defensive fallback, not something expected to fire --
-            # see the identical pattern in hex_view_tab.py.
-            logger.debug("Could not switch ttk theme to 'clam': %s", e)
+            logger.debug("Could not switch ttk theme to 'default': %s", e)
         dark = ctk.get_appearance_mode() == "Dark"
         bg = stripe_bg_color()
         field_bg = "#242424" if dark else "#ffffff"
@@ -239,43 +220,6 @@ class XMFilesTab(ctk.CTkFrame):
         # builds/platforms.
         style.map(_TREE_STYLE, background=[("selected", SELECTED_ROW_BG)])
 
-        # Approximate CTkScrollableFrame's own scrollbar look (a slim,
-        # borderless thumb with no up/down arrow buttons) so this native
-        # scrollbar doesn't stand out as a different widget kit -- same
-        # layout data_registers_tab.py uses, just under this tab's own
-        # style name (see this method's docstring on why).
-        trough = field_bg
-        thumb = "#565b5e" if dark else "#c0c0c0"
-        thumb_active = "#6e7173" if dark else "#a6a6a6"
-        style.layout(
-            _SCROLLBAR_STYLE,
-            [
-                (
-                    "Vertical.Scrollbar.trough",
-                    {
-                        "sticky": "ns",
-                        "children": [
-                            (
-                                "Vertical.Scrollbar.thumb",
-                                {"expand": "1", "sticky": "nswe"},
-                            )
-                        ],
-                    },
-                )
-            ],
-        )
-        style.configure(
-            _SCROLLBAR_STYLE,
-            background=thumb,
-            troughcolor=trough,
-            bordercolor=trough,
-            relief="flat",
-            borderwidth=0,
-        )
-        style.map(
-            _SCROLLBAR_STYLE,
-            background=[("active", thumb_active), ("pressed", thumb_active)],
-        )
         return bg
 
     def refresh_theme(self):

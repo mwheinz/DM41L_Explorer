@@ -48,7 +48,6 @@ SELECTED_ROW_FG = "#ffffff"
 # _style_treeview()'s docstring for why these must NOT be the "Treeview"/
 # "XMFiles.Treeview" style names the other two Treeview-based tabs use.
 _TREE_STYLE = "Programs.Treeview"
-_SCROLLBAR_STYLE = "Programs.Vertical.TScrollbar"
 
 
 class ProgramTab(ctk.CTkFrame):
@@ -110,7 +109,6 @@ class ProgramTab(ctk.CTkFrame):
             table_frame,
             orient="vertical",
             command=self._tree.yview,
-            style=_SCROLLBAR_STYLE,
         )
         self._tree.configure(yscrollcommand=vsb.set)
         self._tree.pack(side="left", fill="both", expand=True)
@@ -125,28 +123,14 @@ class ProgramTab(ctk.CTkFrame):
         version of this and why a native ttk.Treeview/ttk.Scrollbar is
         used here instead of CTk widgets at all.
 
-        This tab configures its OWN ttk style names (`_TREE_STYLE` /
-        `_SCROLLBAR_STYLE` above), not the "Treeview" or "XMFiles.*"
-        names the other two Treeview-based tabs use -- ttk styles are
-        global and shared by name, not per-widget-instance, so any two
-        Treeview-using tabs that configured the *same* style name with
-        different font/color choices would silently fight over it,
-        whichever tab styled itself last winning for every table using
-        that name (see xm_files_tab.py's `_style_treeview()` docstring,
-        GitHub issue #21, for the full story of catching this before it
-        became a live bug). Three tabs now means three distinct names.
-
         Returns the current stripe background color, for the caller to
         `tag_configure("oddrow", ...)` -- unlike the style calls above,
         tag colors are per-widget-instance, not shared."""
         style = ttk.Style()
         try:
-            style.theme_use("clam")
+            style.theme_use("default")
         except Exception as e:
-            # "clam" ships with every Tcl/Tk this project supports; this
-            # is a defensive fallback, not something expected to fire --
-            # see the identical pattern in hex_view_tab.py.
-            logger.debug("Could not switch ttk theme to 'clam': %s", e)
+            logger.debug("Could not switch ttk theme to 'default': %s", e)
         dark = ctk.get_appearance_mode() == "Dark"
         bg = stripe_bg_color()
         field_bg = "#242424" if dark else "#ffffff"
@@ -175,42 +159,6 @@ class ProgramTab(ctk.CTkFrame):
         # issue #22) for the full story.
         style.map(_TREE_STYLE, background=[("selected", SELECTED_ROW_BG)])
 
-        # Approximate CTkScrollableFrame's own scrollbar look (a slim,
-        # borderless thumb with no up/down arrow buttons) -- same layout
-        # the other two Treeview-based tabs use, just under this tab's
-        # own style name.
-        trough = field_bg
-        thumb = "#565b5e" if dark else "#c0c0c0"
-        thumb_active = "#6e7173" if dark else "#a6a6a6"
-        style.layout(
-            _SCROLLBAR_STYLE,
-            [
-                (
-                    "Vertical.Scrollbar.trough",
-                    {
-                        "sticky": "ns",
-                        "children": [
-                            (
-                                "Vertical.Scrollbar.thumb",
-                                {"expand": "1", "sticky": "nswe"},
-                            )
-                        ],
-                    },
-                )
-            ],
-        )
-        style.configure(
-            _SCROLLBAR_STYLE,
-            background=thumb,
-            troughcolor=trough,
-            bordercolor=trough,
-            relief="flat",
-            borderwidth=0,
-        )
-        style.map(
-            _SCROLLBAR_STYLE,
-            background=[("active", thumb_active), ("pressed", thumb_active)],
-        )
         return bg
 
     def refresh_theme(self):

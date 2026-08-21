@@ -171,7 +171,6 @@ class HexViewTab(ctk.CTkFrame):
             parent,
             orient="vertical",
             command=tree.yview,
-            style="DM41L.Vertical.TScrollbar",
         )
         tree.configure(yscrollcommand=vsb.set)
         tree.pack(side="left", fill="both", expand=True)
@@ -188,7 +187,7 @@ class HexViewTab(ctk.CTkFrame):
         style names/registration are process-global, not per-widget)."""
         style = ttk.Style()
         try:
-            style.theme_use("clam")
+            style.theme_use("default")
         except Exception as e:
             # "clam" ships with every Tcl/Tk this project supports; this
             # is a defensive fallback, not something expected to fire.
@@ -223,39 +222,6 @@ class HexViewTab(ctk.CTkFrame):
         # would look like a broken "clickable" affordance on a tab that's
         # explicitly not interactive.
         style.map("Treeview", background=[], foreground=[])
-
-        trough = field_bg
-        thumb = "#565b5e" if dark else "#c0c0c0"
-        thumb_active = "#6e7173" if dark else "#a6a6a6"
-        style.layout(
-            "DM41L.Vertical.TScrollbar",
-            [
-                (
-                    "Vertical.Scrollbar.trough",
-                    {
-                        "sticky": "ns",
-                        "children": [
-                            (
-                                "Vertical.Scrollbar.thumb",
-                                {"expand": "1", "sticky": "nswe"},
-                            )
-                        ],
-                    },
-                )
-            ],
-        )
-        style.configure(
-            "DM41L.Vertical.TScrollbar",
-            background=thumb,
-            troughcolor=trough,
-            bordercolor=trough,
-            relief="flat",
-            borderwidth=0,
-        )
-        style.map(
-            "DM41L.Vertical.TScrollbar",
-            background=[("active", thumb_active), ("pressed", thumb_active)],
-        )
 
     def refresh_theme(self):
         """Re-applies every theme-dependent color after
