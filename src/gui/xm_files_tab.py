@@ -1,19 +1,56 @@
 """
 XM Files tab: view, add, edit, remove, import, and export extended-memory
 files.
+
+Uses a native ttk.Treeview rather than one CustomTkinter widget per row --
+the same performance fix as gui/data_registers_tab.py (see that module's
+docstring for the full story): building 5-8 CTk widgets per row (one per
+column, plus a per-row Export/Edit/Remove button each) got noticeably slow
+once a dump had more than a few dozen XM files, and CTk widgets don't scale
+to that count the way a native table does -- GitHub issue #21. Per-row
+Export/Edit/Remove buttons are gone; those three actions now live in the
+header (like Add File/Import File already did) and act on whichever row is
+currently selected, matching the pattern gui/data_registers_tab.py already
+established for its own "Edit..." button.
+
+ttk.Treeview also already receives macOS trackpad scroll events correctly
+on its own (see gui/scroll_support.py's docstring), so this incidentally
+should also fix GitHub issue #20 (touchpad scrolling dead in this tab),
+which was specific to the CTkScrollableFrame/Canvas this tab used to use.
 """
 
 import logging
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox
 import customtkinter as ctk
 
 from memory import Memory, ExtendedMemory, DM41LMemoryError, parse_data_line
 from gui.xm_file_dialog import XMFileDialog
-from gui.scroll_support import bind_touchpad_scroll
 from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
 
 logger = logging.getLogger(__name__)
+
+# File types Export/Edit are meaningful for -- Program files' on-disk
+# format isn't part of this feature yet (see XMFileDialog's module
+# docstring). Shared between _update_action_buttons() (dynamic
+# enable/disable) and _edit_selected()'s own defensive check.
+_EDITABLE_FILE_TYPES = (ExtendedMemory.TYPE_DATA, ExtendedMemory.TYPE_ASCII)
+
+# Selected-row highlight. Deliberately a local copy of
+# data_registers_tab.py's own SELECTED_ROW_BG/FG (same values), not a
+# shared import -- see this tab's _style_treeview() docstring for why this
+# tab also needs its own, separately-named ttk style ("XMFiles.Treeview")
+# rather than reusing the plain "Treeview" style Data Registers configures;
+# keeping the color constants local alongside that separate style avoids
+# an awkward cross-tab-module import for two hex strings.
+SELECTED_ROW_BG = "#1f6aa5"
+SELECTED_ROW_FG = "#ffffff"
+
+# Distinct ttk style names for this tab's Treeview/scrollbar -- see
+# _style_treeview()'s docstring for why these must NOT be the plain
+# "Treeview"/"DM41L.Vertical.TScrollbar" names data_registers_tab.py uses.
+_TREE_STYLE = "XMFiles.Treeview"
+_SCROLLBAR_STYLE = "XMFiles.Vertical.TScrollbar"
 
 
 def _guess_file_type(lines: list) -> str:
@@ -52,19 +89,206 @@ class XMFilesTab(ctk.CTkFrame):
             button_kwargs={"text": "Add File", "width": 100, "command": self._add_file},
         )
         ctk.CTkButton(
-            header,
-            text="Import File",
-            width=110,
-            command=self._import_file,
+            header, text="Import File", width=110, command=self._import_file
         ).pack(side="right", padx=(0, 8))
+        export_button = ctk.CTkButton(
+            header, text="Export...", width=90, command=self._export_selected
+        )
+        export_button.pack(side="right", padx=(0, 8))
+        edit_button = ctk.CTkButton(
+            header, text="Edit", width=90, command=self._edit_selected
+        )
+        edit_button.pack(side="right", padx=(0, 8))
+        remove_button = ctk.CTkButton(
+            header,
+            text="Remove",
+            width=90,
+            fg_color="#a03e3e",
+            hover_color="#832f2f",
+            command=self._remove_selected,
+        )
+        remove_button.pack(side="right", padx=(0, 8))
 
-        self._table = ctk.CTkScrollableFrame(self)
-        self._table.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        for col, weight in enumerate([0, 0, 0, 0, 1, 0, 0, 0]):
-            self._table.grid_columnconfigure(col, weight=weight)
-        bind_touchpad_scroll(self._table)
+        table_frame = ctk.CTkFrame(self, fg_color="transparent")
+        table_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
-        self._stripe_bg = stripe_bg_color()
+        self._stripe_bg = self._style_treeview()
+
+        self._tree = ttk.Treeview(
+            table_frame,
+            columns=("name", "type", "header", "registers", "preview"),
+            show="headings",
+            selectmode="browse",
+            style=_TREE_STYLE,
+        )
+        for col, text, width, stretch in [
+            ("name", "Name", 90, False),
+            ("type", "Type", 90, False),
+            ("header", "Header", 90, False),
+            ("registers", "Size", 70, False),
+            ("preview", "Preview", 180, True),
+        ]:
+            self._tree.heading(col, text=text)
+            self._tree.column(col, width=width, anchor="w", stretch=stretch)
+        self._tree.tag_configure("oddrow", background=self._stripe_bg)
+        self._tree.tag_configure(
+            "selectedrow", background=SELECTED_ROW_BG, foreground=SELECTED_ROW_FG
+        )
+
+        vsb = ttk.Scrollbar(
+            table_frame,
+            orient="vertical",
+            command=self._tree.yview,
+            style=_SCROLLBAR_STYLE,
+        )
+        self._tree.configure(yscrollcommand=vsb.set)
+        self._tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="left", fill="y")
+
+        self._tree.bind("<Double-1>", lambda e: self._edit_selected())
+        self._tree.bind("<<TreeviewSelect>>", self._on_tree_selected)
+
+        # Closures over the three header buttons -- see
+        # _update_action_buttons()'s docstring for why this is a single
+        # stored callable rather than three separate self._export_button /
+        # self._edit_button / self._remove_button instance attributes
+        # (this class is already at the repo's own pylint
+        # max-attributes=7 ceiling; see data_registers_tab.py's own
+        # GitHub issue #22 fix for the same constraint).
+        def update_action_buttons(selected_file):
+            can_edit = (
+                selected_file is not None
+                and selected_file.file_type in _EDITABLE_FILE_TYPES
+            )
+            export_button.configure(state="normal" if can_edit else "disabled")
+            edit_button.configure(state="normal" if can_edit else "disabled")
+            remove_button.configure(
+                state="normal" if selected_file is not None else "disabled"
+            )
+
+        self._update_action_buttons = update_action_buttons
+        self._update_action_buttons(None)
+
+    def _style_treeview(self) -> str:
+        """Rough dark/light theming for this tab's native table (font,
+        colors, scrollbar look) -- see gui/data_registers_tab.py's own
+        `_style_treeview()` for the original version of this and why a
+        native ttk.Treeview/ttk.Scrollbar is used here instead of CTk
+        widgets at all (performance).
+
+        This tab configures its OWN ttk style names (`_TREE_STYLE` /
+        `_SCROLLBAR_STYLE` above) instead of the plain "Treeview" /
+        "DM41L.Vertical.TScrollbar" names data_registers_tab.py uses.
+        ttk styles are global and shared by name, not per-widget-instance:
+        any ttk.Treeview that doesn't request a custom `style=` uses the
+        same "Treeview"/"Treeview.Heading" style application-wide, so two
+        *different* tabs each calling `style.configure("Treeview", ...)`
+        with their own font/color choices would silently fight over one
+        shared style -- whichever tab's styling method ran most recently
+        would win for BOTH tables, not just its own. Giving this tab its
+        own style names sidesteps that entirely, at the cost of it not
+        automatically picking up any future per-tab differences Data
+        Registers' styling might grow -- worth it for the isolation.
+
+        Uses the shared monospace font (gui/tab_common.py) for the whole
+        table, matching Data Registers -- half of this tab's original
+        per-row labels (Header, Preview) already used it, and giving the
+        whole tree one consistent font avoids yet another same-values-
+        for-now, could-silently-diverge-later coupling with Data
+        Registers' choice.
+
+        Returns the current stripe background color, for the caller to
+        `tag_configure("oddrow", ...)` -- unlike the style calls above,
+        tag colors are per-widget-instance, not shared."""
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception as e:
+            # "clam" ships with every Tcl/Tk this project supports; this
+            # is a defensive fallback, not something expected to fire --
+            # see the identical pattern in hex_view_tab.py.
+            logger.debug("Could not switch ttk theme to 'clam': %s", e)
+        dark = ctk.get_appearance_mode() == "Dark"
+        bg = stripe_bg_color()
+        field_bg = "#242424" if dark else "#ffffff"
+        fg = "#e6e6e6" if dark else "#1a1a1a"
+        ui_font = ctk.ThemeManager.theme["CTkFont"]
+        font = (MONOSPACE_FONT_FAMILY, ui_font["size"])
+        heading_font = (ui_font["family"], ui_font["size"], "bold")
+        style.configure(
+            _TREE_STYLE,
+            background=field_bg,
+            fieldbackground=field_bg,
+            foreground=fg,
+            rowheight=22,
+            borderwidth=0,
+            font=font,
+        )
+        style.configure(
+            f"{_TREE_STYLE}.Heading", background=bg, foreground=fg, font=heading_font
+        )
+        # Kept as a harmless fallback even though the hand-managed
+        # "selectedrow" tag (see _on_tree_selected()) is what actually
+        # does the work -- a per-item tag's background silently overrides
+        # this "selected" state map in ttk.Treeview regardless of what
+        # this says, a long-standing Tk behavior. See
+        # data_registers_tab.py's _on_tree_selected() docstring
+        # (GitHub issue #22) for the full story and why the fix can't
+        # just be "give selectedrow priority over oddrow" either --
+        # that priority itself turned out to be inconsistent across Tk
+        # builds/platforms.
+        style.map(_TREE_STYLE, background=[("selected", SELECTED_ROW_BG)])
+
+        # Approximate CTkScrollableFrame's own scrollbar look (a slim,
+        # borderless thumb with no up/down arrow buttons) so this native
+        # scrollbar doesn't stand out as a different widget kit -- same
+        # layout data_registers_tab.py uses, just under this tab's own
+        # style name (see this method's docstring on why).
+        trough = field_bg
+        thumb = "#565b5e" if dark else "#c0c0c0"
+        thumb_active = "#6e7173" if dark else "#a6a6a6"
+        style.layout(
+            _SCROLLBAR_STYLE,
+            [
+                (
+                    "Vertical.Scrollbar.trough",
+                    {
+                        "sticky": "ns",
+                        "children": [
+                            (
+                                "Vertical.Scrollbar.thumb",
+                                {"expand": "1", "sticky": "nswe"},
+                            )
+                        ],
+                    },
+                )
+            ],
+        )
+        style.configure(
+            _SCROLLBAR_STYLE,
+            background=thumb,
+            troughcolor=trough,
+            bordercolor=trough,
+            relief="flat",
+            borderwidth=0,
+        )
+        style.map(
+            _SCROLLBAR_STYLE,
+            background=[("active", thumb_active), ("pressed", thumb_active)],
+        )
+        return bg
+
+    def refresh_theme(self):
+        """Re-applies theme-dependent ttk styling/colors after
+        ctk.set_appearance_mode() changes elsewhere (e.g. Preferences) --
+        see gui/data_registers_tab.py's identical method for why this is
+        needed at all (CustomTkinter's theme engine has no hook into
+        ttk)."""
+        self._stripe_bg = self._style_treeview()
+        self._tree.tag_configure("oddrow", background=self._stripe_bg)
+        self._tree.tag_configure(
+            "selectedrow", background=SELECTED_ROW_BG, foreground=SELECTED_ROW_FG
+        )
 
     def _notify_change(self):
         if self._on_change:
@@ -73,13 +297,47 @@ class XMFilesTab(ctk.CTkFrame):
     def _xm(self) -> ExtendedMemory:
         return ExtendedMemory(self._memory, address_range=[0x40, 0x2EF])
 
+    def _on_tree_selected(self, event=None):  # pylint: disable=unused-argument
+        """Gives the selected row a visible highlight, the same way (and
+        for the same reason) as data_registers_tab.py's own
+        `_on_tree_selected()` -- see that method's docstring for the full
+        GitHub issue #22 story. This tab only has one table (not two side
+        by side like Data Registers), so there's no cross-tree
+        exclusivity to manage -- just this table's own selection."""
+        for pos, iid in enumerate(self._tree.get_children()):
+            if "selectedrow" in self._tree.item(iid, "tags"):
+                self._tree.item(iid, tags=("oddrow",) if pos % 2 else ())
+
+        selection = self._tree.selection()
+        if selection:
+            self._tree.item(selection[0], tags=("selectedrow",))
+
+        self._update_action_buttons(self._selected_file())
+
+    def _selected_header_addr(self):
+        selection = self._tree.selection()
+        return int(selection[0]) if selection else None
+
+    def _selected_file(self):
+        """The XMFile currently selected in the table, re-fetched fresh
+        from Memory (not cached) -- same reasoning as the old
+        `_edit_file()`'s own lookup-by-header_addr: a file's exact
+        attributes can only be trusted as of the last render(), and
+        header_addr is this tab's stable per-file identity (also used as
+        each row's Treeview iid)."""
+        addr = self._selected_header_addr()
+        if addr is None or self._memory is None:
+            return None
+        files = self._xm().list_files()
+        return next((f for f in files if f.header_addr == addr), None)
+
     def render(self, memory: Memory):
         self._memory = memory
-        for widget in self._table.winfo_children():
-            widget.destroy()
+        self._tree.delete(*self._tree.get_children())
 
         if memory is None:
             self._header_label.configure(text="(no memory dump loaded)")
+            self._update_action_buttons(None)
             return
 
         try:
@@ -87,101 +345,28 @@ class XMFilesTab(ctk.CTkFrame):
         except DM41LMemoryError as e:
             logger.warning("Could not list XM files: %s", e)
             self._header_label.configure(text=f"Could not list XM files: {e}")
+            self._update_action_buttons(None)
             return
 
         self._header_label.configure(text=f"Extended-memory files: {len(files)}")
 
-        headers = ["Name", "Type", "Header", "Registers", "Preview", "", "", ""]
-        for col, text in enumerate(headers):
-            ctk.CTkLabel(self._table, text=text, font=ctk.CTkFont(weight="bold")).grid(
-                row=0, column=col, sticky="w", padx=6, pady=4
+        for pos, f in enumerate(files):
+            #span_note = " (spans regions)" if f.spans_regions else ""
+            self._tree.insert(
+                "",
+                "end",
+                iid=str(f.header_addr),
+                values=(
+                    f.name.rstrip(),
+                    f.type_label,
+                    f"0x{f.header_addr:03x}",
+                    #f"{f.num_registers}{span_note}",
+                    f"{f.num_registers}",
+                    self._preview_for(f),
+                ),
+                tags=("oddrow",) if pos % 2 else (),
             )
-
-        for i, f in enumerate(files, start=1):
-            self._render_row(f, row=i)
-
-    def _render_row(self, f, row: int):
-        # Alternating row shading: the same shared shade as Data Registers'
-        # ttk.Treeview striping (see stripe_bg_color()), applied directly as
-        # each label's own fg_color rather than as a separate background
-        # widget behind them.
-        #
-        # An earlier version gridded one full-row CTkFrame *behind* the
-        # row's labels instead. That doesn't work with CustomTkinter:
-        # CTkLabel's "transparent" isn't real canvas alpha -- it just paints
-        # itself to match its own master's declared color at construction
-        # time -- so each label still showed its own (wrong-colored) opaque
-        # patch on top of the frame instead of blending with it. Worse, an
-        # unconstrained CTkFrame defaults to a 200x200 minimum size, and
-        # with nothing else in that row tall enough to out-rank it, the
-        # whole row grew to match -- exactly the "rows are much taller"
-        # symptom the user reported. Coloring each label directly (with
-        # `sticky="nsew"` so it fills its whole cell, not just its text)
-        # avoids both problems: no extra oversized widget, and no
-        # mismatched "transparent" patches.
-        row_bg = self._stripe_bg if (row - 1) % 2 == 1 else "transparent"
-
-        preview = self._preview_for(f)
-
-        ctk.CTkLabel(
-            self._table, text=f.name.rstrip(), anchor="w", fg_color=row_bg
-        ).grid(row=row, column=0, sticky="nsew", padx=6, pady=1)
-        ctk.CTkLabel(self._table, text=f.type_label, anchor="w", fg_color=row_bg).grid(
-            row=row, column=1, sticky="nsew", padx=6, pady=1
-        )
-        ctk.CTkLabel(
-            self._table,
-            text=f"0x{f.header_addr:03x}",
-            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
-            anchor="w",
-            fg_color=row_bg,
-        ).grid(row=row, column=2, sticky="nsew", padx=6, pady=1)
-        span_note = " (spans regions)" if f.spans_regions else ""
-        ctk.CTkLabel(
-            self._table,
-            text=f"{f.num_registers}{span_note}",
-            anchor="w",
-            fg_color=row_bg,
-        ).grid(row=row, column=3, sticky="nsew", padx=6, pady=1)
-        ctk.CTkLabel(
-            self._table,
-            text=preview,
-            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
-            anchor="w",
-            fg_color=row_bg,
-        ).grid(row=row, column=4, sticky="nsew", padx=6, pady=1)
-
-        # Export (like Edit) only makes sense for Data/ASCII -- Program
-        # files' on-disk format isn't part of this feature (see the
-        # XMFileDialog module docstring on why Program isn't editable
-        # here either).
-        can_edit = f.file_type in (ExtendedMemory.TYPE_DATA, ExtendedMemory.TYPE_ASCII)
-        export_button = ctk.CTkButton(
-            self._table,
-            text="Export...",
-            width=76,
-            state="normal" if can_edit else "disabled",
-            command=lambda file=f: self._export_file(file),
-        )
-        export_button.grid(row=row, column=5, sticky="e", padx=6, pady=1)
-        edit_button = ctk.CTkButton(
-            self._table,
-            text="Edit",
-            width=56,
-            state="normal" if can_edit else "disabled",
-            command=lambda addr=f.header_addr: self._edit_file(addr),
-        )
-        edit_button.grid(row=row, column=6, sticky="e", padx=6, pady=1)
-        ctk.CTkButton(
-            self._table,
-            text="Remove",
-            width=64,
-            fg_color="#a03e3e",
-            hover_color="#832f2f",
-            command=lambda addr=f.header_addr, name=f.name: self._remove_file(
-                addr, name
-            ),
-        ).grid(row=row, column=7, sticky="e", padx=6, pady=1)
+        self._update_action_buttons(None)
 
     @staticmethod
     def _preview_for(f) -> str:
@@ -356,3 +541,46 @@ class XMFilesTab(ctk.CTkFrame):
         logger.info("XM file removed: %r", name)
         self._notify_change()
         self.render(self._memory)
+
+    # -- Header-button versions of Edit/Export/Remove, acting on whatever
+    # row is currently selected. The buttons themselves are dynamically
+    # enabled/disabled by _update_action_buttons() based on the selection
+    # (and, for Export/Edit, the selected file's type), so the "No
+    # Selection"/"Not Editable" messageboxes below are a defensive
+    # fallback -- e.g. double-click (bound to _edit_selected() too)
+    # bypasses button state entirely, and a selection can in principle
+    # change between a click and this callback running.
+
+    def _edit_selected(self):
+        f = self._selected_file()
+        if f is None:
+            messagebox.showinfo("No Selection", "Select an XM file first.")
+            return
+        if f.file_type not in _EDITABLE_FILE_TYPES:
+            # Not just a nicety: XMFileDialog doesn't itself guard against
+            # a Program-type `existing` file -- it would silently show an
+            # empty "Data" editor (Program isn't Data or ASCII, so none of
+            # its content prefill branches match), and saving that would
+            # overwrite the real program with nothing. The disabled Edit
+            # button already prevents reaching this for a mouse click, but
+            # double-click doesn't check button state, so this method
+            # needs its own guard regardless.
+            messagebox.showinfo(
+                "Not Editable", f"{f.type_label} files can't be edited here yet."
+            )
+            return
+        self._edit_file(f.header_addr)
+
+    def _export_selected(self):
+        f = self._selected_file()
+        if f is None:
+            messagebox.showinfo("No Selection", "Select an XM file first.")
+            return
+        self._export_file(f)
+
+    def _remove_selected(self):
+        f = self._selected_file()
+        if f is None:
+            messagebox.showinfo("No Selection", "Select an XM file first.")
+            return
+        self._remove_file(f.header_addr, f.name)
