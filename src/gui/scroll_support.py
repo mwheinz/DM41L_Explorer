@@ -55,7 +55,21 @@ def bind_touchpad_scroll(scrollable_frame):
         if not scrollable_frame.winfo_ismapped():
             return None
         _, delta_y = _decode_touchpad_delta(event.delta)
-        if delta_y:
+        # yview() == (0.0, 1.0) means the whole scrollregion is already
+        # visible -- i.e. this tab's content fits inside the window with
+        # room to spare. Tk's Canvas doesn't clamp yview_scroll() to a
+        # no-op in that case the way it does once content overflows: when
+        # the scrollregion is smaller than the canvas, yview_scroll happily
+        # slides the (already fully visible) content around inside the
+        # extra space instead of refusing the move, which is exactly what
+        # let a two-finger trackpad gesture drag Overview's cards up/down
+        # even though nothing was actually clipped. Mirrors the same guard
+        # CTkScrollableFrame's own built-in `_mouse_wheel_all()` already
+        # uses for regular <MouseWheel>/<Button-4>/<Button-5> scrolling
+        # (see customtkinter/windows/widgets/ctk_scrollable_frame.py) --
+        # <TouchpadScroll> just never had it, since this handler is this
+        # project's own addition, not part of CTkScrollableFrame itself.
+        if delta_y and scrollable_frame._parent_canvas.yview() != (0.0, 1.0):
             scrollable_frame._parent_canvas.yview_scroll(-delta_y, "units")
         return "break"
 
