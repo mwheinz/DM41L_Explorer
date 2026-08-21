@@ -27,6 +27,14 @@ PRIMARY_DATA_END = 0x1FF
 # extend towards ".END.". If alarms exist, the will occupy space between the
 # end of the key assignment and ".END.". Note that key assignments, alarms,
 # and programs are all optional - they may not exist.
+#
+# Key Assignments and Alarms both sit within this same LOW_MEMORY_START-
+# to-.END. span, packed immediately above one another with no gap (see
+# Memory.key_assignments_end()/alarms_end()) -- they are NOT part of
+# "unused" program memory. _render_summary() below subtracts both out of
+# its "Unused program memory" figure, and _render_partition() shows their
+# bounds directly (GitHub issue #23 -- neither used to be accounted for
+# or shown at all).
 LOW_MEMORY_START = 0xC0
 
 # Raw structural XM capacity, in registers: each region's usable span is
@@ -94,15 +102,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
 
         self._stack_frame = self._make_card(0, 0, "Stack & Alpha Registers")
         self._summary_frame = self._make_card(0, 1, "Memory Summary")
-        self._system_frame = self._make_card(1, 0, "System & Pointer Registers")
+        self._system_frame = self._make_card(1, 0, "System Registers")
         self._partition_frame = self._make_card(1, 1, "Memory Partitions")
-
-        '''
-        self._future_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._future_frame.grid(
-            row=2, column=0, columnspan=2, sticky="nsew", padx=8, pady=(4, 12)
-        )
-        '''
 
     def _make_card(self, row, column, title):
         """Creates a bordered/tinted 'card' frame at (row, column) with a
@@ -219,25 +220,13 @@ class OverviewTab(ctk.CTkScrollableFrame):
         rows = [
             ("Q (scratch)", sr.Q().get_hex()),
             ("F (Append)", sr.F().get_hex()),
-            ("Ret. stack a", sr.a().get_hex()),
-            ("Ret. stack b", sr.b().get_hex()),
-            ("c (partition)", sr.c().get_hex()),
-            ("d (56 flags)", sr.d().get_hex()),
+            ("a (Ret. stack)", sr.a().get_hex()),
+            ("b (Ret. stack)", sr.b().get_hex()),
+            ("c", sr.c().get_hex()),
+            ("d (flags)", sr.d().get_hex()),
             ("e", sr.e().get_hex()),
         ]
-        next_row = self._render_grid_rows(
-            self._system_frame, rows, start_row=1, columns=2
-        )
-
-        ctk.CTkLabel(
-            self._system_frame,
-            text="Registers c and d are broken out in detail in the "
-            "Partition panel and the Flags tab, respectively.",
-            wraplength=340,
-            justify="left",
-            text_color="gray60",
-            font=ctk.CTkFont(size=11),
-        ).grid(row=next_row, column=0, columnspan=4, sticky="w", padx=10, pady=(6, 10))
+        self._render_grid_rows(self._system_frame, rows, start_row=1, columns=2)
 
     # -- R00 / .END. / SREG partition ------------------------------------
 
@@ -299,6 +288,45 @@ class OverviewTab(ctk.CTkScrollableFrame):
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).grid(row=3, column=1, sticky="w", padx=10, pady=2)
 
+        # Key Assignments and Alarms sit back-to-back immediately above
+        # LOW_MEMORY_START, below whatever's left for Program storage --
+        # see this module's LOW_MEMORY_START comment. Shown as their own
+        # partitions (not just folded into the Memory Summary card's
+        # register counts) so the boundary between them is visible here
+        # too, matching how R00/.END. are shown as boundaries above
+        # (GitHub issue #23).
+        key_assignments_end = self._memory.key_assignments_end()
+        alarms_end = self._memory.alarms_end()
+
+        ctk.CTkLabel(self._partition_frame, text="Key Assignments:").grid(
+            row=4, column=0, sticky="w", padx=10, pady=2
+        )
+        ctk.CTkLabel(
+            self._partition_frame,
+            text=self._format_partition_span(LOW_MEMORY_START, key_assignments_end),
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+        ).grid(row=4, column=1, columnspan=2, sticky="w", padx=10, pady=2)
+
+        ctk.CTkLabel(self._partition_frame, text="Alarms:").grid(
+            row=5, column=0, sticky="w", padx=10, pady=(2, 10)
+        )
+        ctk.CTkLabel(
+            self._partition_frame,
+            text=self._format_partition_span(key_assignments_end, alarms_end),
+            font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
+        ).grid(row=5, column=1, columnspan=2, sticky="w", padx=10, pady=(2, 10))
+
+    @staticmethod
+    def _format_partition_span(start: int, end: int) -> str:
+        """Formats a [start, end) register span for the Memory Partitions
+        card -- 'none' when the span is empty (start == end, i.e. that
+        partition has nothing in it), otherwise its address range and
+        register count."""
+        if end <= start:
+            return "(none)"
+        count = end - start
+        return f"0x{start:03x}-0x{end - 1:03x} ({count} register{'s' if count != 1 else ''})"
+
     def _apply_r00(self):
         text = self._r00_var.get().strip()
         try:
@@ -331,6 +359,38 @@ class OverviewTab(ctk.CTkScrollableFrame):
 
     # -- Memory usage summary ---------------------------------------------
 
+    def _xm_summary_texts(self):
+        """Returns (files_text, used_text, free_text) for the Memory
+        Summary card's Extended-memory rows. Factored out of
+        _render_summary() so that method stays under pylint's
+        max-locals=20 -- this XM used/free percentage math alone needs
+        about eight locals, and _render_summary() also now has to track
+        the Key Assignments/Alarms register counts (GitHub issue #23)."""
+        try:
+            xm = ExtendedMemory(self._memory, address_range=[0x40, 0x2EF])
+            xm_files = xm.list_files()
+            xm_used = sum(
+                f.num_registers + XM_FILE_OVERHEAD_REGISTERS for f in xm_files
+            )
+            # xm_used can legitimately exceed XM_TOTAL_REGISTERS: that
+            # constant already has EMDIR's next-file reserve subtracted
+            # out (see its definition above), and a real file's own
+            # header+name overhead is exactly what eats into that
+            # reserve once the file actually exists. Clamp the
+            # free/percentage figures rather than showing negative
+            # numbers -- a real DM41L would report 0 free (and refuse
+            # new files), never a negative count.
+            xm_free = max(0, XM_TOTAL_REGISTERS - xm_used)
+            xm_used_pct = min(100, round(100 * xm_used / XM_TOTAL_REGISTERS))
+            return (
+                str(len(xm_files)),
+                f"{xm_used}/{XM_TOTAL_REGISTERS} registers ({xm_used_pct}%)",
+                f"{xm_free}/{XM_TOTAL_REGISTERS} registers ({100 - xm_used_pct}%)",
+            )
+        except DM41LMemoryError as e:
+            logger.warning("Could not list XM files for summary: %s", e)
+            return f"could not be listed ({e})", "unknown", "unknown"
+
     def _render_summary(self):
         self._clear_below_title(self._summary_frame)
 
@@ -349,37 +409,24 @@ class OverviewTab(ctk.CTkScrollableFrame):
         if r00 is not None and r00 < MIN_SANE_R00:
             r00 = None  # No real dump loaded yet -- see gui/memory_ranges.py.
 
-        try:
-            xm = ExtendedMemory(self._memory, address_range=[0x40, 0x2EF])
-            xm_files = xm.list_files()
-            xm_text = str(len(xm_files))
-            xm_used = sum(
-                f.num_registers + XM_FILE_OVERHEAD_REGISTERS for f in xm_files
-            )
-            # xm_used can legitimately exceed XM_TOTAL_REGISTERS: that
-            # constant already has EMDIR's next-file reserve subtracted
-            # out (see its definition above), and a real file's own
-            # header+name overhead is exactly what eats into that
-            # reserve once the file actually exists. Clamp the
-            # free/percentage figures rather than showing negative
-            # numbers -- a real DM41L would report 0 free (and refuse
-            # new files), never a negative count.
-            xm_free = max(0, XM_TOTAL_REGISTERS - xm_used)
-            xm_used_pct = min(100, round(100 * xm_used / XM_TOTAL_REGISTERS))
-            xm_used_text = f"{xm_used}/{XM_TOTAL_REGISTERS} registers ({xm_used_pct}%)"
-            xm_free_text = (
-                f"{xm_free}/{XM_TOTAL_REGISTERS} registers ({100 - xm_used_pct}%)"
-            )
-        except DM41LMemoryError as e:
-            logger.warning("Could not list XM files for summary: %s", e)
-            xm_text = f"could not be listed ({e})"
-            xm_used_text = xm_free_text = "unknown"
+        xm_text, xm_used_text, xm_free_text = self._xm_summary_texts()
 
         rows = []
         if r00 is not None:
+            # Key Assignments and Alarms both live within the same
+            # LOW_MEMORY_START-to-.END. span as "unused" program memory
+            # (see this module's LOW_MEMORY_START comment) -- registers
+            # either one has actually claimed are not free, so both are
+            # subtracted out of "Unused program memory" below rather than
+            # counted as available space (GitHub issue #23).
+            key_assignments_end = self._memory.key_assignments_end()
+            alarms_end = self._memory.alarms_end()
+            key_assignment_regs = key_assignments_end - LOW_MEMORY_START
+            alarm_regs = alarms_end - key_assignments_end
+
             reserved = (PRIMARY_DATA_END + 1) - r00
             consumed = r00 - dot_end
-            available = dot_end - LOW_MEMORY_START
+            available = max(0, dot_end - alarms_end)
             rows.append(
                 (
                     "User memory locations",
@@ -387,6 +434,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
                 )
             )
             rows.append(("Program storage consumed", f"{consumed} registers"))
+            rows.append(("Key assignments", f"{key_assignment_regs} registers"))
+            rows.append(("Alarms", f"{alarm_regs} registers"))
             rows.append(
                 (
                     "Unused program memory",
