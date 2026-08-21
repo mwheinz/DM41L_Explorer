@@ -12,15 +12,14 @@ logger = logging.getLogger(__name__)
 class ProjectConfig:
     """Centralized configuration for DM41L_Explorer with file-based persistence."""
 
-    # Persistent storage location in the user's home directory. Filename is
-    # a holdover from the project's old name "Project Voyager".
+    # Persistent storage location in the user's home directory.
     PREFS_FILE = Path.home() / ".dm41l_explorer.json"
 
     # Default values
     DEFAULT_PREFS = {
-        "baudrate": 38400,
+        "baudrate": 38400, # The only speed the DM41L currently supports.
         "console_timeout_minutes": 10,
-        "serial_port": "/dev/tty.usbmodem14101",
+        "serial_port": "/dev/tty.usbmodem14101", # MacOS default(?)
         "logging_level": "INFO",
         "log_directory": str(Path.home()),
         "appearance_mode": "System",  # "System", "Light", "Dark"
