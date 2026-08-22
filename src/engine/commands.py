@@ -4,10 +4,7 @@ The individual commands for controlling the emulator console.
 
 import re
 import logging
-import os
 from typing import Any
-from pathlib import Path
-from memory import Memory
 from .base_command import BaseCommand
 
 logger = logging.getLogger(__name__)
