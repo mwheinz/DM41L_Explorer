@@ -9,14 +9,11 @@ import customtkinter as ctk
 from memory import Memory
 from gui.flags_doc import load_flag_names
 from gui.scroll_support import bind_touchpad_scroll
-from gui.tab_common import build_tab_header
+from gui.tab_common import build_tab_header, CARD_KWARGS
 
 logger = logging.getLogger(__name__)
 
 FLAG_COUNT = 56
-
-CARD_FG = ("gray92", "gray17")
-CARD_BORDER = ("gray80", "gray28")
 
 
 class FlagsTab(ctk.CTkFrame):
@@ -33,13 +30,7 @@ class FlagsTab(ctk.CTkFrame):
 
         _, self._header_label = build_tab_header(self)
 
-        self._body = ctk.CTkScrollableFrame(
-            self,
-            fg_color=CARD_FG,
-            border_width=1,
-            border_color=CARD_BORDER,
-            corner_radius=10,
-        )
+        self._body = ctk.CTkScrollableFrame(self, **CARD_KWARGS)
         self._body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         bind_touchpad_scroll(self._body)
 

@@ -1,7 +1,7 @@
-'''
+"""
 Overview tab: status registers, the R00/.END. partition, and a summary of
 how memory is divided up. Flags live in their own tab (gui/flags_tab.py).
-'''
+"""
 
 import logging
 from tkinter import messagebox
@@ -17,7 +17,7 @@ from memory import (
     MIN_SANE_R00,
 )
 from gui.scroll_support import bind_touchpad_scroll
-from gui.tab_common import MONOSPACE_FONT_FAMILY
+from gui.tab_common import MONOSPACE_FONT_FAMILY, CARD_KWARGS
 
 logger = logging.getLogger(__name__)
 
@@ -84,14 +84,11 @@ XM_TOTAL_REGISTERS = (
     XM_RAW_REGISTERS - XM_EOM_SENTINEL_REGISTERS - XM_NEXT_FILE_RESERVE_REGISTERS
 )
 
-CARD_FG = ("gray92", "gray17")
-CARD_BORDER = ("gray80", "gray28")
-
 
 class OverviewTab(ctk.CTkScrollableFrame):
-    '''Renders a Memory object's status registers, R00/.END. partition, and
+    """Renders a Memory object's status registers, R00/.END. partition, and
     a register-usage summary. Call `render(memory)` whenever the buffer
-    changes.'''
+    changes."""
 
     def __init__(self, master, on_change=None, **kwargs):
         super().__init__(master, **kwargs)
@@ -110,15 +107,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self._partition_frame = self._make_card(1, 1, "Memory Partitions")
 
     def _make_card(self, row, column, title):
-        '''Creates a bordered/tinted 'card' frame at (row, column) with a
-        bold title, used to visually separate sections from each other.'''
-        card = ctk.CTkFrame(
-            self,
-            fg_color=CARD_FG,
-            border_width=1,
-            border_color=CARD_BORDER,
-            corner_radius=10,
-        )
+        """Creates a bordered/tinted 'card' frame at (row, column) with a
+        bold title, used to visually separate sections from each other."""
+        card = ctk.CTkFrame(self, **CARD_KWARGS)
         card.grid(row=row, column=column, sticky="nsew", padx=8, pady=4)
         ctk.CTkLabel(card, text=title, font=ctk.CTkFont(weight="bold")).grid(
             row=0, column=0, columnspan=4, sticky="w", padx=10, pady=(10, 6)
@@ -325,12 +316,12 @@ class OverviewTab(ctk.CTkScrollableFrame):
 
     @staticmethod
     def _format_partition_span(start: int, end: int) -> str:
-        '''Formats a [start, end) register span for the Memory Partitions
+        """Formats a [start, end) register span for the Memory Partitions
         card -- 'none' when the span is empty (start == end, i.e. that
         partition has nothing in it), otherwise its address range and
         register count. Takes a half-open (exclusive end) span, matching
         this method's original signature -- callers sourcing a RegionSpan
-        (inclusive end) from Memory.regions() pass `span.end + 1`.'''
+        (inclusive end) from Memory.regions() pass `span.end + 1`."""
         if end <= start:
             return "(none)"
         count = end - start
@@ -369,12 +360,12 @@ class OverviewTab(ctk.CTkScrollableFrame):
     # -- Memory usage summary ---------------------------------------------
 
     def _xm_summary_texts(self):
-        '''Returns (files_text, used_text, free_text) for the Memory
+        """Returns (files_text, used_text, free_text) for the Memory
         Summary card's Extended-memory rows. Factored out of
         _render_summary() so that method stays under pylint's
         max-locals=20 -- this XM used/free percentage math alone needs
         about eight locals, and _render_summary() also now has to track
-        the Key Assignments/Alarms register counts (GitHub issue #23).'''
+        the Key Assignments/Alarms register counts (GitHub issue #23)."""
         try:
             xm = ExtendedMemory(self._memory, address_range=[0x40, 0x2EF])
             xm_files = xm.list_files()

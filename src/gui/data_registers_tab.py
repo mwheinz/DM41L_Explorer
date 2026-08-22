@@ -1,4 +1,4 @@
-'''
+"""
 Data Registers tab: view and edit main data memory (R00 through 0x1ff).
 
 Uses a native ttk.Treeview rather than one CustomTkinter widget per cell.
@@ -9,12 +9,11 @@ that count the way a native table does -- see the app's startup-speed
 notes (gui/app.py) for the full story. ttk.Treeview also already receives
 macOS trackpad scroll events correctly on its own, so it doesn't need the
 CTkScrollableFrame workaround in gui/scroll_support.py.
-'''
+"""
 
 import logging
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox
-import tkinter
 import customtkinter as ctk
 
 from memory import (
@@ -27,22 +26,28 @@ from memory import (
 )
 from gui.register_edit_dialog import RegisterEditDialog
 from gui.register_range_dialog import RegisterRangeDialog, RegisterImportLocationDialog
-from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
+from gui.tab_common import (
+    build_tab_header,
+    build_tree_with_scrollbar,
+    style_treeview,
+    apply_row_tags,
+    clear_selected_row_tag,
+    read_text_file_via_dialog,
+)
 
 logger = logging.getLogger(__name__)
 
-# Selected-row highlight, applied via the "selectedrow" tag (see
-# _on_tree_selected()). Fixed rather than dark/light-mode-dependent like
-# stripe_bg_color() -- CustomTkinter's own default accent blue reads fine
-# against either theme's row background, so the selected row matches the
-# rest of the app's UI instead of introducing a new color.
-SELECTED_ROW_BG = "#1f6aa5"
-SELECTED_ROW_FG = "#ffffff"
+_TREE_COLUMNS = [
+    ("reg", "Reg", 55, False),
+    ("addr", "Addr", 65, False),
+    ("hex", "Hex", 170, False),
+    ("value", "Value", 170, True),
+]
 
 
 class DataRegistersTab(ctk.CTkFrame):
-    '''Renders the main-data-memory register table for a Memory object.
-    Call `render(memory)` whenever the buffer changes.'''
+    """Renders the main-data-memory register table for a Memory object.
+    Call `render(memory)` whenever the buffer changes."""
 
     def __init__(self, master, on_change=None, **kwargs):
         super().__init__(master, **kwargs)
@@ -73,7 +78,7 @@ class DataRegistersTab(ctk.CTkFrame):
         table_frame = ctk.CTkFrame(self, fg_color="transparent")
         table_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
-        self._style_treeview()
+        self._stripe_bg = style_treeview()
 
         # The register list is split across two side-by-side tables (the
         # first half of registers on the left, the rest on the right)
@@ -87,14 +92,10 @@ class DataRegistersTab(ctk.CTkFrame):
         right_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
         right_frame.pack(side="left", fill="both", expand=True, padx=(8, 0))
 
-        self._tree_left = self._build_register_tree(left_frame)
-        self._tree_right = self._build_register_tree(right_frame)
+        self._tree_left, _ = build_tree_with_scrollbar(left_frame, _TREE_COLUMNS)
+        self._tree_right, _ = build_tree_with_scrollbar(right_frame, _TREE_COLUMNS)
         self._trees = (self._tree_left, self._tree_right)
-        for tree in self._trees:
-            tree.tag_configure("oddrow", background=self._stripe_bg)
-            tree.tag_configure(
-                "selectedrow", background=SELECTED_ROW_BG, foreground=SELECTED_ROW_FG
-            )
+        apply_row_tags(self._trees, self._stripe_bg)
 
         for tree in self._trees:
             tree.bind("<Double-1>", lambda e: self._edit_selected())
@@ -106,133 +107,35 @@ class DataRegistersTab(ctk.CTkFrame):
                 lambda e, t=tree: self._on_tree_selected(t),
             )
 
-    def _build_register_tree(self, parent) -> ttk.Treeview:
-        columns = ("reg", "addr", "hex", "value")
-        tree = ttk.Treeview(
-            parent, columns=columns, show="headings", selectmode="browse"
-        )
-        for col, text, width, stretch in [
-            ("reg", "Reg", 55, False),
-            ("addr", "Addr", 65, False),
-            ("hex", "Hex", 170, False),
-            ("value", "Value", 170, True),
-        ]:
-            tree.heading(col, text=text)
-            tree.column(col, width=width, anchor="w", stretch=stretch)
-
-        vsb = tkinter.Scrollbar(
-            parent,
-            orient="vertical",
-            command=tree.yview,
-        )
-        tree.configure(yscrollcommand=vsb.set)
-        tree.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="left", fill="y")
-        return tree
-
-    def _style_treeview(self):
-        '''Rough dark/light theming so the native table (and its native
-        scrollbar) don't clash too badly with CustomTkinter's look. This
-        table uses ttk.Treeview/tkinter.Scrollbar instead of CTk widgets purely
-        for performance (see module docstring) -- CTk has no theme hook
-        into ttk, so without this the scrollbar (and font) would default to
-        the stock OS theme, which looks noticeably different from the
-        CTkScrollableFrame scrollbars used on the Flags/XM Files tabs.
-
-        Row/cell text uses the app's shared monospace font (see
-        gui/tab_common.py) since every column here is register content
-        (address, hex bytes, decoded value) rather than a label -- fixed
-        width keeps those columns aligned. The heading row stays in the
-        regular UI font (read from CTk's own theme dict, so it automatically
-        follows whatever font preference gui/app.py applied at startup --
-        see `_apply_font_prefs`), matching the bold-labeled column headers
-        used elsewhere (e.g. the XM Files tab).
-
-        Also stashes `self._stripe_bg` for alternating row colors -- reuses
-        the same subtle shade already used for the heading/scrollbar trough
-        (now centralized in gui/tab_common.py's `stripe_bg_color()`, shared
-        with the XM Files/Programs tabs' own zebra striping) rather than
-        inventing a third color, so odd rows read as a gentle tint instead
-        of a jarring stripe. Row tags are applied per-item in render(),
-        once the tree widgets exist (an instance method, not @staticmethod
-        like this used to be, purely so it has a `self` to stash that
-        color on for `_build_register_tree` to pick up).
-
-        See `_on_tree_selected()` for why the selected row's highlight is
-        applied by hand via a "selectedrow" tag (colored with the
-        module-level SELECTED_ROW_BG/FG) instead of relying solely on
-        the `style.map(..., background=[("selected", ...)])` call
-        below.'''
-        style = ttk.Style()
-        try:
-            style.theme_use("default")
-        except Exception as e:
-            logger.debug("Could not switch ttk theme to 'default': %s", e)
-        dark = ctk.get_appearance_mode() == "Dark"
-        bg = stripe_bg_color()
-        field_bg = "#242424" if dark else "#ffffff"
-        fg = "#e6e6e6" if dark else "#1a1a1a"
-        self._stripe_bg = bg
-        ui_font = ctk.ThemeManager.theme["CTkFont"]
-        font = (MONOSPACE_FONT_FAMILY, ui_font["size"])
-        heading_font = (ui_font["family"], ui_font["size"], "bold")
-        style.configure(
-            "Treeview",
-            background=field_bg,
-            fieldbackground=field_bg,
-            foreground=fg,
-            rowheight=22,
-            borderwidth=0,
-            font=font,
-        )
-        style.configure(
-            "Treeview.Heading", background=bg, foreground=fg, font=heading_font
-        )
-        # In principle this alone should color the selected row, but a
-        # per-item tag's background (e.g. "oddrow" below) silently wins
-        # over this "selected" state map in ttk.Treeview -- a long-
-        # standing Tk behavior, not specific to this app or platform.
-        # Since every row here carries either "oddrow" or the default
-        # (untagged) styling, that made the selection highlight
-        # invisible on every zebra-striped row and unreliable on the
-        # rest -- GitHub issue #22. Kept as a harmless fallback; the
-        # real fix is the hand-managed "selectedrow" tag in
-        # `_on_tree_selected()`.
-        style.map("Treeview", background=[("selected", SELECTED_ROW_BG)])
-
     def refresh_theme(self):
-        '''Re-applies theme-dependent ttk styling/colors after
+        """Re-applies theme-dependent ttk styling/colors after
         ctk.set_appearance_mode() changes elsewhere (e.g. Preferences --
         see gui/app.py's _on_preferences_saved()).
 
-        __init__ used to call _style_treeview() once, at construction
-        time, and nothing ever re-invoked it on a live theme change --
-        CTk's own theme engine has no hook into ttk (see
-        _style_treeview()'s docstring). That's why this tab used to need
-        a full restart to follow a dark/light switch. This recomputes
+        __init__ used to call gui/tab_common.py's `style_treeview()` once,
+        at construction time, and nothing ever re-invoked it on a live
+        theme change -- CTk's own theme engine has no hook into ttk (see
+        that function's docstring). That's why this tab used to need a
+        full restart to follow a dark/light switch. This recomputes
         _stripe_bg and re-applies the "oddrow" tag on both trees, in
         place -- tag_configure updates propagate to already-rendered
-        rows automatically, no need to re-render().'''
-        self._style_treeview()
-        for tree in self._trees:
-            tree.tag_configure("oddrow", background=self._stripe_bg)
-            tree.tag_configure(
-                "selectedrow", background=SELECTED_ROW_BG, foreground=SELECTED_ROW_FG
-            )
+        rows automatically, no need to re-render()."""
+        self._stripe_bg = style_treeview()
+        apply_row_tags(self._trees, self._stripe_bg)
 
     def _notify_change(self):
         if self._on_change:
             self._on_change()
 
     def _on_tree_selected(self, selected_tree: ttk.Treeview):
-        '''Gives the selected row a visible highlight -- GitHub issue #22.
+        """Gives the selected row a visible highlight -- GitHub issue #22.
 
         ttk.Treeview has a built-in "selected" state background (set via
-        `style.map()` in `_style_treeview()`), but a per-item tag's
-        background overrides it regardless of selection state, which is
-        why the highlight never showed: every row here carries either
-        the "oddrow" zebra-stripe tag or the default (untagged) style,
-        and the tag always won.
+        `style.map()` in gui/tab_common.py's `style_treeview()`), but a
+        per-item tag's background overrides it regardless of selection
+        state, which is why the highlight never showed: every row here
+        carries either the "oddrow" zebra-stripe tag or the default
+        (untagged) style, and the tag always won.
 
         The fix is NOT to give "selectedrow" priority over "oddrow" by
         listing it first -- an earlier version of this fix tried that,
@@ -246,10 +149,16 @@ class DataRegistersTab(ctk.CTkFrame):
         background matches the "selected" state color from `style.map()`
         above, so it doesn't matter which of those two agreeing sources
         wins either. "oddrow" is restored on deselect by recomputing that
-        row's position parity from its current index in the tree, rather
-        than caching it -- no state to go stale across a render()
-        teardown/rebuild.
-        '''
+        row's position parity from its current index in the tree
+        (gui/tab_common.py's `clear_selected_row_tag()`), rather than
+        caching it -- no state to go stale across a render() teardown/
+        rebuild. This tab's own version of the fix (unlike
+        gui/program_tab.py's/gui/xm_files_tab.py's single-table
+        `highlight_selected_row()` use) has to clear the tag across
+        *both* side-by-side tables before re-tagging just the one that
+        was actually clicked, hence calling `clear_selected_row_tag()`
+        directly here instead.
+        """
         selection = selected_tree.selection()
         if not selection:
             return
@@ -259,9 +168,7 @@ class DataRegistersTab(ctk.CTkFrame):
         # recomputed from its position -- cheaper than tracking it and
         # always correct even right after a render() rebuilt every row.
         for tree in self._trees:
-            for pos, iid in enumerate(tree.get_children()):
-                if "selectedrow" in tree.item(iid, "tags"):
-                    tree.item(iid, tags=("oddrow",) if pos % 2 else ())
+            clear_selected_row_tag(tree)
 
         # Keep selection exclusive across both tables -- selecting a row
         # in one should clear whatever was selected in the other, so
@@ -332,10 +239,10 @@ class DataRegistersTab(ctk.CTkFrame):
             )
 
     def _current_range(self):
-        '''Returns (r00, count) for the currently-displayed data
+        """Returns (r00, count) for the currently-displayed data
         registers, or None if there's no memory loaded / no sane R00 --
         the same check render() uses, shared here so Export/Import don't
-        each re-derive it.'''
+        each re-derive it."""
         if self._memory is None:
             return None
         try:
@@ -347,11 +254,11 @@ class DataRegistersTab(ctk.CTkFrame):
         return r00, (PRIMARY_DATA_END + 1) - r00
 
     def _export_registers(self):
-        '''Prompts for which sub-range of the currently-displayed data
+        """Prompts for which sub-range of the currently-displayed data
         registers to export (default: all of them -- GitHub issue #15),
         then writes that range as one DATA-format line each (see
         registers.format_data_line()), in R00..end order -- GitHub issue
-        #11.'''
+        #11."""
         current_range = self._current_range()
         if current_range is None:
             messagebox.showwarning(
@@ -395,13 +302,13 @@ class DataRegistersTab(ctk.CTkFrame):
         RegisterRangeDialog(self, count, do_export)
 
     def _import_registers(self):
-        '''Reads a DATA-format file (see registers.parse_data_line()) and
+        """Reads a DATA-format file (see registers.parse_data_line()) and
         prompts for which currently-displayed register the file's data
         should start overwriting from -- GitHub issue #14. The file no
         longer has to cover every displayed register; it just has to fit
         starting from the chosen location, and this does not resize main
         memory (see GitHub issue #11 for the original all-registers-only
-        behavior this replaces).'''
+        behavior this replaces)."""
         current_range = self._current_range()
         if current_range is None:
             messagebox.showwarning(
@@ -410,16 +317,8 @@ class DataRegistersTab(ctk.CTkFrame):
             return
         r00, count = current_range
 
-        path = filedialog.askopenfilename(
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
-        )
-        if not path:
-            return
-        try:
-            content = Path(path).read_text(encoding="ascii")
-        except (OSError, UnicodeDecodeError) as e:
-            logger.warning("Could not read %s for register import: %s", path, e)
-            messagebox.showerror("Could Not Read File", str(e))
+        path, content = read_text_file_via_dialog("register import", logger)
+        if path is None:
             return
 
         # Every line matters here -- each maps to one specific register

@@ -21,13 +21,20 @@ which was specific to the CTkScrollableFrame/Canvas this tab used to use.
 
 import logging
 from pathlib import Path
-from tkinter import ttk, filedialog, messagebox
-import tkinter
+from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from memory import Memory, ExtendedMemory, DM41LMemoryError, parse_data_line
 from gui.xm_file_dialog import XMFileDialog
-from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
+from gui.tab_common import (
+    build_tab_header,
+    build_tab_treeview,
+    style_treeview,
+    apply_row_tags,
+    highlight_selected_row,
+    read_text_file_via_dialog,
+    clear_tree_for_render,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,17 +44,19 @@ logger = logging.getLogger(__name__)
 # enable/disable) and _edit_selected()'s own defensive check.
 _EDITABLE_FILE_TYPES = (ExtendedMemory.TYPE_DATA, ExtendedMemory.TYPE_ASCII)
 
-# Selected-row highlight. Deliberately a local copy of
-# data_registers_tab.py's own SELECTED_ROW_BG/FG (same values), not a
-# shared import -- see this tab's _style_treeview() docstring for why this
-# tab also needs its own, separately-named ttk style ("XMFiles.Treeview")
-# rather than reusing the plain "Treeview" style Data Registers configures;
-# keeping the color constants local alongside that separate style avoids
-# an awkward cross-tab-module import for two hex strings.
-SELECTED_ROW_BG = "#1f6aa5"
-SELECTED_ROW_FG = "#ffffff"
-
+# Distinct ttk style name for this tab's Treeview/scrollbar -- see
+# gui/tab_common.py's `style_treeview()` docstring for why this tab needs
+# its own, separately-named ttk style rather than reusing the plain
+# "Treeview" style Data Registers configures.
 _TREE_STYLE = "XMFiles.Treeview"
+
+_TREE_COLUMNS = [
+    ("name", "Name", 90, False),
+    ("type", "Type", 90, False),
+    ("header", "Header", 90, False),
+    ("registers", "Size", 70, False),
+    ("preview", "Preview", 180, True),
+]
 
 
 def _guess_file_type(lines: list) -> str:
@@ -106,40 +115,7 @@ class XMFilesTab(ctk.CTkFrame):
         )
         remove_button.pack(side="right", padx=(0, 8))
 
-        table_frame = ctk.CTkFrame(self, fg_color="transparent")
-        table_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-
-        self._stripe_bg = self._style_treeview()
-
-        self._tree = ttk.Treeview(
-            table_frame,
-            columns=("name", "type", "header", "registers", "preview"),
-            show="headings",
-            selectmode="browse",
-            style=_TREE_STYLE,
-        )
-        for col, text, width, stretch in [
-            ("name", "Name", 90, False),
-            ("type", "Type", 90, False),
-            ("header", "Header", 90, False),
-            ("registers", "Size", 70, False),
-            ("preview", "Preview", 180, True),
-        ]:
-            self._tree.heading(col, text=text)
-            self._tree.column(col, width=width, anchor="w", stretch=stretch)
-        self._tree.tag_configure("oddrow", background=self._stripe_bg)
-        self._tree.tag_configure(
-            "selectedrow", background=SELECTED_ROW_BG, foreground=SELECTED_ROW_FG
-        )
-
-        vsb = tkinter.Scrollbar(
-            table_frame,
-            orient="vertical",
-            command=self._tree.yview,
-        )
-        self._tree.configure(yscrollcommand=vsb.set)
-        self._tree.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="left", fill="y")
+        _, self._tree = build_tab_treeview(self, _TREE_COLUMNS, style=_TREE_STYLE)
 
         self._tree.bind("<Double-1>", lambda e: self._edit_selected())
         self._tree.bind("<<TreeviewSelect>>", self._on_tree_selected)
@@ -165,72 +141,14 @@ class XMFilesTab(ctk.CTkFrame):
         self._update_action_buttons = update_action_buttons
         self._update_action_buttons(None)
 
-    def _style_treeview(self) -> str:
-        """Rough dark/light theming for this tab's native table (font,
-        colors, scrollbar look) -- see gui/data_registers_tab.py's own
-        `_style_treeview()` for the original version of this and why a
-        native ttk.Treeview/tkinter.Scrollbar is used here instead of CTk
-        widgets at all (performance).
-
-        Uses the shared monospace font (gui/tab_common.py) for the whole
-        table, matching Data Registers -- half of this tab's original
-        per-row labels (Header, Preview) already used it, and giving the
-        whole tree one consistent font avoids yet another same-values-
-        for-now, could-silently-diverge-later coupling with Data
-        Registers' choice.
-
-        Returns the current stripe background color, for the caller to
-        `tag_configure("oddrow", ...)` -- unlike the style calls above,
-        tag colors are per-widget-instance, not shared."""
-        style = ttk.Style()
-        try:
-            style.theme_use("default")
-        except Exception as e:
-            logger.debug("Could not switch ttk theme to 'default': %s", e)
-        dark = ctk.get_appearance_mode() == "Dark"
-        bg = stripe_bg_color()
-        field_bg = "#242424" if dark else "#ffffff"
-        fg = "#e6e6e6" if dark else "#1a1a1a"
-        ui_font = ctk.ThemeManager.theme["CTkFont"]
-        font = (MONOSPACE_FONT_FAMILY, ui_font["size"])
-        heading_font = (ui_font["family"], ui_font["size"], "bold")
-        style.configure(
-            _TREE_STYLE,
-            background=field_bg,
-            fieldbackground=field_bg,
-            foreground=fg,
-            rowheight=22,
-            borderwidth=0,
-            font=font,
-        )
-        style.configure(
-            f"{_TREE_STYLE}.Heading", background=bg, foreground=fg, font=heading_font
-        )
-        # Kept as a harmless fallback even though the hand-managed
-        # "selectedrow" tag (see _on_tree_selected()) is what actually
-        # does the work -- a per-item tag's background silently overrides
-        # this "selected" state map in ttk.Treeview regardless of what
-        # this says, a long-standing Tk behavior. See
-        # data_registers_tab.py's _on_tree_selected() docstring
-        # (GitHub issue #22) for the full story and why the fix can't
-        # just be "give selectedrow priority over oddrow" either --
-        # that priority itself turned out to be inconsistent across Tk
-        # builds/platforms.
-        style.map(_TREE_STYLE, background=[("selected", SELECTED_ROW_BG)])
-
-        return bg
-
     def refresh_theme(self):
         """Re-applies theme-dependent ttk styling/colors after
         ctk.set_appearance_mode() changes elsewhere (e.g. Preferences) --
         see gui/data_registers_tab.py's identical method for why this is
         needed at all (CustomTkinter's theme engine has no hook into
         ttk)."""
-        self._stripe_bg = self._style_treeview()
-        self._tree.tag_configure("oddrow", background=self._stripe_bg)
-        self._tree.tag_configure(
-            "selectedrow", background=SELECTED_ROW_BG, foreground=SELECTED_ROW_FG
-        )
+        self._stripe_bg = style_treeview(_TREE_STYLE)
+        apply_row_tags(self._tree, self._stripe_bg)
 
     def _notify_change(self):
         if self._on_change:
@@ -241,19 +159,12 @@ class XMFilesTab(ctk.CTkFrame):
 
     def _on_tree_selected(self, event=None):  # pylint: disable=unused-argument
         """Gives the selected row a visible highlight, the same way (and
-        for the same reason) as data_registers_tab.py's own
-        `_on_tree_selected()` -- see that method's docstring for the full
-        GitHub issue #22 story. This tab only has one table (not two side
-        by side like Data Registers), so there's no cross-tree
-        exclusivity to manage -- just this table's own selection."""
-        for pos, iid in enumerate(self._tree.get_children()):
-            if "selectedrow" in self._tree.item(iid, "tags"):
-                self._tree.item(iid, tags=("oddrow",) if pos % 2 else ())
-
-        selection = self._tree.selection()
-        if selection:
-            self._tree.item(selection[0], tags=("selectedrow",))
-
+        for the same reason) as gui/tab_common.py's
+        `highlight_selected_row()` docstring (GitHub issue #22) explains.
+        This tab only has one table (not two side by side like Data
+        Registers), so there's no cross-tree exclusivity to manage --
+        just this table's own selection."""
+        highlight_selected_row(self._tree)
         self._update_action_buttons(self._selected_file())
 
     def _selected_header_addr(self):
@@ -275,10 +186,7 @@ class XMFilesTab(ctk.CTkFrame):
 
     def render(self, memory: Memory):
         self._memory = memory
-        self._tree.delete(*self._tree.get_children())
-
-        if memory is None:
-            self._header_label.configure(text="(no memory dump loaded)")
+        if clear_tree_for_render(self._tree, self._header_label, memory):
             self._update_action_buttons(None)
             return
 
@@ -393,16 +301,8 @@ class XMFilesTab(ctk.CTkFrame):
             )
             return
 
-        path = filedialog.askopenfilename(
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
-        )
-        if not path:
-            return
-        try:
-            content = Path(path).read_text(encoding="ascii")
-        except (OSError, UnicodeDecodeError) as e:
-            logger.warning("Could not read %s for XM file import: %s", path, e)
-            messagebox.showerror("Could Not Read File", str(e))
+        path, content = read_text_file_via_dialog("XM file import", logger)
+        if path is None:
             return
 
         default_name = Path(path).stem[:7] or "IMPORT"

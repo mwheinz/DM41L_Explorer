@@ -41,7 +41,7 @@ import customtkinter as ctk
 from memory import Memory
 from gui.key_assignment_edit_dialog import KeyAssignmentEditDialog
 from gui.scroll_support import bind_touchpad_scroll
-from gui.tab_common import build_tab_header
+from gui.tab_common import build_tab_header, build_caption_label, CARD_FG, CARD_BORDER
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +70,6 @@ DM41L_LAYOUT = [
     ["ON", "SHIFT", "ALPHA", 33, 34, 41, 81, 82, 83, 84],
 ]
 
-CARD_FG = ("gray92", "gray17")
-CARD_BORDER = ("gray80", "gray28")
 UNASSIGNED_TEXT = "gray50"
 UNASSIGNED_FG = ("gray85", "gray24")
 
@@ -157,21 +155,13 @@ class KeyAssignmentsTab(ctk.CTkFrame):
 
         _, self._header_label = build_tab_header(self)
 
-        self._caption = ctk.CTkLabel(
+        self._caption = build_caption_label(
             self,
-            text=(
-                "Click a key's unshifted or shifted function to assign, "
-                "reassign, or delete it -- a built-in/peripheral function "
-                "or a global program (marked ▸). Import/export of key "
-                "assignments isn't handled here yet."
-            ),
-            font=ctk.CTkFont(size=12),
-            text_color="gray60",
-            anchor="w",
-            justify="left",
-            wraplength=900,
+            "Click a key's unshifted or shifted function to assign, "
+            "reassign, or delete it -- a built-in/peripheral function "
+            "or a global program (marked ▸). Import/export of key "
+            "assignments isn't handled here yet.",
         )
-        self._caption.pack(fill="x", padx=8, pady=(0, 4))
 
         self._scroll = ctk.CTkScrollableFrame(self)
         self._scroll.pack(fill="both", expand=True, padx=8, pady=(0, 8))
