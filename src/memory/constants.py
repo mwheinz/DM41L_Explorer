@@ -17,11 +17,6 @@ PRIMARY_DATA_END = 0x1FF
 # isn't a real partition boundary, just "there's no dump here yet". Treat
 # anything below this as that case, rather than as a dump with an
 # implausibly huge (up to 512-register) data segment.
-#
-# Moved here from gui/memory_ranges.py (issue #25) since Memory.regions()
-# needs this same threshold to decide whether a real program/data
-# partition exists -- it's a property of the dump itself, not just a GUI
-# display concern. gui/memory_ranges.py re-exports it for compatibility.
 MIN_SANE_R00 = 0xC1
 
 ZERO_REGISTER_HEX = "00000000000000"

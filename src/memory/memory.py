@@ -100,6 +100,10 @@ class Memory:
 
     @classmethod
     def from_string(cls, buffer: str) -> "Memory":
+        '''
+        Creates a new Memory object from a string that contains a DM41
+        memory dump.
+        '''
         lines = buffer.strip().splitlines()
         if not lines:
             return cls()
@@ -160,6 +164,7 @@ class Memory:
 
     @classmethod
     def from_file(cls, path: Union[str, Path]) -> "Memory":
+        ''' Load a memory dump from disk. '''
         with open(path, "r", encoding="utf-8") as f:
             return cls.from_string(f.read())
 
