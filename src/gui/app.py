@@ -1,7 +1,7 @@
-"""
+'''
 DM41L Explorer: a CustomTkinter GUI for DM41L_Explorer.
 
-"""
+'''
 
 import logging
 import logging.handlers
@@ -131,7 +131,7 @@ def _setup_logging(config_store):
 
 
 def _apply_font_prefs(config_store):
-    """Overrides CustomTkinter's default UI font family/size, if configured.
+    '''Overrides CustomTkinter's default UI font family/size, if configured.
 
     CTkFont() instances read `ThemeManager.theme["CTkFont"]` at construction
     time for whichever of family/size/weight isn't explicitly passed in, so
@@ -144,7 +144,7 @@ def _apply_font_prefs(config_store):
 
     Leaves CTk's own per-platform default (set by `set_default_color_theme`
     above) alone for whichever of family/size the user hasn't overridden.
-    """
+    '''
     if config_store.font_family:
         ctk.ThemeManager.theme["CTkFont"]["family"] = config_store.font_family
     if config_store.font_size:
@@ -152,7 +152,7 @@ def _apply_font_prefs(config_store):
 
 
 class DM41LExplorerApp(ctk.CTk):
-    """Main application window."""
+    '''Main application window.'''
 
     def __init__(self):
         super().__init__()
@@ -295,8 +295,8 @@ class DM41LExplorerApp(ctk.CTk):
         self._tabs_dirty = {name: True for name in self._tabs}
 
     def _build_menus(self):
-        """Builds the application's menu bar. Every basic function lives
-        here rather than in toolbar buttons, per the current design."""
+        '''Builds the application's menu bar. Every basic function lives
+        here rather than in toolbar buttons, per the current design.'''
 
         acc = "Command" if PLATFORM_SYSTEM == "Darwin" else "Control"
 
@@ -456,14 +456,14 @@ class DM41LExplorerApp(ctk.CTk):
         self._render_active_tab()
 
     def _render_active_tab(self):
-        """Renders only the tab currently on screen, if it's stale.
+        '''Renders only the tab currently on screen, if it's stale.
 
         Tabs render lazily rather than all at once: building a tab's
         widgets from scratch for a big register table is genuinely slow
         (see the module docstring), so there's no reason to pay that cost
         for tabs the user hasn't looked at yet, or to pay it twice for a
         tab that's already showing current content.
-        """
+        '''
         name = self.tabview.get()
         if not self._tabs_dirty.get(name, True):
             return
@@ -471,9 +471,9 @@ class DM41LExplorerApp(ctk.CTk):
         self._tabs_dirty[name] = False
 
     def _render_tabs(self):
-        """Invalidates every tab (e.g. after loading a whole new dump) and
+        '''Invalidates every tab (e.g. after loading a whole new dump) and
         immediately re-renders whichever one is currently visible; the
-        rest pick up the new memory next time they're selected."""
+        rest pick up the new memory next time they're selected.'''
         for name in self._tabs_dirty:
             self._tabs_dirty[name] = True
         self._render_active_tab()
@@ -500,7 +500,7 @@ class DM41LExplorerApp(ctk.CTk):
     # -- Connection -------------------------------------------------------
 
     def attempt_auto_connect(self):
-        """Entry point: try the configured default port; on failure, prompt."""
+        '''Entry point: try the configured default port; on failure, prompt.'''
         default_port = self.config_store.serial_port
         ports = self.serial.get_available_ports()
 
@@ -763,13 +763,13 @@ class DM41LExplorerApp(ctk.CTk):
         self._load_dump_into_buffer(path)
 
     def _load_dump_into_buffer(self, path):
-        """Reads `path` into self.memory and refreshes the UI to match.
+        '''Reads `path` into self.memory and refreshes the UI to match.
         This is the actual load step shared by every way of opening a dump
         (File > Open..., a startup file argument, and double-clicking a
         .dm41 file) -- callers are responsible for checking `self.dirty`
         and confirming with the user first, since the right prompt (or
         whether to prompt at all) differs by caller. This always
-        overwrites the current buffer unconditionally."""
+        overwrites the current buffer unconditionally.'''
         try:
             self.memory = Memory.from_file(path)
             self.memory_source = Path(path)
@@ -785,7 +785,7 @@ class DM41LExplorerApp(ctk.CTk):
             messagebox.showerror("Error", f"Could not load dump: {e}")
 
     def open_dump_file(self, path):
-        """Opens `path` as the app's current dump, prompting to discard
+        '''Opens `path` as the app's current dump, prompting to discard
         unsaved changes first if needed (same prompt File > Open... uses).
 
         Public entry point for anything that hands the app a file path
@@ -794,7 +794,7 @@ class DM41LExplorerApp(ctk.CTk):
         launching fresh via double-click on macOS -- see
         `_handle_startup_file_arg`/main() below) and the macOS "Open
         Document" AppleEvent for double-clicking a .dm41 file while the
-        app is already running (see `_on_mac_open_document` below)."""
+        app is already running (see `_on_mac_open_document` below).'''
         if not Path(path).exists():
             logger.warning("Could not find file: %s", path)
             messagebox.showerror("Error", f"Could not find file: {path}")
@@ -806,12 +806,12 @@ class DM41LExplorerApp(ctk.CTk):
         self._load_dump_into_buffer(path)
 
     def _on_mac_open_document(self, *paths):
-        """Handles macOS's "Open Document" AppleEvent -- what Finder sends
+        '''Handles macOS's "Open Document" AppleEvent -- what Finder sends
         for double-clicking a .dm41 file, whether that launches the app
         fresh or the app is already running. Tk surfaces this as a
         registered command (wired in __init__) rather than a normal
         widget-level event or sys.argv, per
-        https://www.tcl.tk/man/tcl/TkCmd/tk_mac.html."""
+        https://www.tcl.tk/man/tcl/TkCmd/tk_mac.html.'''
         if not paths:
             return
         # Finder can in principle hand over more than one path at once
@@ -917,7 +917,7 @@ class DM41LExplorerApp(ctk.CTk):
 
 
 def _handle_startup_file_arg(app):
-    """Opens a dump file passed on the command line at launch, if any --
+    '''Opens a dump file passed on the command line at launch, if any --
     the Windows/Linux half of "double-click a .dm41 file to open it": file
     associations on those platforms launch the app with the file's path as
     an argument. macOS instead delivers this via an "Open Document"
@@ -928,7 +928,7 @@ def _handle_startup_file_arg(app):
     Ignores anything that looks like a flag (starts with "-") rather than
     a path, since this app has no other command-line options of its own to
     parse -- a stray flag shouldn't be treated as a file to open.
-    """
+    '''
     if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         app.open_dump_file(sys.argv[1])
 
