@@ -75,6 +75,40 @@ CARD_BORDER = ("gray80", "gray28")
 UNASSIGNED_TEXT = "gray50"
 UNASSIGNED_FG = ("gray85", "gray24")
 
+# Background colors for the fixed non-assignable physical-key cells
+# rendered by _build_static_cell() (issue #24): the color is the CELL's
+# fg_color (the CTkFrame tile itself), not the label's text -- CTkLabel's
+# own fg_color defaults to "transparent" (confirmed against customtkinter's
+# theme JSON), so it always shows whatever color the surrounding cell frame
+# is painted, the same way CARD_FG paints every other cell. SHIFT and ALPHA
+# each get one color used in both appearance modes, per the issue (no
+# light/dark split was asked for those two); ON/USR/PGM get a light/dark
+# tuple, matching the issue's explicit "dark grey in light mode, light grey
+# in dark mode" ask.
+SHIFT_BG_COLOR = "#FFD700"  # gold yellow
+ALPHA_BG_COLOR = "#ADD8E6"  # light blue
+NON_ASSIGNABLE_BG_COLOR = ("gray30", "gray70")  # dark grey / light grey
+
+STATIC_CELL_BG_COLORS = {
+    "SHIFT": SHIFT_BG_COLOR,
+    "ALPHA": ALPHA_BG_COLOR,
+    "ON": NON_ASSIGNABLE_BG_COLOR,
+    "USR": NON_ASSIGNABLE_BG_COLOR,
+    "PGM": NON_ASSIGNABLE_BG_COLOR,
+}
+
+# Label text colors to match each background above -- dark text reads on
+# the light SHIFT/ALPHA backgrounds; NON_ASSIGNABLE's text is the inverse
+# of its own tuple (light text on the dark-grey light-mode background,
+# dark text on the light-grey dark-mode background), not a copy of it.
+STATIC_CELL_TEXT_COLORS = {
+    "SHIFT": "gray10",
+    "ALPHA": "gray10",
+    "ON": ("gray90", "gray10"),
+    "USR": ("gray90", "gray10"),
+    "PGM": ("gray90", "gray10"),
+}
+
 # Sized for the actual function-name lengths in memory/functions.py (median
 # 4 characters, longest 7, e.g. "RCLFLAG") rather than the widest string
 # that could ever appear -- a handful of long names may render a touch
@@ -247,7 +281,7 @@ class KeyAssignmentsTab(ctk.CTkFrame):
     def _build_static_cell(self, parent, label: str, row: int, col: int):
         cell = ctk.CTkFrame(
             parent,
-            fg_color=CARD_FG,
+            fg_color=STATIC_CELL_BG_COLORS.get(label, CARD_FG),
             border_width=1,
             border_color=CARD_BORDER,
             corner_radius=6,
@@ -256,7 +290,7 @@ class KeyAssignmentsTab(ctk.CTkFrame):
         ctk.CTkLabel(
             cell,
             text=label,
-            text_color="gray50",
+            text_color=STATIC_CELL_TEXT_COLORS.get(label, "gray50"),
             font=ctk.CTkFont(size=10),
             width=KEY_BUTTON_WIDTH,
             height=44,
