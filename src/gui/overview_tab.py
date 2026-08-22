@@ -5,7 +5,6 @@ how memory is divided up. Flags live in their own tab (gui/flags_tab.py).
 
 import logging
 from tkinter import messagebox
-import tkinter
 import customtkinter as ctk
 
 from memory import (
