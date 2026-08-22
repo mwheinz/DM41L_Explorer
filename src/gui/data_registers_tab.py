@@ -1,4 +1,4 @@
-"""
+'''
 Data Registers tab: view and edit main data memory (R00 through 0x1ff).
 
 Uses a native ttk.Treeview rather than one CustomTkinter widget per cell.
@@ -9,7 +9,7 @@ that count the way a native table does -- see the app's startup-speed
 notes (gui/app.py) for the full story. ttk.Treeview also already receives
 macOS trackpad scroll events correctly on its own, so it doesn't need the
 CTkScrollableFrame workaround in gui/scroll_support.py.
-"""
+'''
 
 import logging
 from pathlib import Path
@@ -17,10 +17,16 @@ from tkinter import ttk, filedialog, messagebox
 import tkinter
 import customtkinter as ctk
 
-from memory import Memory, Register, PRIMARY_DATA_END, format_data_line, parse_data_line
+from memory import (
+    Memory,
+    Register,
+    PRIMARY_DATA_END,
+    MIN_SANE_R00,
+    format_data_line,
+    parse_data_line,
+)
 from gui.register_edit_dialog import RegisterEditDialog
 from gui.register_range_dialog import RegisterRangeDialog, RegisterImportLocationDialog
-from gui.memory_ranges import MIN_SANE_R00
 from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY, stripe_bg_color
 
 logger = logging.getLogger(__name__)
@@ -35,8 +41,8 @@ SELECTED_ROW_FG = "#ffffff"
 
 
 class DataRegistersTab(ctk.CTkFrame):
-    """Renders the main-data-memory register table for a Memory object.
-    Call `render(memory)` whenever the buffer changes."""
+    '''Renders the main-data-memory register table for a Memory object.
+    Call `render(memory)` whenever the buffer changes.'''
 
     def __init__(self, master, on_change=None, **kwargs):
         super().__init__(master, **kwargs)
@@ -125,7 +131,7 @@ class DataRegistersTab(ctk.CTkFrame):
         return tree
 
     def _style_treeview(self):
-        """Rough dark/light theming so the native table (and its native
+        '''Rough dark/light theming so the native table (and its native
         scrollbar) don't clash too badly with CustomTkinter's look. This
         table uses ttk.Treeview/tkinter.Scrollbar instead of CTk widgets purely
         for performance (see module docstring) -- CTk has no theme hook
@@ -156,7 +162,7 @@ class DataRegistersTab(ctk.CTkFrame):
         applied by hand via a "selectedrow" tag (colored with the
         module-level SELECTED_ROW_BG/FG) instead of relying solely on
         the `style.map(..., background=[("selected", ...)])` call
-        below."""
+        below.'''
         style = ttk.Style()
         try:
             style.theme_use("default")
@@ -195,7 +201,7 @@ class DataRegistersTab(ctk.CTkFrame):
         style.map("Treeview", background=[("selected", SELECTED_ROW_BG)])
 
     def refresh_theme(self):
-        """Re-applies theme-dependent ttk styling/colors after
+        '''Re-applies theme-dependent ttk styling/colors after
         ctk.set_appearance_mode() changes elsewhere (e.g. Preferences --
         see gui/app.py's _on_preferences_saved()).
 
@@ -206,7 +212,7 @@ class DataRegistersTab(ctk.CTkFrame):
         a full restart to follow a dark/light switch. This recomputes
         _stripe_bg and re-applies the "oddrow" tag on both trees, in
         place -- tag_configure updates propagate to already-rendered
-        rows automatically, no need to re-render()."""
+        rows automatically, no need to re-render().'''
         self._style_treeview()
         for tree in self._trees:
             tree.tag_configure("oddrow", background=self._stripe_bg)
@@ -219,7 +225,7 @@ class DataRegistersTab(ctk.CTkFrame):
             self._on_change()
 
     def _on_tree_selected(self, selected_tree: ttk.Treeview):
-        """Gives the selected row a visible highlight -- GitHub issue #22.
+        '''Gives the selected row a visible highlight -- GitHub issue #22.
 
         ttk.Treeview has a built-in "selected" state background (set via
         `style.map()` in `_style_treeview()`), but a per-item tag's
@@ -243,7 +249,7 @@ class DataRegistersTab(ctk.CTkFrame):
         row's position parity from its current index in the tree, rather
         than caching it -- no state to go stale across a render()
         teardown/rebuild.
-        """
+        '''
         selection = selected_tree.selection()
         if not selection:
             return
@@ -326,10 +332,10 @@ class DataRegistersTab(ctk.CTkFrame):
             )
 
     def _current_range(self):
-        """Returns (r00, count) for the currently-displayed data
+        '''Returns (r00, count) for the currently-displayed data
         registers, or None if there's no memory loaded / no sane R00 --
         the same check render() uses, shared here so Export/Import don't
-        each re-derive it."""
+        each re-derive it.'''
         if self._memory is None:
             return None
         try:
@@ -341,11 +347,11 @@ class DataRegistersTab(ctk.CTkFrame):
         return r00, (PRIMARY_DATA_END + 1) - r00
 
     def _export_registers(self):
-        """Prompts for which sub-range of the currently-displayed data
+        '''Prompts for which sub-range of the currently-displayed data
         registers to export (default: all of them -- GitHub issue #15),
         then writes that range as one DATA-format line each (see
         registers.format_data_line()), in R00..end order -- GitHub issue
-        #11."""
+        #11.'''
         current_range = self._current_range()
         if current_range is None:
             messagebox.showwarning(
@@ -389,13 +395,13 @@ class DataRegistersTab(ctk.CTkFrame):
         RegisterRangeDialog(self, count, do_export)
 
     def _import_registers(self):
-        """Reads a DATA-format file (see registers.parse_data_line()) and
+        '''Reads a DATA-format file (see registers.parse_data_line()) and
         prompts for which currently-displayed register the file's data
         should start overwriting from -- GitHub issue #14. The file no
         longer has to cover every displayed register; it just has to fit
         starting from the chosen location, and this does not resize main
         memory (see GitHub issue #11 for the original all-registers-only
-        behavior this replaces)."""
+        behavior this replaces).'''
         current_range = self._current_range()
         if current_range is None:
             messagebox.showwarning(

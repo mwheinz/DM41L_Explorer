@@ -1,7 +1,34 @@
 '''
-MemoryRegion and its concrete subclasses -- named spans of registers
-within a Memory (status registers, primary/data memory, and the
-still-lightly-understood key-assignment/alarm/program-memory regions).
+MemoryRegion/StatusRegisters, and RegionSpan -- two different answers to
+"what named span of registers is this."
+
+MemoryRegion is a real object with behavior (get_register()/set_register()/
+registers()/__contains__), meant for a region whose address range is fixed
+at construction time. StatusRegisters (0x00-0x0F, never moves) is the only
+region that actually fits that shape, which is why it's the only subclass
+here -- until issue #25, this module also had KeyAssignments/Alarms/
+ProgramMemory/PrimaryData/UnusedRegion stub subclasses for the *dynamic*
+regions (key assignments, alarms, program memory, data memory), but none
+of them were ever actually instantiated anywhere in the codebase (two --
+KeyAssignments/Alarms -- didn't even have a working __init__), and for
+good reason: those regions' boundaries move on nearly every edit (adding a
+key assignment moves key_assignments_end(), which moves the Alarms buffer,
+which moves where "unused" program memory starts, independently of R00()/
+DotEnd() also moving as programs are added/removed). A MemoryRegion
+instance built at one instant would go stale the moment any of that
+happened -- worse than not having the abstraction at all, and exactly the
+kind of drift issue #23 was caused by. Meanwhile hex_view_tab.py and
+overview_tab.py, the only real consumers, never wanted region *behavior*
+for these anyway -- both just wanted "what are the current boundaries",
+computed fresh, as plain data.
+
+That's what RegionSpan is for: a small immutable (key, label, start, end)
+descriptor, no behavior beyond containment/length, returned in a fresh
+list by Memory.regions() (memory.py) every time it's called -- so it can
+never drift from Memory's own live boundary accessors (R00()/DotEnd()/
+key_assignments_end()/alarms_end()). hex_view_tab.py and overview_tab.py
+both now read region boundaries from that single source instead of each
+hand-rolling its own classification/arithmetic.
 
 Extended memory (XMFile/ExtendedMemory) lives in xm_file.py instead, since
 it has its own file-system-like structure built on top of a region.
@@ -157,50 +184,37 @@ class StatusRegisters(MemoryRegion):
         return None
 
 
-class KeyAssignments(MemoryRegion):
-    '''Need more research.'''
-
-    key = "key_assignments"
-    label = "Key Assignments"
-
-
-class Alarms(MemoryRegion):
-    '''Need more research.'''
-
-    key = "alarms"
-    label = "Alarms"
-
-
-class ProgramMemory(MemoryRegion):
+class RegionSpan:
     '''
-    Still needs more research for anything beyond listing what's here --
-    decoding actual instruction bytes isn't implemented. See
-    docs/program.md sec 5 for the global-label/END chain format, and
-    Memory.list_programs() below for what that lets us report today.
+    A plain, immutable descriptor for one of the *dynamic* regions
+    Memory.regions() (memory.py) reports -- key assignments, alarms,
+    program memory, data memory, status registers, XM, the unused/void
+    gaps. Deliberately NOT a MemoryRegion: it carries no reference back to
+    a Memory and no read/write behavior, just the boundaries and label a
+    caller asked "what's here" for at one moment. See this module's
+    docstring for why the region-with-behavior shape (MemoryRegion) is
+    wrong for anything whose boundaries move.
+
+    `start`/`end` are both inclusive, matching MemoryRegion.address_range's
+    own convention (`start <= addr <= end`).
     '''
 
-    key = "program_memory"
-    label = "Program Memory"
+    __slots__ = ("key", "label", "start", "end")
 
+    def __init__(self, key: str, label: str, start: int, end: int):
+        self.key = key
+        self.label = label
+        self.start = start
+        self.end = end
 
-class PrimaryData(MemoryRegion):
-    '''
-    Main data-register storage; registers here hold BCD-encoded numbers,
-    0-6 characters of ASCII data, or packed binary data.
-    '''
+    @property
+    def count(self) -> int:
+        '''Number of registers this span covers -- 0 (not negative) for an
+        empty span, e.g. a dump with no key assignments at all.'''
+        return max(0, self.end - self.start + 1)
 
-    key = "primary_data"
-    label = "Main Memory"
+    def __contains__(self, addr: int) -> bool:
+        return self.start <= addr <= self.end
 
-    def get_number(self, addr: int) -> float:
-        return self.get_register(addr).get_bcd_number()
-
-    def set_number(self, addr: int, value: float):
-        register = self.get_register(addr)
-        register.set_bcd_number(value)
-        self.set_register(addr, register)
-
-
-class UnusedRegion(MemoryRegion):
-    key = "unused"
-    label = "Unused / Free"
+    def __repr__(self) -> str:
+        return f"RegionSpan({self.key!r}, 0x{self.start:03X}-0x{self.end:03X})"

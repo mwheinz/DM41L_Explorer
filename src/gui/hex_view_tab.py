@@ -1,4 +1,4 @@
-"""
+'''
 Hex View tab: a read-only, color-coded hex dump of the entire addressable
 memory space (0x000-0x2ff), one row per register.
 
@@ -16,7 +16,7 @@ numbers). Unlike Data Registers, this is a single table rather than a
 left/right split: a hex dump reads more naturally as one continuous
 top-to-bottom listing, and the whole point here is seeing color bands
 transition as you scroll through it.
-"""
+'''
 
 import logging
 from tkinter import ttk
@@ -24,33 +24,27 @@ import tkinter
 import customtkinter as ctk
 
 from memory import Memory
-from gui.memory_ranges import MIN_SANE_R00
 from gui.tab_common import build_tab_header, MONOSPACE_FONT_FAMILY
 
 logger = logging.getLogger(__name__)
 
-# The full addressable range this tab displays. Per docs/memory.md section
-# 3/4: Status Registers 0x000-0x00f, an unused/"void" gap 0x010-0x03f,
-# Extended Memory #0 0x040-0x0bf, Main Memory 0x0c0-0x1ff (itself split
-# further below, when a dump with a sane R00/.END. is loaded), Extended
-# Memory #1 0x200-0x2ef. This covers the full address space of the HP41CX
-# calculator and the DM41L emulator.
+# The full addressable range this tab displays -- matches the span
+# Memory.regions() covers (0x000-0x2ef): Status Registers, an unused/"void"
+# gap, Extended Memory #0, Main Memory (itself split further, when a dump
+# with a sane R00/.END. is loaded), Extended Memory #1. This is the full
+# address space of the HP41CX calculator and the DM41L emulator.
 DISPLAY_START = 0x000
 DISPLAY_END = 0x2EF
 
-STATUS_END = 0x00F
-UNUSED_END = 0x03F
-XM0_END = 0x0BF
-MAIN_MEMORY_START = 0x0C0
-MAIN_MEMORY_END = 0x1FF
-XM1_START = 0x200
-XM1_END = 0x2EF
-
-# One entry per region this tab can color. `light`/`dark` are the row
-# background tints for CTk's two appearance modes -- picked distinct enough
-# to tell apart at a glance but not so saturated they fight with the
-# selection highlight or make the monospace text hard to read. Order here
-# is also legend display order.
+# One entry per region key Memory.regions() can report. `light`/`dark` are
+# the row background tints for CTk's two appearance modes -- picked
+# distinct enough to tell apart at a glance but not so saturated they
+# fight with the selection highlight or make the monospace text hard to
+# read. Order here is also legend display order. This is a color/legend
+# catalog only now (issue #25) -- it lists every region kind that COULD
+# appear (so the legend stays complete even when the current dump doesn't
+# have one of them, e.g. "Program"/"Data" while no sane R00/.END. is
+# loaded), not the actual boundaries, which come from Memory.regions().
 REGIONS = [
     ("status", "Status Registers", "#cfe0f5", "#39507a"),
     ("unused", "Unused / Free", "#e8e8e8", "#3a3a3a"),
@@ -61,54 +55,25 @@ REGIONS = [
     ("data", "Data Memory", "#c9f0ee", "#2f7a7a"),
     ("nonexistent", "Inaccessible", "#d0d0d0", "#242424"),
 ]
-REGION_LABELS = {key: label for key, label, _, _ in REGIONS}
 
 
-def _classify(
-    addr: int,
-    r00: int,
-    dot_end: int,
-    has_partition: bool,
-    key_assignments_end: int,
-    alarms_end: int,
-) -> str:
-    """Returns the region key for a single address. `has_partition` is
-    False when no real dump is loaded yet (R00 below MIN_SANE_R00) -- in
-    that case Main Memory is shown as one undivided band rather than
-    guessing at a program/data split from meaningless R00/.END. values.
-    `key_assignments_end` (Memory.key_assignments_end()) and `alarms_end`
-    (Memory.alarms_end()) are both independent of R00/.END. sanity --
-    the former is found by scanning for the 0xF0 marker byte Key
-    Assignment registers start with, the latter by reading the Alarms
-    buffer's own header (see alarms_end()'s docstring) -- so both are
-    honored even when `has_partition` is False."""
-    if DISPLAY_START <= addr <= STATUS_END:
-        return "status"
-    if addr <= UNUSED_END:
-        return "nonexistent"
-    if addr <= XM0_END:
-        return "xm"
-    if addr <= MAIN_MEMORY_END:
-        if addr < key_assignments_end:
-            return "key"
-        if addr < alarms_end:
-            return "alarms"
-        if not has_partition:
-            return "unused"
-        if addr < dot_end:
-            return "unused"
-        if addr < r00:
-            return "program"
-        return "data"
-    if addr <= XM1_END:
-        return "xm"
-    return "nonexistent"
+def _region_span_for(regions: list, addr: int):
+    '''The RegionSpan in `regions` (a Memory.regions() list) containing
+    `addr`, or None. `regions` covers the full display range with no gaps
+    (see Memory.regions()'s docstring), so every address in
+    [DISPLAY_START, DISPLAY_END] is expected to match something -- render()
+    below falls back to the "nonexistent" catalog entry if this somehow
+    returns None, rather than crashing.'''
+    for span in regions:
+        if addr in span:
+            return span
+    return None
 
 
 class HexViewTab(ctk.CTkFrame):
-    """Renders a read-only, region-colored hex dump of the full address
+    '''Renders a read-only, region-colored hex dump of the full address
     space for a Memory object. Call `render(memory)` whenever the buffer
-    changes."""
+    changes.'''
 
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
@@ -131,8 +96,8 @@ class HexViewTab(ctk.CTkFrame):
         self._apply_region_tags()
 
     def _build_legend(self):
-        """A row of small color swatches + labels so the row colors below
-        are self-explanatory without a separate reference doc."""
+        '''A row of small color swatches + labels so the row colors below
+        are self-explanatory without a separate reference doc.'''
         legend = ctk.CTkFrame(self, fg_color="transparent")
         legend.pack(fill="x", padx=8, pady=(0, 6))
         dark = ctk.get_appearance_mode() == "Dark"
@@ -179,13 +144,13 @@ class HexViewTab(ctk.CTkFrame):
         return tree
 
     def _style_treeview(self):
-        """Same dark/light ttk theming approach as Data Registers (see that
+        '''Same dark/light ttk theming approach as Data Registers (see that
         module's `_style_treeview` docstring for why ttk needs this at
         all) -- kept as its own copy rather than a shared helper since the
         two tabs configure different tag sets (region colors here,
         odd/even zebra striping there) on top of the same base style
         names, and a shared style object is already how ttk works (the
-        style names/registration are process-global, not per-widget)."""
+        style names/registration are process-global, not per-widget).'''
         style = ttk.Style()
         try:
             style.theme_use("default")
@@ -225,7 +190,7 @@ class HexViewTab(ctk.CTkFrame):
         style.map("Treeview", background=[], foreground=[])
 
     def refresh_theme(self):
-        """Re-applies every theme-dependent color after
+        '''Re-applies every theme-dependent color after
         ctk.set_appearance_mode() changes elsewhere (e.g. Preferences --
         see gui/app.py's _on_preferences_saved()).
 
@@ -237,7 +202,7 @@ class HexViewTab(ctk.CTkFrame):
         to need a full restart to follow a dark/light switch. This
         recomputes and re-applies both, in place, without touching the
         legend's layout or the tree's already-rendered rows (tag_configure
-        updates propagate to existing rows automatically)."""
+        updates propagate to existing rows automatically).'''
         self._style_treeview()
         self._apply_region_tags()
         dark = ctk.get_appearance_mode() == "Dark"
@@ -261,18 +226,12 @@ class HexViewTab(ctk.CTkFrame):
             self._header_label.configure(text="(no memory dump loaded)")
             return
 
-        try:
-            r00 = memory.R00()
-            dot_end = memory.DotEnd()
-        except Exception as e:
-            # Expected whenever no real dump is loaded yet -- see the
-            # identical pattern in overview_tab.py's _render_summary().
-            logger.debug("Could not read R00/.END. for hex view: %s", e)
-            r00 = dot_end = 0
-
-        has_partition = r00 >= MIN_SANE_R00 and dot_end <= r00
-        key_assignments_end = memory.key_assignments_end()
-        alarms_end = memory.alarms_end()
+        # One regions() call per render, not one per address -- render()
+        # walks up to 752 addresses below, and Memory.regions() itself
+        # already does the R00/.END./key-assignments/alarms boundary work
+        # (including the same defensive R00/DotEnd fallback this tab used
+        # to do inline) once per call.
+        regions = memory.regions()
 
         count = DISPLAY_END - DISPLAY_START + 1
         self._header_label.configure(
@@ -281,9 +240,9 @@ class HexViewTab(ctk.CTkFrame):
 
         for addr in range(DISPLAY_START, DISPLAY_END + 1):
             register = memory.get_register(addr)
-            region_key = _classify(
-                addr, r00, dot_end, has_partition, key_assignments_end, alarms_end
-            )
+            span = _region_span_for(regions, addr)
+            region_key = span.key if span else "nonexistent"
+            region_label = span.label if span else "Inaccessible"
             self._tree.insert(
                 "",
                 "end",
@@ -291,7 +250,7 @@ class HexViewTab(ctk.CTkFrame):
                     f"0x{addr:03x}",
                     self._hex_spaced(register),
                     self._ascii_preview(register),
-                    REGION_LABELS[region_key],
+                    region_label,
                 ),
                 tags=(region_key,),
             )

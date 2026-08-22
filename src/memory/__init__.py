@@ -1,4 +1,4 @@
-"""
+'''
 A representation of the memory of a DM41L emulator.
 
 The dump consists of three parts: the header ("DM41") the dump of main
@@ -24,13 +24,15 @@ individual submodules for what lives where:
   trigraphs.py     encode_trigraphs/decode_trigraphs (docs/trigraphs.md --
                     the HP41/DM41L FOCAL character set's non-ASCII symbols)
   constants.py     address-range and sentinel-register constants
-  regions.py       MemoryRegion and its non-XM subclasses
+  regions.py       MemoryRegion/StatusRegisters (fixed-range regions with
+                    real behavior) and RegionSpan (plain descriptor for
+                    Memory.regions()'s dynamic, freshly-computed output)
   xm_file.py       XMFile, ExtendedMemory (extended-memory file storage)
   program_info.py  ProgramInfo (program-memory "global chain" entries)
   memory.py        Memory (the top-level dump: parsing, raw register
                     access, and the R00/.END./flags/program-chain
                     accessors built on top of it)
-"""
+'''
 
 from .registers import (
     DM41LMemoryError,
@@ -51,36 +53,12 @@ from .constants import (
     EOM_REGISTER,
     STATUS_REGISTER_LABELS,
     XM_REGIONS,
+    MIN_SANE_R00,
 )
-from .regions import (
-    MemoryRegion,
-    StatusRegisters,
-    KeyAssignments,
-    Alarms,
-    ProgramMemory,
-    PrimaryData,
-    UnusedRegion,
-)
+from .regions import MemoryRegion, StatusRegisters, RegionSpan
 from .xm_file import XMFile, ExtendedMemory, NAME_MIN_CHAR, NAME_MAX_CHAR
 from .program_info import ProgramInfo
 from .memory import Memory
-
-# Every concrete region type, used to build REGION_NAMES and available for
-# isinstance() checks by callers (e.g. the GUI) that need to special-case a
-# particular kind of region.
-REGION_CLASSES = [
-    StatusRegisters,
-    KeyAssignments,
-    ProgramMemory,
-    PrimaryData,
-    ExtendedMemory,
-    UnusedRegion,
-]
-
-# Display name for each region key. Kept as a plain dict (rather than only
-# living on the classes) since callers like the preferences UI iterate over
-# it directly.
-REGION_NAMES = {cls.key: cls.label for cls in REGION_CLASSES}
 
 __all__ = [
     "DM41LMemoryError",
@@ -100,19 +78,14 @@ __all__ = [
     "EOM_REGISTER",
     "STATUS_REGISTER_LABELS",
     "XM_REGIONS",
+    "MIN_SANE_R00",
     "MemoryRegion",
     "StatusRegisters",
-    "KeyAssignments",
-    "Alarms",
-    "ProgramMemory",
-    "PrimaryData",
-    "UnusedRegion",
+    "RegionSpan",
     "XMFile",
     "ExtendedMemory",
     "NAME_MIN_CHAR",
     "NAME_MAX_CHAR",
     "ProgramInfo",
     "Memory",
-    "REGION_CLASSES",
-    "REGION_NAMES",
 ]

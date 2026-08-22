@@ -1,42 +1,46 @@
-"""
+'''
 Overview tab: status registers, the R00/.END. partition, and a summary of
 how memory is divided up. Flags live in their own tab (gui/flags_tab.py).
-"""
+'''
 
 import logging
 from tkinter import messagebox
 import tkinter
 import customtkinter as ctk
 
-from memory import Memory, StatusRegisters, ExtendedMemory, DM41LMemoryError, XM_REGIONS
-from gui.memory_ranges import MIN_SANE_R00
+from memory import (
+    Memory,
+    StatusRegisters,
+    ExtendedMemory,
+    DM41LMemoryError,
+    XM_REGIONS,
+    PRIMARY_DATA_END,
+    MIN_SANE_R00,
+)
 from gui.scroll_support import bind_touchpad_scroll
 from gui.tab_common import MONOSPACE_FONT_FAMILY
 
 logger = logging.getLogger(__name__)
 
-# Registers 0x0c1-0x1ff are the addressable main-memory range (0x0c0 is Key
-# Assignments); PRIMARY_DATA_END (0x1ff) is main memory's top boundary, so
-# main data storage always runs from R00 up to and including this address.
-PRIMARY_DATA_END = 0x1FF
-
-# Data registers, programs, key-assignments, and alarm storage all live
-# at/above this address; see docs/memory.md. Data registers occupy the space
-# between the register addressed by the status register field R00. Program
-# storage exists between R00-1 and the register pointed to by status register
-# field ".END.". If key assignments exist, they start at LOW_MEMORY_START and
-# extend towards ".END.". If alarms exist, the will occupy space between the
-# end of the key assignment and ".END.". Note that key assignments, alarms,
-# and programs are all optional - they may not exist.
+# Data registers, programs, key-assignments, and alarm storage all live at/
+# above the start of Key Assignments; see docs/memory.md. Data registers
+# occupy the space between the register addressed by the status register
+# field R00. Program storage exists between R00-1 and the register pointed
+# to by status register field ".END.". If key assignments exist, they start
+# at the bottom of this span and extend towards ".END.". If alarms exist,
+# they occupy the space immediately above the key assignments, still below
+# ".END.". Note that key assignments, alarms, and programs are all
+# optional -- they may not exist.
 #
-# Key Assignments and Alarms both sit within this same LOW_MEMORY_START-
-# to-.END. span, packed immediately above one another with no gap (see
-# Memory.key_assignments_end()/alarms_end()) -- they are NOT part of
+# Key Assignments and Alarms both sit within this same span, packed
+# immediately above one another with no gap -- they are NOT part of
 # "unused" program memory. _render_summary() below subtracts both out of
 # its "Unused program memory" figure, and _render_partition() shows their
 # bounds directly (GitHub issue #23 -- neither used to be accounted for
-# or shown at all).
-LOW_MEMORY_START = 0xC0
+# or shown at all). Both methods now source every one of these boundaries
+# from Memory.regions() (issue #25) -- by key ("key", "alarms", "unused",
+# "program", "data") -- rather than computing them independently, so this
+# module no longer needs to know any of the raw address math itself.
 
 # Raw structural XM capacity, in registers: each region's usable span is
 # (lo, hi] -- lo itself is that region's reserved link/pointer register
@@ -86,9 +90,9 @@ CARD_BORDER = ("gray80", "gray28")
 
 
 class OverviewTab(ctk.CTkScrollableFrame):
-    """Renders a Memory object's status registers, R00/.END. partition, and
+    '''Renders a Memory object's status registers, R00/.END. partition, and
     a register-usage summary. Call `render(memory)` whenever the buffer
-    changes."""
+    changes.'''
 
     def __init__(self, master, on_change=None, **kwargs):
         super().__init__(master, **kwargs)
@@ -107,8 +111,8 @@ class OverviewTab(ctk.CTkScrollableFrame):
         self._partition_frame = self._make_card(1, 1, "Memory Partitions")
 
     def _make_card(self, row, column, title):
-        """Creates a bordered/tinted 'card' frame at (row, column) with a
-        bold title, used to visually separate sections from each other."""
+        '''Creates a bordered/tinted 'card' frame at (row, column) with a
+        bold title, used to visually separate sections from each other.'''
         card = ctk.CTkFrame(
             self,
             fg_color=CARD_FG,
@@ -289,22 +293,25 @@ class OverviewTab(ctk.CTkScrollableFrame):
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).grid(row=3, column=1, sticky="w", padx=10, pady=2)
 
-        # Key Assignments and Alarms sit back-to-back immediately above
-        # LOW_MEMORY_START, below whatever's left for Program storage --
-        # see this module's LOW_MEMORY_START comment. Shown as their own
-        # partitions (not just folded into the Memory Summary card's
-        # register counts) so the boundary between them is visible here
-        # too, matching how R00/.END. are shown as boundaries above
-        # (GitHub issue #23).
-        key_assignments_end = self._memory.key_assignments_end()
-        alarms_end = self._memory.alarms_end()
+        # Key Assignments and Alarms sit back-to-back, below whatever's left
+        # for Program storage -- see this module's header comment. Shown as
+        # their own partitions (not just folded into the Memory Summary
+        # card's register counts) so the boundary between them is visible
+        # here too, matching how R00/.END. are shown as boundaries above
+        # (GitHub issue #23). Both spans come straight from
+        # Memory.regions() (issue #25) -- RegionSpan's start/end are
+        # inclusive, so _format_partition_span (which takes an exclusive
+        # end) is passed `span.end + 1`.
+        spans = {span.key: span for span in self._memory.regions()}
+        key_span = spans["key"]
+        alarms_span = spans["alarms"]
 
         ctk.CTkLabel(self._partition_frame, text="Key Assignments:").grid(
             row=4, column=0, sticky="w", padx=10, pady=2
         )
         ctk.CTkLabel(
             self._partition_frame,
-            text=self._format_partition_span(LOW_MEMORY_START, key_assignments_end),
+            text=self._format_partition_span(key_span.start, key_span.end + 1),
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).grid(row=4, column=1, columnspan=2, sticky="w", padx=10, pady=2)
 
@@ -313,16 +320,18 @@ class OverviewTab(ctk.CTkScrollableFrame):
         )
         ctk.CTkLabel(
             self._partition_frame,
-            text=self._format_partition_span(key_assignments_end, alarms_end),
+            text=self._format_partition_span(alarms_span.start, alarms_span.end + 1),
             font=ctk.CTkFont(family=MONOSPACE_FONT_FAMILY),
         ).grid(row=5, column=1, columnspan=2, sticky="w", padx=10, pady=(2, 10))
 
     @staticmethod
     def _format_partition_span(start: int, end: int) -> str:
-        """Formats a [start, end) register span for the Memory Partitions
+        '''Formats a [start, end) register span for the Memory Partitions
         card -- 'none' when the span is empty (start == end, i.e. that
         partition has nothing in it), otherwise its address range and
-        register count."""
+        register count. Takes a half-open (exclusive end) span, matching
+        this method's original signature -- callers sourcing a RegionSpan
+        (inclusive end) from Memory.regions() pass `span.end + 1`.'''
         if end <= start:
             return "(none)"
         count = end - start
@@ -361,12 +370,12 @@ class OverviewTab(ctk.CTkScrollableFrame):
     # -- Memory usage summary ---------------------------------------------
 
     def _xm_summary_texts(self):
-        """Returns (files_text, used_text, free_text) for the Memory
+        '''Returns (files_text, used_text, free_text) for the Memory
         Summary card's Extended-memory rows. Factored out of
         _render_summary() so that method stays under pylint's
         max-locals=20 -- this XM used/free percentage math alone needs
         about eight locals, and _render_summary() also now has to track
-        the Key Assignments/Alarms register counts (GitHub issue #23)."""
+        the Key Assignments/Alarms register counts (GitHub issue #23).'''
         try:
             xm = ExtendedMemory(self._memory, address_range=[0x40, 0x2EF])
             xm_files = xm.list_files()
@@ -398,36 +407,33 @@ class OverviewTab(ctk.CTkScrollableFrame):
         if self._memory is None:
             return
 
-        try:
-            r00 = self._memory.R00()
-            dot_end = self._memory.DotEnd()
-        except Exception as e:
-            # Expected whenever no real dump is loaded yet (a fresh empty
-            # buffer has no sane R00/.END.) -- routine, not warning-worthy.
-            logger.debug("Could not read R00/.END. for summary: %s", e)
-            r00 = dot_end = None
-
-        if r00 is not None and r00 < MIN_SANE_R00:
-            r00 = None  # No real dump loaded yet -- see gui/memory_ranges.py.
+        # "program"/"data" spans only appear in Memory.regions()'s output
+        # when it considers the dump to have a sane R00/.END. partition
+        # (see that method's has_partition) -- their presence/absence here
+        # is now the single source of truth for whether a partition exists,
+        # replacing this method's old separate R00()/DotEnd()/MIN_SANE_R00
+        # check (GitHub issue #25). This is very slightly stricter than the
+        # old check (which only looked at R00, not R00 vs .END.), but that
+        # old combination -- a sane R00 with .END. above it -- was already
+        # not a state _render_partition() treats as a normal partition
+        # either, so no real dump should ever notice the difference.
+        spans = {span.key: span for span in self._memory.regions()}
+        has_partition = "program" in spans
 
         xm_text, xm_used_text, xm_free_text = self._xm_summary_texts()
 
         rows = []
-        if r00 is not None:
-            # Key Assignments and Alarms both live within the same
-            # LOW_MEMORY_START-to-.END. span as "unused" program memory
-            # (see this module's LOW_MEMORY_START comment) -- registers
-            # either one has actually claimed are not free, so both are
-            # subtracted out of "Unused program memory" below rather than
-            # counted as available space (GitHub issue #23).
-            key_assignments_end = self._memory.key_assignments_end()
-            alarms_end = self._memory.alarms_end()
-            key_assignment_regs = key_assignments_end - LOW_MEMORY_START
-            alarm_regs = alarms_end - key_assignments_end
-
-            reserved = (PRIMARY_DATA_END + 1) - r00
-            consumed = r00 - dot_end
-            available = max(0, dot_end - alarms_end)
+        if has_partition:
+            # Key Assignments and Alarms both live within the same span as
+            # "unused" program memory (see this module's header comment) --
+            # registers either one has actually claimed are not free, so
+            # both are subtracted out of "Unused program memory" below
+            # rather than counted as available space (GitHub issue #23).
+            key_assignment_regs = spans["key"].count
+            alarm_regs = spans["alarms"].count
+            reserved = spans["data"].count
+            consumed = spans["program"].count
+            available = spans["unused"].count
             rows.append(
                 (
                     "User memory locations",

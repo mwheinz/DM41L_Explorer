@@ -11,8 +11,16 @@ from typing import Dict, Optional, Union
 from pathlib import Path
 
 from .registers import Register
-from .constants import PRIMARY_DATA_END, KEY_ASSIGNMENTS_RANGE
+from .constants import (
+    PRIMARY_DATA_END,
+    KEY_ASSIGNMENTS_RANGE,
+    STATUS_REGISTERS_RANGE,
+    VOID_RANGE,
+    XM_REGIONS,
+    MIN_SANE_R00,
+)
 from .program_info import ProgramInfo
+from .regions import RegionSpan
 from . import functions as key_functions
 
 
@@ -300,9 +308,10 @@ class Memory:
     # count that includes the header and the closing delimiter), that
     # many alarm entries packed in ascending, time-sorted order, then a
     # single 0xF0-marked delimiter register. Per-alarm content (the
-    # time/repeat/message registers) isn't decoded here yet -- see
-    # regions.py's Alarms class -- but the buffer's outer bounds are
-    # enough to (a) show it as its own region in the hex view and (b)
+    # time/repeat/message registers) isn't decoded here yet -- but the
+    # buffer's outer bounds (alarms_end() below, exposed as a region via
+    # regions() further down) are enough to (a) show it as its own region
+    # in the hex view and (b)
     # keep it from being overwritten, or separated by a gap, whenever a
     # Key Assignments edit changes how many registers that region needs
     # (see _relocate_alarms() below).
@@ -406,6 +415,107 @@ class Memory:
             new_alarms_end = new_start + count
             for addr in range(new_alarms_end, old_alarms_end):
                 self.set_register(addr, Register(size=7))
+
+    # -- Regions (issue #25) --
+    #
+    # A single source for "what named region is this address in", replacing
+    # what used to be independently hand-rolled in gui/hex_view_tab.py's
+    # _classify() and gui/overview_tab.py's _render_summary()/
+    # _render_partition() -- both called the boundary accessors above
+    # (key_assignments_end()/alarms_end()/R00()/DotEnd()) correctly, but
+    # each also reimplemented its own copy of "so what are the actual
+    # region spans", which is exactly the kind of duplication that let
+    # issue #23 (Alarms/Key Assignments not counted in the memory summary)
+    # happen in the first place. regions() below is that missing shared
+    # answer.
+
+    def regions(self) -> list:
+        '''
+        Every named region of the full addressable display range
+        (0x000-0x2EF), as a flat, address-ordered list of RegionSpan(key,
+        label, start, end) -- both inclusive. Computed fresh from this
+        Memory's own live boundary accessors on every call, so (unlike a
+        construction-time MemoryRegion instance would) it can never go
+        stale after key assignments/alarms/programs/data change -- see
+        regions.py's module docstring for why that matters here.
+
+        The "key" region (Key Assignments) always starts at
+        KEY_ASSIGNMENTS_RANGE[0] (0xC0); "alarms" always starts exactly
+        where "key" ends, with no gap (see alarms_end()'s docstring).
+        Above that, when R00()/DotEnd() describe a sane program/data
+        partition (see MIN_SANE_R00), the remaining span up to
+        PRIMARY_DATA_END splits into "unused" (whatever's left over,
+        approximate), "program", and "data"; when there's no sane
+        partition yet (e.g. a freshly-created empty buffer, or a
+        corrupt/unloaded dump), the whole remaining span is reported as
+        one "unused" region instead of guessing at a split from
+        meaningless R00/.END. values.
+
+        A span can be empty (`.count == 0`, e.g. "key" when no key
+        assignments exist) -- callers that want addresses (like
+        hex_view_tab.py's per-row classification) can rely on `addr in
+        span` correctly never matching an empty one, so empty spans don't
+        need special-casing there; callers that want counts/text (like
+        overview_tab.py's summary card) just read `.count` directly.
+
+        The "xm" key appears twice (Extended Memory #0 and #1), since the
+        two spans aren't contiguous with each other. Note XM #1's reported
+        start (XM_REGIONS[1][0] - 1) is one register below XM_REGIONS[1]'s
+        own start -- XM_REGIONS describes each region's *usable storage*
+        span (excluding its reserved link/pointer register), while this
+        display range includes that reserved register as part of the
+        region visually, matching what hex_view_tab.py already showed
+        before this method existed. XM #0 needs no such adjustment since
+        XM_REGIONS[0][0] (0x40) already is the first displayed address
+        there.
+        '''
+        spans = []
+
+        spans.append(RegionSpan("status", "Status Registers", *STATUS_REGISTERS_RANGE))
+        spans.append(RegionSpan("nonexistent", "Inaccessible", *VOID_RANGE))
+
+        xm0_lo, xm0_hi = XM_REGIONS[0]
+        spans.append(RegionSpan("xm", "XM", xm0_lo, xm0_hi))
+
+        low = KEY_ASSIGNMENTS_RANGE[0]
+        key_assignments_end = self.key_assignments_end()
+        alarms_end = self.alarms_end()
+        spans.append(RegionSpan("key", "Key Assignments", low, key_assignments_end - 1))
+        spans.append(RegionSpan("alarms", "Alarms", key_assignments_end, alarms_end - 1))
+
+        try:
+            r00 = self.R00()
+            dot_end = self.DotEnd()
+        except Exception:
+            # Same defensive posture as the try/except this replaces in
+            # hex_view_tab.py/overview_tab.py -- a real dump always
+            # decodes SOME r00/dot_end (even a fresh Memory()'s built-in
+            # defaults do), but this guards against whatever unusual state
+            # those call sites were already guarding against.
+            r00 = dot_end = 0
+        has_partition = r00 >= MIN_SANE_R00 and dot_end <= r00
+
+        if has_partition:
+            spans.append(RegionSpan("unused", "Unused / Free", alarms_end, dot_end - 1))
+            spans.append(RegionSpan("program", "User Programs", dot_end, r00 - 1))
+            spans.append(RegionSpan("data", "Data Memory", r00, PRIMARY_DATA_END))
+        else:
+            spans.append(RegionSpan("unused", "Unused / Free", alarms_end, PRIMARY_DATA_END))
+
+        xm1_lo, xm1_hi = XM_REGIONS[1]
+        spans.append(RegionSpan("xm", "XM", xm1_lo - 1, xm1_hi))
+
+        return spans
+
+    def region_for(self, addr: int):
+        '''The RegionSpan containing `addr` (from regions()), or None if
+        `addr` falls outside every span this method returns (shouldn't
+        happen for any address in [0x000, 0x2EF], the full display range
+        regions() covers, but this is a lookup, not a guarantee).'''
+        for span in self.regions():
+            if addr in span:
+                return span
+        return None
 
     # The 34 real assignable key positions on the physical keyboard (docs
     # sec 6 item 4's "HP41" grid) as (M, N) pairs. Row 3 has no N=1 -- that
@@ -866,10 +976,11 @@ class Memory:
         '''
         r00 = self.R00()
         dend = self.DotEnd()
-        # 0xC1 matches gui/memory_ranges.py's MIN_SANE_R00 -- a fresh,
-        # never-loaded Memory() decodes R00 as 0, which isn't a real
-        # partition boundary.
-        if not (0xC1 <= r00 <= PRIMARY_DATA_END) or not (0xC0 <= dend < r00):
+        # MIN_SANE_R00 -- a fresh, never-loaded Memory() decodes R00 as 0,
+        # which isn't a real partition boundary.
+        if not (MIN_SANE_R00 <= r00 <= PRIMARY_DATA_END) or not (
+            KEY_ASSIGNMENTS_RANGE[0] <= dend < r00
+        ):
             return []
 
         entries = []
