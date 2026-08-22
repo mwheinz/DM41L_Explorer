@@ -1,10 +1,10 @@
-"""
+'''
 Memory: a complete DM41L memory dump -- parsing/serializing the dump
 format, raw register access, and the higher-level accessors built on top
 of it (R00/.END./SigmaReg, the 56 status flags, and the program-memory
 global chain walk). See the memory package's __init__.py docstring for
 the on-disk dump format overview.
-"""
+'''
 
 import re
 from typing import Dict, Optional, Union
@@ -17,7 +17,7 @@ from . import functions as key_functions
 
 
 class Memory:
-    """A complete DM41L memory dump."""
+    '''A complete DM41L memory dump.'''
 
     # Pattern to capture 'A:' followed by any hex string of 1 or more chars
     SPECIAL_PATTERN = re.compile(r"([A-Z]:\s*)([0-9a-fA-F]+)")
@@ -171,61 +171,57 @@ class Memory:
         else:
             self._special_registers[key] = register
 
+    @staticmethod
+    def _nibbles_to_int(nibbles) -> int:
+        ''' Combine a list of nibbles into an integer. '''
+        value = 0
+        for n in nibbles:
+            value = (value << 4) | n
+        return value
+
     # -- Register c (0x0D): SREG / printer-use / cold-start / R00 / .END. --
     #
-    # Reverse-engineered from "A programmers handbook v.2.07.pdf" (its
-    # "Status registers" diagram) and cross-checked against the R00/.END.
-    # values implied by every src/tests/data/*.dm41 sample (e.g. R00 works
-    # out to 0x19c -- 0x200-0x19c = 100 data registers, the default HP41
-    # "SIZE 100" -- in most samples, and 0x180 -- 128 registers -- in
-    # empty-128.dm41, matching its filename). All three address fields are
-    # plain 3-nibble hex integers (not BCD), packed back-to-back with no
-    # byte alignment across register c's 14 nibbles (nibble 0 = MSB,
-    # matching Register.get_nibbles()):
+    #   Register c contains multiple important fields. Read memory.md for a
+    #   detailed explanation of what each field is fore.
     #   nibbles[0:3]   SREG  (ΣREG) absolute address
     #   nibbles[3:5]   printer use (undecoded)
     #   nibbles[5:8]   cold-start signature -- always 0x169 in real dumps,
     #                  usable as a sanity check
     #   nibbles[8:11]  R00   absolute address of data register 00
     #   nibbles[11:14] .END. absolute address of the end of program memory
-
-    @staticmethod
-    def _nibbles_to_int(nibbles) -> int:
-        value = 0
-        for n in nibbles:
-            value = (value << 4) | n
-        return value
-
     def _reg_c_nibbles(self) -> list:
         return self.get_register(self.REG_C_ADDR).get_nibbles()
 
     def SigmaReg(self) -> int:
-        """Absolute address of ΣREG, decoded from register c."""
+        '''Absolute address of ΣREG, decoded from register c.'''
         return self._nibbles_to_int(self._reg_c_nibbles()[0:3])
 
     def DotEnd(self) -> int:
-        """Absolute address of the end of loaded program memory (".END.")."""
+        '''Absolute address of the end of loaded program memory (".END.").'''
         return self._nibbles_to_int(self._reg_c_nibbles()[11:14])
 
     def R00(self) -> int:
-        """
+        '''
         Absolute address of data register 00 -- the boundary between
         program memory (below R00) and main data memory (R00 up to
         PRIMARY_DATA_END, inclusive).
-        """
+        '''
         return self._nibbles_to_int(self._reg_c_nibbles()[8:11])
 
     def set_R00(self, addr: int):
-        """
+        '''
         Directly rewrites the R00 pointer in register c.
 
         This only moves the partition marker -- it does NOT move, clear, or
         resize any actual register contents on either side of the new
         boundary, so moving it can expose stale program bytes as "data" (or
         hide real data registers behind the program-memory boundary).
-        Callers that want a safe move should reconcile the affected
-        registers themselves first.
-        """
+
+        This is useful for experimenting with synthetic programming - careful
+        use of R00 movement can be used to create special "byte jumper" and
+        "byte loader" instructions that are the foundation of synthetic
+        programming.
+        '''
         if not (0 <= addr <= 0xFFF):
             raise ValueError(
                 f"R00 must fit in a 3-nibble address (0-0xFFF), got 0x{addr:x}"
@@ -256,7 +252,7 @@ class Memory:
     # bounds -- isn't implemented yet (see regions.py's Alarms class).
 
     def _scan_key_assignments_end(self) -> int:
-        """Scans upward from KEY_ASSIGNMENTS_RANGE[0] (0xC0) for as long as
+        '''Scans upward from KEY_ASSIGNMENTS_RANGE[0] (0xC0) for as long as
         each register's leading byte is the 0xF0 key-assignment marker,
         and returns the address one past the last such register -- an
         exclusive upper bound, suitable for e.g. `range(0xC0, end)`.
@@ -269,7 +265,7 @@ class Memory:
         than trusting DotEnd()/R00() -- both of those are themselves
         derived values that can be nonsense in a fresh or corrupt Memory,
         so this scan deliberately doesn't depend on either.
-        """
+        '''
         addr = KEY_ASSIGNMENTS_RANGE[0]
         while (
             addr <= PRIMARY_DATA_END
@@ -279,7 +275,7 @@ class Memory:
         return addr
 
     def key_assignments_end(self) -> int:
-        """Address one past the last Key Assignments register, as of the
+        '''Address one past the last Key Assignments register, as of the
         last time this dump was loaded via from_string()/from_file() (see
         _scan_key_assignments_end()). KEY_ASSIGNMENTS_RANGE[0] (0xC0)
         itself if there are no key assignments.
@@ -293,7 +289,7 @@ class Memory:
         go through _encode_key_assignment_entries(), which keeps this
         cached value (and the Alarms buffer immediately above it, see
         alarms_end()) up to date as part of the edit.
-        """
+        '''
         return self._key_assignments_end
 
     # -- Alarms (docs/alarms.md sec 3/4) --
@@ -314,7 +310,7 @@ class Memory:
     ALARMS_HEADER_MARKER = 0xAA
 
     def alarms_end(self) -> int:
-        """Address one past the last Alarms register (the header, every
+        '''Address one past the last Alarms register (the header, every
         entry, and the closing 0xF0 delimiter). Unlike
         key_assignments_end(), this isn't cached -- there's no dedicated
         set/delete-alarm API yet that would need to keep a cached value
@@ -330,11 +326,11 @@ class Memory:
         that's treated as "not a real Alarms buffer" rather than trusted
         at face value, the same defensive posture
         _scan_key_assignments_end() takes against a corrupt dump.
-        """
+        '''
         return self._alarms_span_end(self.key_assignments_end())
 
     def _alarms_span_end(self, start: int) -> int:
-        """Address one past the Alarms buffer starting at `start` (the
+        '''Address one past the Alarms buffer starting at `start` (the
         same header-marker/count check alarms_end() makes), or `start`
         itself if there's no real Alarms buffer there. Factored out of
         alarms_end() so _encode_key_assignment_entries() can ask "where
@@ -343,7 +339,7 @@ class Memory:
         through alarms_end() itself -- that method always calls
         key_assignments_end() for `start`, which is a cached value not
         yet updated to the new boundary at the point in that method
-        where this is needed (see its docstring)."""
+        where this is needed (see its docstring).'''
         header = self.get_register(start).get_bytes()
         if header[0] != self.ALARMS_HEADER_MARKER:
             return start
@@ -354,7 +350,7 @@ class Memory:
         return end
 
     def _relocate_alarms(self, old_key_assignments_end: int, new_key_assignments_end: int):
-        """Moves the Alarms buffer (if any) so it keeps starting exactly
+        '''Moves the Alarms buffer (if any) so it keeps starting exactly
         at `new_key_assignments_end`, with no gap -- called from
         _encode_key_assignment_entries() with the Key Assignments
         region's boundary before and after an edit, since the Alarms
@@ -379,7 +375,7 @@ class Memory:
         (Key Assignments growing) are left alone -- the caller,
         _encode_key_assignment_entries(), is about to overwrite that
         entire span with real Key Assignment register data anyway.
-        """
+        '''
         delta = new_key_assignments_end - old_key_assignments_end
         if delta == 0:
             return
@@ -450,7 +446,7 @@ class Memory:
 
     @staticmethod
     def _key_row_col(key_number: int) -> tuple:
-        """Splits a two-digit key number `MN` (docs/key_assignments.md sec
+        '''Splits a two-digit key number `MN` (docs/key_assignments.md sec
         2 -- row M, column N) into (M, N). Raises ValueError unless
         `key_number` is one of the 34 real assignable keyboard positions
         (see _VALID_KEY_POSITIONS above) -- notably rejecting `31` (the
@@ -458,7 +454,7 @@ class Memory:
         keyboard's layout. `N` here is the key-NUMBER column (as printed
         on the key, e.g. the `2` in `42`) -- see _physical_column() for
         the column actually used by the byte/bit formulas, which differs
-        from this for row 4."""
+        from this for row 4.'''
         m, n = divmod(key_number, 10)
         if (m, n) not in Memory._VALID_KEY_POSITIONS:
             raise ValueError(f"Invalid key number: {key_number!r}")
@@ -466,21 +462,21 @@ class Memory:
 
     @staticmethod
     def _physical_column(m: int, n: int) -> int:
-        """Maps a key number's (M, N) -- N being the key-NUMBER column,
+        '''Maps a key number's (M, N) -- N being the key-NUMBER column,
         e.g. the `2` in key `42` -- to the physical column actually used
         by the key-byte (sec 4.3) and KEYFLAGS bit (sec 4.5) formulas.
         Identical to N for every row except row 4, whose double-width
         ENTER^ key shifts the three keys after it over by one physical
-        column -- see _ROW4_PHYSICAL_COLUMN above."""
+        column -- see _ROW4_PHYSICAL_COLUMN above.'''
         if m == 4:
             return Memory._ROW4_PHYSICAL_COLUMN[n]
         return n
 
     @staticmethod
     def key_byte_for(key_number: int, shifted: bool) -> int:
-        """The internal key-byte encoding for `key_number` (docs sec 4.3):
+        '''The internal key-byte encoding for `key_number` (docs sec 4.3):
         `16*(N-1) + M` unshifted, `16*(N-1) + (M+8)` shifted, where `N` is
-        the *physical* column (see _physical_column())."""
+        the *physical* column (see _physical_column()).'''
         m, n = Memory._key_row_col(key_number)
         n_phys = Memory._physical_column(m, n)
         row = m + 8 if shifted else m
@@ -488,20 +484,20 @@ class Memory:
 
     @staticmethod
     def _keyflags_bit(key_number: int) -> int:
-        """Bit position within the KEYFLAGS bitmap (register F or e) for
+        '''Bit position within the KEYFLAGS bitmap (register F or e) for
         `key_number` (docs sec 4.5): `36 - M - 8*(N-1)`, where `N` is the
         *physical* column (see _physical_column()). The same bit number
         is used in both registers -- which register (F vs. e)
-        distinguishes unshifted from shifted, not the bit position."""
+        distinguishes unshifted from shifted, not the bit position.'''
         m, n = Memory._key_row_col(key_number)
         n_phys = Memory._physical_column(m, n)
         return 36 - m - 8 * (n_phys - 1)
 
     def get_key_flag(self, key_number: int, shifted: bool) -> bool:
-        """Reads the KEYFLAGS existence bit for `key_number` -- True means
+        '''Reads the KEYFLAGS existence bit for `key_number` -- True means
         *some* assignment exists for this key/shift-state, in either the
         Key Assignment Registers (sec 4.2) or a global label (sec 4.6);
-        it says nothing about which kind. See docs sec 4.5."""
+        it says nothing about which kind. See docs sec 4.5.'''
         addr = self.KEYFLAGS_SHIFTED_ADDR if shifted else self.KEYFLAGS_UNSHIFTED_ADDR
         bit = self._keyflags_bit(key_number)
         reg = self.get_register(addr)
@@ -509,12 +505,12 @@ class Memory:
         return bool((reg.get_bytes()[byte_index] >> (7 - bit_in_byte)) & 1)
 
     def set_key_flag(self, key_number: int, shifted: bool, value: bool):
-        """Sets or clears the KEYFLAGS existence bit for `key_number`
+        '''Sets or clears the KEYFLAGS existence bit for `key_number`
         (docs sec 4.5). Callers writing an actual assignment should use
         set_key_assignment()/delete_key_assignment() below instead of
         calling this directly -- those keep the Key Assignment Registers
         and KEYFLAGS in sync; this is the low-level primitive they (and
-        global-label assignment/deletion, once implemented) share."""
+        global-label assignment/deletion, once implemented) share.'''
         addr = self.KEYFLAGS_SHIFTED_ADDR if shifted else self.KEYFLAGS_UNSHIFTED_ADDR
         bit = self._keyflags_bit(key_number)
         reg = self.get_register(addr)
@@ -528,12 +524,12 @@ class Memory:
         self.set_register(addr, Register(data=bytes(data)))
 
     def _decode_key_assignment_entries(self) -> list:
-        """Returns every entry currently in the Key Assignment Registers,
+        '''Returns every entry currently in the Key Assignment Registers,
         in stored (newest-first, sec 4.4) order, as
         `(fn_byte1, fn_byte2_or_None, key_byte)` tuples -- `fn_byte2` is
         None for a single-byte built-in function entry (the register's
         real filler-first storage, sec 4.2, is normalized away here so
-        every other method only deals with "1 byte" vs. "2 bytes")."""
+        every other method only deals with "1 byte" vs. "2 bytes").'''
         entries = []
         for addr in range(KEY_ASSIGNMENTS_RANGE[0], self.key_assignments_end()):
             raw = self.get_register(addr).get_bytes()
@@ -548,7 +544,7 @@ class Memory:
         return entries
 
     def _encode_key_assignment_entries(self, entries: list):
-        """Repacks `entries` (same shape _decode_key_assignment_entries()
+        '''Repacks `entries` (same shape _decode_key_assignment_entries()
         returns) canonically into the Key Assignment Registers, starting
         at KEY_ASSIGNMENTS_RANGE[0] with no gaps, two entries per
         register, re-adding the filler byte for a single-byte entry (sec
@@ -561,7 +557,7 @@ class Memory:
         updates key_assignments_end(). See _relocate_alarms() for the
         move itself. Entries are written in list order -- callers
         control LIFO placement (sec 4.4) by ordering `entries` themselves
-        before calling this."""
+        before calling this.'''
         base = KEY_ASSIGNMENTS_RANGE[0]
         old_end = self.key_assignments_end()
         new_end = base + (len(entries) + 1) // 2  # ceil(len/2), 2 entries/register
@@ -607,7 +603,7 @@ class Memory:
         self._key_assignments_end = new_end
 
     def set_key_assignment(self, key_number: int, shifted: bool, function_bytes):
-        """Assigns `key_number` (unshifted or shifted, per `shifted`) to a
+        '''Assigns `key_number` (unshifted or shifted, per `shifted`) to a
         built-in/peripheral function -- `function_bytes` is a single int
         (a one-byte HP-41 function, e.g. 0x40 for `+`; see the sec-5
         caveat in memory/functions.py for the low-code (<0x40) case) or a
@@ -624,7 +620,7 @@ class Memory:
         shadow that program's assignment rather than genuinely replacing
         it; see set_program_key_assignment() for the same precedent in
         the other direction.
-        """
+        '''
         key_byte = self.key_byte_for(key_number, shifted)
 
         if isinstance(function_bytes, int):
@@ -645,11 +641,11 @@ class Memory:
         self.set_key_flag(key_number, shifted, True)
 
     def delete_key_assignment(self, key_number: int, shifted: bool):
-        """Removes any Key Assignment Register entry for `key_number`/
+        '''Removes any Key Assignment Register entry for `key_number`/
         `shifted` and clears its KEYFLAGS bit. A no-op (still clears the
         flag) if the key currently has no entry there -- e.g. it's a
         global-label assignment (sec 4.6, untouched by this method) or
-        simply unassigned."""
+        simply unassigned.'''
         key_byte = self.key_byte_for(key_number, shifted)
         entries = self._decode_key_assignment_entries()
         filtered = [e for e in entries if e[2] != key_byte]
@@ -658,14 +654,14 @@ class Memory:
         self.set_key_flag(key_number, shifted, False)
 
     def get_key_assignment(self, key_number: int, shifted: bool) -> Optional[dict]:
-        """Looks up the single Key Assignment Register entry (if any) for
+        '''Looks up the single Key Assignment Register entry (if any) for
         `key_number`/`shifted` -- same dict shape as one entry from
         list_key_assignments(), or None if that key/shift-state has no
         entry there (unassigned, or assigned via a global label instead,
         sec 4.6). Intended for a GUI rendering one keypad cell at a time
         (docs sec 6 item 4), where scanning the full decoded list per cell
         would be wasteful for a whole grid at once -- callers rendering
-        every key at once should use list_key_assignments() instead."""
+        every key at once should use list_key_assignments() instead.'''
         key_byte = self.key_byte_for(key_number, shifted)
         for fn1, fn2, kb in self._decode_key_assignment_entries():
             if kb == key_byte:
@@ -680,7 +676,7 @@ class Memory:
         return None
 
     def list_key_assignments(self) -> list:
-        """Returns every built-in/peripheral key assignment currently in
+        '''Returns every built-in/peripheral key assignment currently in
         the Key Assignment Registers as a list of dicts:
         `{"key_number": int, "shifted": bool, "fn_byte1": int,
         "fn_byte2": int|None, "name": str}` -- `name` is the looked-up
@@ -689,7 +685,7 @@ class Memory:
         matches the buffer's own newest-first order (sec 4.4); global
         label assignments (sec 4.6) are NOT included here -- see
         list_programs()'s `key_assignment` field for those, per
-        docs/key_assignments.md sec 6 item 4's shared-data-model note."""
+        docs/key_assignments.md sec 6 item 4's shared-data-model note.'''
         results = []
         for fn1, fn2, key_byte in self._decode_key_assignment_entries():
             try:
@@ -714,7 +710,7 @@ class Memory:
 
     @staticmethod
     def _key_number_for_byte(key_byte: int) -> tuple:
-        """Inverts key_byte_for(): given a stored key byte, returns
+        '''Inverts key_byte_for(): given a stored key byte, returns
         (key_number, shifted). Tries every real assignable keyboard
         position (_VALID_KEY_NUMBERS) rather than algebraically inverting
         the formula, since the carry behavior for M=8 rows (sec 4.3) makes
@@ -722,7 +718,7 @@ class Memory:
         called on the small number of decoded entries in a dump, so the
         brute-force cost is immaterial. Raises ValueError if `key_byte`
         doesn't match any real key (e.g. a corrupt dump, or a hand-crafted
-        test fixture targeting a non-assignable position)."""
+        test fixture targeting a non-assignable position).'''
         for key_number in Memory._VALID_KEY_NUMBERS:
             if Memory.key_byte_for(key_number, False) == key_byte:
                 return key_number, False
@@ -758,7 +754,7 @@ class Memory:
         self.set_register(self.REG_D_ADDR, Register(data=bytes(data)))
 
     def get_all_flags(self) -> list:
-        """Returns a list of FLAG_COUNT bools, flag 0 first."""
+        '''Returns a list of FLAG_COUNT bools, flag 0 first.'''
         d = self.get_register(self.REG_D_ADDR)
         bits = int.from_bytes(d.get_bytes(), "big")
         binary = format(bits, f"0{self.FLAG_COUNT}b")
@@ -784,12 +780,12 @@ class Memory:
         return reg, 6 - remainder
 
     def _read_bytes_forward(self, reg: int, offset: int, count: int) -> bytes:
-        """Reads `count` bytes starting at (reg, offset) in the direction
+        '''Reads `count` bytes starting at (reg, offset) in the direction
         chain markers and global-label names read correctly in (increasing
         program line number / decreasing address -- see docs/program.md).
         Running past offset 6 continues at offset 0 of the next LOWER
         register, matching how program memory actually continues across a
-        register boundary."""
+        register boundary.'''
         out = bytearray()
         r, o = reg, offset
         for _ in range(count):
@@ -801,9 +797,9 @@ class Memory:
         return bytes(out)
 
     def _decode_chain_marker(self, reg: int, offset: int) -> Optional[dict]:
-        """Decodes the 3-byte '1100 bbb rrrrrrrrr eeeeffff' marker at
+        '''Decodes the 3-byte '1100 bbb rrrrrrrrr eeeeffff' marker at
         (reg, offset) -- docs/program.md sec 5.1. Returns None if the byte
-        at (reg, offset) doesn't start with the 0xC0-0xCD marker nibble."""
+        at (reg, offset) doesn't start with the 0xC0-0xCD marker nibble.'''
         raw = self._read_bytes_forward(reg, offset, 3)
         if (raw[0] >> 4) != 0xC:
             return None
@@ -821,13 +817,13 @@ class Memory:
         }
 
     def _decode_label_name(self, reg: int, offset: int, length: int) -> tuple:
-        """Decodes a global label's key-assignment byte and name, given
+        '''Decodes a global label's key-assignment byte and name, given
         where its 4-byte header starts -- docs/program.md sec 5.2. Reading
         the header and name in one continuous forward pass (rather than as
         two separate reads) is what makes a name longer than 3 characters
         correctly spill into the preceding register: `_read_bytes_forward`
         only wraps registers within a single call. Returns
-        (name, key_assignment)."""
+        (name, key_assignment).'''
         combined = self._read_bytes_forward(reg, offset, 4 + max(length, 0))
         key_assignment = combined[3]
         name = "".join(
@@ -836,7 +832,7 @@ class Memory:
         return name, key_assignment
 
     def list_programs(self) -> list:
-        """
+        '''
         Walks the global chain backward from `.END.` toward R00 and
         returns every global alpha label and plain END marker found along
         the way, oldest first -- the register nearest R00 is the first
@@ -867,7 +863,7 @@ class Memory:
         the caller. Also bounded to a generous iteration cap, and guards
         against revisiting the same position, as a backstop against an
         accidentally circular chain.
-        """
+        '''
         r00 = self.R00()
         dend = self.DotEnd()
         # 0xC1 matches gui/memory_ranges.py's MIN_SANE_R00 -- a fresh,
@@ -961,23 +957,23 @@ class Memory:
     # physical key, which has independent unshifted/shifted slots.
 
     def _find_program_by_name(self, name: str) -> Optional[ProgramInfo]:
-        """First named global label matching `name` (oldest-created, i.e.
+        '''First named global label matching `name` (oldest-created, i.e.
         list_programs()' own order, in the rare case of a duplicate name)
         -- shared by set_program_key_assignment()/
-        clear_program_key_assignment()/get_program_for_key()."""
+        clear_program_key_assignment()/get_program_for_key().'''
         for program in self.list_programs():
             if program.is_named and program.name == name:
                 return program
         return None
 
     def _write_program_key_byte(self, header_addr: int, header_offset: int, value: int):
-        """Overwrites the key-assignment byte (the 4th byte, sec 4.2/5.2)
+        '''Overwrites the key-assignment byte (the 4th byte, sec 4.2/5.2)
         of the global-label header starting at (header_addr,
         header_offset) -- the write-side counterpart to
         _decode_label_name() reading it. `_addr_for`/`_pos_for` convert to
         and from the linear address space so this doesn't need its own
         register-boundary-crossing loop (see _read_bytes_forward for why
-        register offset and address run in opposite directions)."""
+        register offset and address run in opposite directions).'''
         reg, offset = self._pos_for(self._addr_for(header_addr, header_offset) - 3)
         data = bytearray(self.get_register(reg).get_bytes())
         data[offset] = value
@@ -986,13 +982,13 @@ class Memory:
     def _clear_program_assignments_for_key_byte(
         self, key_byte: int, except_name: Optional[str] = None
     ):
-        """Writes 0x00 (unassigned) into the header of every global label
+        '''Writes 0x00 (unassigned) into the header of every global label
         currently holding `key_byte`, except one named `except_name` (used
         by set_program_key_assignment() while moving that program itself
         onto this key -- its own old byte is handled separately there).
         Does not touch KEYFLAGS -- callers own that, since the bit should
         usually end up set (by whatever new assignment is replacing these)
-        rather than cleared."""
+        rather than cleared.'''
         for program in self.list_programs():
             if (
                 program.is_named
@@ -1002,14 +998,14 @@ class Memory:
                 self._write_program_key_byte(program.header_addr, program.header_offset, 0x00)
 
     def get_program_for_key(self, key_number: int, shifted: bool) -> Optional[ProgramInfo]:
-        """Looks up the global label (if any) assigned to `key_number`/
+        '''Looks up the global label (if any) assigned to `key_number`/
         `shifted` via sec 4.6 -- the counterpart to get_key_assignment()
         for the other storage mechanism (sec 4.1). Per the real lookup
         order (sec 4.7), a Key Assignment Register entry on the same key
         always takes priority over a global-label one, but this method
         only checks global labels -- callers wanting "whatever's actually
         assigned to this key" should check get_key_assignment() first and
-        fall back to this (see gui/key_assignments_tab.py)."""
+        fall back to this (see gui/key_assignments_tab.py).'''
         key_byte = self.key_byte_for(key_number, shifted)
         for program in self.list_programs():
             if program.is_named and program.key_assignment == key_byte:
@@ -1017,7 +1013,7 @@ class Memory:
         return None
 
     def set_program_key_assignment(self, name: str, key_number: int, shifted: bool):
-        """Assigns the global label `name` to `key_number`/`shifted` (sec
+        '''Assigns the global label `name` to `key_number`/`shifted` (sec
         4.6) -- `ASN "name" [key]` on a real calculator. Unlike
         set_key_assignment(), this never touches the Key Assignment
         Registers; it writes directly into the label's own header.
@@ -1035,7 +1031,7 @@ class Memory:
         would be misleading rather than a real dual assignment. Same
         silent-overwrite precedent as set_key_assignment().
 
-        Raises ValueError if no global label named `name` exists."""
+        Raises ValueError if no global label named `name` exists.'''
         program = self._find_program_by_name(name)
         if program is None:
             raise ValueError(f"No global label named {name!r} found")
@@ -1061,11 +1057,11 @@ class Memory:
         self.set_key_flag(key_number, shifted, True)
 
     def clear_program_key_assignment(self, name: str):
-        """Removes global label `name`'s key assignment (sec 4.6), if it
+        '''Removes global label `name`'s key assignment (sec 4.6), if it
         has one -- writes 0x00 back into its header and clears the
         corresponding KEYFLAGS bit. No-op if the label has no key
         assignment. Raises ValueError if no global label named `name`
-        exists."""
+        exists.'''
         program = self._find_program_by_name(name)
         if program is None:
             raise ValueError(f"No global label named {name!r} found")
