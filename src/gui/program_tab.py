@@ -1,37 +1,49 @@
 """
-Programs tab: a read-only listing of program memory's "global chain" --
-every global label header (LBL), plain END marker, and the one permanent
-`.END.` marker itself, found walking backward from `.END.` toward R00.
-See docs/program.md sec 5 for the full derivation (reverse-engineered from
-sample dumps and Wickes' "Synthetic Programming on the HP-41C", section
-2C) and memory.py's Memory.list_programs() / ProgramInfo for the
-implementation this renders.
+Programs tab: a read-only listing of the real, END-delimited programs in
+program memory -- one row per program, matching how many programs CAT 1
+would actually show, NOT one row per global label or per raw chain marker.
+See docs/program.md sec 5.3 for the full derivation and memory.py's
+Memory.list_programs() / Program / ProgramLabel for the implementation
+this renders (built on top of the raw chain walk,
+Memory.list_global_chain() / ProgramInfo, described in sec 5).
 
-Each row is one independent chain link, not "a program": the user's own
-testing found a single END can have zero, one, or several LBLs chained to
-it, so this deliberately does NOT try to group entries into programs -- it
-shows the raw chain, same as CAT 1 would list it, with each entry's Type
-(LBL/END/.END.) and the raw byte distance its own marker reports onward to
-the next chain link. That distance is NOT a program size -- see
-ProgramInfo's docstring -- it's shown as-is to help research whether/how
-it reconciles with CAT 1's reported program byte lengths. The `.END.` row
-(the newest entry, when present) matters for that comparison too: an
-earlier version of this tool silently dropped it, which turned out to hide
-bytes CAT 1 counts as part of the newest program.
+A program is delimited by an explicit plain END marker, never by a global
+label: an HP-41 program can have zero, one, or several labels (the Labels
+column lists them, comma-joined, or shows "(unlabelled)" if it has none),
+and the single newest program in memory doesn't need an explicit END of
+its own at all -- the permanent `.END.` sentinel can close it out instead.
+This replaces an earlier version of this tab that showed one row per raw
+chain link (LBL/END/.END.) with no notion of "a program" at all, built on
+an earlier version of the grouping logic that also miscounted programs by
+mistaking the zero-padding bytes kept in front of the permanent `.END.`
+marker (for register alignment -- see docs/program.md sec 5.1) for a small
+extra unnamed program. Both were caught by the user's own real-hardware
+CAT 1 comparisons (tests/data/unlabelled.dm41, tests/data/twolabels.dm41).
 
 Uses a native ttk.Treeview rather than one CustomTkinter widget per row --
 the same performance/consistency fix as gui/data_registers_tab.py and
 gui/xm_files_tab.py (see either module's docstring for the full story;
-GitHub issues #21/#22). This tab is read-only, so unlike those two there's
-no per-row action button, no double-click-to-edit, and no selection-driven
-enable/disable -- the row highlight is purely a "you can see which row you
-clicked" visual nicety, matching the other tabs' look for consistency.
+GitHub issues #21/#22). This tab does not let you edit program memory, so
+unlike those two there's no double-click-to-edit -- but a selected row can
+be exported to a standalone HP-41 program file (RAW or DAT format -- see
+memory/program_files.py), so there is one selection-driven action button,
+"Export...".
+
+Export uses Memory.get_program_bytes() (memory/memory.py) -- the exact
+bytes CAT 1 would report for that program, from its own first instruction
+through its own terminator (an explicit END, or the permanent `.END.` for
+the single newest program). A program with more than one global label
+(see tests/data/twolabels.dm41) exports as the single physical block its
+row represents, starting at its oldest label's own header -- not as
+separate per-label slices.
 """
 
 import logging
+from pathlib import Path
+from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
-from memory import Memory
+from memory import Memory, DM41LMemoryError, encode_program_raw, encode_program_dat
 from gui.tab_common import (
     build_tab_header,
     build_tab_treeview,
@@ -51,33 +63,39 @@ logger = logging.getLogger(__name__)
 _TREE_STYLE = "Programs.Treeview"
 
 _TREE_COLUMNS = [
-    ("kind", "Type", 70, False),
-    ("name", "Name", 180, True),
-    ("header", "Address", 120, False),
-    ("distance", "Distance", 120, False),
-    ("key_assignment", "Key Assignment", 160, False),
+    ("labels", "Labels", 220, True),
+    ("address", "Address", 120, False),
+    ("length", "Length", 120, False),
+    ("key_assignment", "Key ASNs", 220, False),
 ]
 
 
 class ProgramTab(ctk.CTkFrame):
-    """Renders the program-memory global chain for a Memory object. Call
-    `render(memory)` whenever the buffer changes."""
+    """Renders the real, END-delimited programs in a Memory object's
+    program memory. Call `render(memory)` whenever the buffer changes."""
 
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
         self._memory: Memory = None
+        self._programs: list = []
 
-        _, self._header_label = build_tab_header(self)
+        header, self._header_label = build_tab_header(self)
+        ctk.CTkButton(
+            header,
+            text="Export...",
+            width=90,
+            command=self._export_selected,
+        ).pack(side="right", padx=(0, 8))
 
         self._caption = build_caption_label(
             self,
-            "The raw global chain in program memory: every LBL header, "
-            "END marker, and the permanent .END. marker itself, in the "
-            "order CAT 1 would list them. This is still-researched "
-            "territory (see docs/program.md) -- entries are NOT grouped "
-            "into programs (a single END can have zero, one, or several "
-            "LBLs chained to it), and Distance is each entry's own raw "
-            "chain-marker distance, not a program size.",
+            "One row per real program in program memory, delimited by "
+            "explicit END markers (or the permanent .END. sentinel for "
+            "the single newest program) -- not by global label, since a "
+            "program can have zero, one, or several. Labels lists every "
+            "global label a program contains, or \"(unlabelled)\" if it "
+            "has none. Select a row and click Export... to save that "
+            "program as a standalone HP-41 program file.",
         )
 
         _, self._tree = build_tab_treeview(self, _TREE_COLUMNS, style=_TREE_STYLE)
@@ -105,6 +123,7 @@ class ProgramTab(ctk.CTkFrame):
 
     def render(self, memory: Memory):
         self._memory = memory
+        self._programs = []
         if clear_tree_for_render(self._tree, self._header_label, memory):
             return
 
@@ -115,11 +134,13 @@ class ProgramTab(ctk.CTkFrame):
             self._header_label.configure(text=f"Could not list programs: {e}")
             return
 
+        self._programs = programs
+
         if not programs:
-            self._header_label.configure(text="Program memory entries: 0")
+            self._header_label.configure(text="Programs in memory: 0")
             return
 
-        self._header_label.configure(text=f"Program memory entries: {len(programs)}")
+        self._header_label.configure(text=f"Programs in memory: {len(programs)}")
 
         for pos, program in enumerate(programs):
             self._tree.insert(
@@ -127,10 +148,9 @@ class ProgramTab(ctk.CTkFrame):
                 "end",
                 iid=str(pos),
                 values=(
-                    program.kind,
-                    program.display_name,
+                    program.names_label,
                     program.address_label,
-                    program.distance_label,
+                    program.length_label,
                     self._key_assignment_text(program),
                 ),
                 tags=("oddrow",) if pos % 2 else (),
@@ -138,10 +158,114 @@ class ProgramTab(ctk.CTkFrame):
 
     @staticmethod
     def _key_assignment_text(program) -> str:
-        # Only global-label entries have a key-assignment byte at all --
-        # a plain END marker has nothing to show here.
-        if not program.is_named:
+        # An unlabelled program has no key-assignment byte at all (that
+        # lives in a global label's own header -- sec 4.6/5.2). A program
+        # with one label shows its assignment plainly; one with several
+        # (tests/data/twolabels.dm41) shows each label's own status,
+        # since each label's header holds an independent key byte.
+        if not program.labels:
             return ""
-        if program.key_assignment == 0:
-            return "unassigned"
-        return f"0x{program.key_assignment:02x}"
+        if len(program.labels) == 1:
+            return program.labels[0].key_assignment_text
+        return ", ".join(
+            f"{label.key_assignment_text}" for label in program.labels
+        )
+
+    def _selected_program(self):
+        """The Program for the currently-selected row, or None if
+        nothing (or something that's since gone stale, e.g. after a
+        reload) is selected."""
+        selection = self._tree.selection()
+        if not selection:
+            return None
+        try:
+            pos = int(selection[0])
+        except ValueError:
+            return None
+        if pos < 0 or pos >= len(self._programs):
+            return None
+        return self._programs[pos]
+
+    _EXPORT_FORMATS = {
+        ".raw": ("RAW", encode_program_raw),
+        ".dat": ("DAT", encode_program_dat),
+    }
+
+    def _export_selected(self):
+        """Exports the selected row's own program bytes
+        (Memory.get_program_bytes() -- this module's docstring) as a
+        standalone HP-41 program file, in whichever of hp41uc's RAW/DAT
+        formats the chosen filename's extension picks
+        (memory/program_files.py). Works the same for a labelled program
+        or an unlabelled one (only local labels, or none at all)."""
+        if self._memory is None:
+            messagebox.showwarning(
+                "No Program Memory", "Load or start a memory buffer first."
+            )
+            return
+
+        program = self._selected_program()
+        if program is None:
+            messagebox.showinfo("No Selection", "Select a program row first.")
+            return
+
+        try:
+            instruction_bytes = self._memory.get_program_bytes(program)
+        except (ValueError, DM41LMemoryError) as e:
+            logger.warning(
+                "Could not read program bytes for %r: %s", program.names_label, e
+            )
+            messagebox.showerror("Could Not Export", str(e))
+            return
+
+        first_label = program.labels[0].name if program.is_named else None
+        program_label = (
+            first_label.strip()
+            if first_label
+            else f"unlabelled program @ {program.address_label}"
+        )
+        default_stub = (
+            first_label.strip()
+            if first_label
+            else f"unlabelled_{program.start_addr:03x}_{program.start_offset}"
+        )
+        default_name = f"{default_stub}.raw"
+        path = filedialog.asksaveasfilename(
+            initialfile=default_name,
+            defaultextension=".raw",
+            filetypes=[
+                ("RAW files", "*.raw"),
+                ("DAT files", "*.dat"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+
+        extension = Path(path).suffix.lower()
+        format_label, encoder = self._EXPORT_FORMATS.get(
+            extension, self._EXPORT_FORMATS[".raw"]
+        )
+
+        try:
+            file_bytes = encoder(instruction_bytes)
+            Path(path).write_bytes(file_bytes)
+        except (OSError, ValueError) as e:
+            logger.warning(
+                "Could not export program %r to %s: %s", program_label, path, e
+            )
+            messagebox.showerror("Could Not Export", str(e))
+            return
+
+        logger.info(
+            "Exported program %r (%d bytes) as %s to %s",
+            program_label,
+            len(instruction_bytes),
+            format_label,
+            path,
+        )
+        messagebox.showinfo(
+            "Exported",
+            f"{program_label} ({len(instruction_bytes)} bytes) "
+            f"written as {format_label} to {path}",
+        )

@@ -76,7 +76,7 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
     should pass `assignment` when it's set and only fall back to
     `program_assignment` otherwise, matching the real lookup order.
     `program_names` lists every assignable global label (from
-    list_programs()) for the Program tab's picker, alphabetical.
+    list_global_chain()) for the Program tab's picker, alphabetical.
     """
 
     def __init__(

@@ -121,8 +121,11 @@ KEY_BUTTON_FONT_SIZE = 14
 def _program_names(memory: Memory) -> list:
     """Every assignable global label's name, alphabetical -- the Program
     tab's picker list. A set first in case a dump has a duplicate label
-    name (list_programs() doesn't assume uniqueness)."""
-    return sorted({p.name for p in memory.list_programs() if p.is_named})
+    name (list_global_chain() doesn't assume uniqueness). Key assignments
+    live on one label's own header (sec 4.6/5.2) regardless of how many
+    labels its program has, so this works off the flat per-label chain,
+    not the grouped list_programs()."""
+    return sorted({p.name for p in memory.list_global_chain() if p.is_named})
 
 
 def _count_all_assignments(memory: Memory) -> int:
@@ -131,7 +134,7 @@ def _count_all_assignments(memory: Memory) -> int:
     assignment -- the header count used to just be the first of these,
     silently omitting any global-label assignments."""
     program_count = sum(
-        1 for p in memory.list_programs() if p.is_named and p.key_assignment
+        1 for p in memory.list_global_chain() if p.is_named and p.key_assignment
     )
     return len(memory.list_key_assignments()) + program_count
 

@@ -100,9 +100,19 @@ DM41
 ...
 ```
 
-This example contains a small unnamed program and a program called "APPTEST" in an
-otherwise empty DM41L emulator. On the calculator, the `CAT 1` command reports
-that "APPTEST" occupies 26 bytes and the nameless app occupies 10 bytes.
+This example contains a single program, called "APPTEST" (26 bytes), in an
+otherwise empty DM41L emulator.
+
+**Correction (2026-08-23):** this section used to say there was also "a small
+unnamed program" occupying 10 bytes. That was a mistake, caught once §5.3
+below worked out the real rule for telling programs apart: the "10 bytes"
+being pointed at here -- six zero bytes followed by `c4 01 20` -- is not a
+second program's own END at all. `c4 01 20`'s third byte is `20`, high
+nibble `2`, which (per the table below, and Wickes) marks the permanent
+`.END.` sentinel itself, not a normal END (high nibble `0`). The six zero
+bytes ahead of it are register-alignment padding (§5.1's "`.END.` is always
+found in the last 3 bytes of a register" note), not program bytes. There is
+only ever one program in this dump.
 
 In this dump, R00 is register 19c and .END. is register 197. Register 197 contains "00 00 00 00 c4 01 20" which decodes like this:
 
@@ -207,5 +217,117 @@ Worked examples, both confirmed against the real calculator's CAT 1 listing:
   **APPTEST**. This is the correction referenced above — the same method
   that correctly reproduces XMBCD and PURXM reproduces this name too, and
   it isn't "TESTAPP".
+
+### 5.3 Grouping the Chain Into Real Programs
+
+Sections 5.1/5.2 walk the raw "global chain" -- every global label header
+and every plain END marker, one link at a time. That chain is NOT the same
+thing as "the list of programs": a program is not required to have a
+global label at all (it can consist of nothing but local, numbered labels,
+or none whatsoever), and it can have more than one. **A program is
+delimited by an explicit plain END marker, never by a label.** The one
+exception is the single *newest* program in memory: it does not need an
+explicit END of its own, because the permanent `.END.` sentinel (§5.1) can
+serve as its terminator instead. Every *older* program, by construction,
+must have a real END of its own, since nothing else could have closed it
+out while a newer program was added after it.
+
+This distinction matters because of a real bug it caused: the permanent
+`.END.` marker is always written at a register boundary -- "In all
+samples, .END. is always found in the last 3 bytes of a register" (§5.1).
+When a program's own last instruction byte doesn't happen to land exactly
+on that boundary, the bytes in between are zero-filled padding, not
+program content. An earlier version of this project's program-memory code
+walked forward from wherever the previous program left off and treated
+*any* END-like marker it hit next -- including `.END.` itself -- as
+closing a real program, which mistook that zero-padding-plus-`.END.` for a
+small extra program that doesn't actually exist. This was caught by
+comparing against a real DM41L's `CAT 1` listing, using two fixtures built
+specifically to pin the rule down (`src/tests/data/unlabelled.dm41` and
+`src/tests/data/twolabels.dm41`).
+
+**Worked example: `unlabelled.dm41`.** Two programs, R00 = 19c, `.END.` =
+196:
+
+```
+196  09000000cc0020
+197  454c724352cc02
+198  43414c204c4142
+199  0009cf66fb4c4f
+19a  454c72715142c0
+19b  f84e4f204c4142
+```
+
+Reading forward from the top of program memory (19b, offset 0): `f8`
+(ALPHA, 8 chars) spells out "NO LABEL" (an ALPHA-string instruction, not a
+label -- there's no global label header here at all), followed by four
+ordinary single-byte opcodes, then `c0 00 09` -- a plain END (third byte
+`09`: high nibble `0`). That's **16 bytes**, exactly matching the real
+calculator's `CAT 1` report for this program. Continuing forward: a
+2-byte opcode, an 11-character ALPHA string ("LOCAL LABEL"), three more
+single-byte opcodes, then `cc 02 09` -- another plain END. That's **20
+bytes**, again matching `CAT 1` exactly. Continuing forward past that
+second END: three zero bytes, then `c0 00 20` -- third byte `20`, high
+nibble `2`: the permanent `.END.` itself, not a plain END. Those three
+zero bytes plus `.END.`'s own three bytes are register-alignment padding,
+not a third program -- and indeed `CAT 1` only ever reported two programs
+here, 16 and 20 bytes, matching the two real explicit ENDs found above and
+nothing else.
+
+**Worked example: `twolabels.dm41`.** One program, two global labels, R00
+= 19c, `.END.` = 198:
+
+```
+198  a69c8400c0022d
+199  005345434f4e44
+19a  53548684c801f7
+19b  c000f600464952
+```
+
+Reading forward from the top (19b, offset 0): `c0 00 f6 00` is a global
+label header (`f6` → length 5) spelling "FIRST", followed by two ordinary
+opcodes, then `c8 01 f7 00` -- a *second* global label header (`f7` →
+length 6) spelling "SECOND", followed by a few more ordinary opcodes, and
+then straight into `c0 02 2d` -- the permanent `.END.` (third byte `2d`,
+high nibble `2`) with no zero-padding gap at all this time (the real
+content happened to land exactly on a register boundary). There is no
+plain END anywhere in this dump -- both labels are chained straight
+through to `.END.` itself, which is legal precisely because this is the
+single newest (and, here, only) program in memory. The whole span from
+FIRST's own header through `.END.`'s own bytes is **one program, 28
+bytes**, with two labels attached to it; `CAT 1` would show two catalog
+entries (one per label) for what is physically one program.
+
+**The grouping rule**, walking the chain oldest to newest (implemented by
+`Memory.list_programs()`, returning `Program`/`ProgramLabel` objects --
+`src/memory/program_info.py`):
+
+1. Every global label encountered is added to the label list of whatever
+   program is currently being accumulated (there may be zero, one, or
+   several before the next boundary).
+2. Every plain END (high nibble `0`) always closes a real program --
+   whatever labels (if any) have been accumulated since the last boundary,
+   plus everything back to that boundary, form one program ending at this
+   END's own bytes. A fresh, empty label list starts for whatever comes
+   next.
+3. The permanent `.END.` (high nibble `2`) is always the last entry in the
+   chain, and is handled specially:
+   - If any labels are pending (nothing has closed them out yet), `.END.`
+     really is this program's own terminator (`twolabels.dm41`'s case) --
+     one more program, ending at `.END.`'s own bytes.
+   - Otherwise, check whether every byte between wherever the last real
+     program left off and `.END.`'s own marker is zero. If so, that's
+     nothing but register-alignment padding -- not a program, not even an
+     empty one -- and is dropped (this is what fixes the `unlabelled.dm41`
+     miscount, and, per the correction earlier in §5.2's worked example,
+     also means `simple.dm41` has only one program, not two). If any byte
+     in that gap is non-zero, it's a real final program with no label of
+     its own at all -- `.END.` closes it out the same way.
+
+Every existing sample dump in `src/tests/data/` that has a trailing gap
+before `.END.` turns out to be pure zero-padding once checked this way --
+`unlabelled.dm41` and `simple.dm41` are the only two (so far) where that
+gap was ever large enough, and non-`.END.`-adjacent, to have been
+mistaken for a real program.
 
 

@@ -28,7 +28,18 @@ individual submodules for what lives where:
                     real behavior) and RegionSpan (plain descriptor for
                     Memory.regions()'s dynamic, freshly-computed output)
   xm_file.py       XMFile, ExtendedMemory (extended-memory file storage)
-  program_info.py  ProgramInfo (program-memory "global chain" entries)
+  program_info.py  ProgramInfo (raw program-memory "global chain" entries)
+                    and ProgramLabel/Program (the grouped, END-delimited
+                    "real program" view built on top of that chain)
+  opcode_scan.py   find_program_end() -- forward HP-41 opcode-length
+                    scanner (ported from hp41uc's seek_end(), see
+                    ~/Work/hp41uc/Source/decomp.c), used by
+                    Memory.get_program_bytes() to find one named
+                    program's own byte range for export
+  program_files.py encode_program_raw/encode_program_dat and
+                    decode_program_raw/decode_program_dat -- hp41uc-
+                    compatible single-program file formats (RAW/DAT;
+                    see ~/Work/hp41uc/Source/convert.c)
   memory.py        Memory (the top-level dump: parsing, raw register
                     access, and the R00/.END./flags/program-chain
                     accessors built on top of it)
@@ -57,7 +68,14 @@ from .constants import (
 )
 from .regions import MemoryRegion, StatusRegisters, RegionSpan
 from .xm_file import XMFile, ExtendedMemory, NAME_MIN_CHAR, NAME_MAX_CHAR
-from .program_info import ProgramInfo
+from .program_info import ProgramInfo, ProgramLabel, Program
+from .opcode_scan import find_program_end
+from .program_files import (
+    encode_program_raw,
+    encode_program_dat,
+    decode_program_raw,
+    decode_program_dat,
+)
 from .memory import Memory
 
 __all__ = [
@@ -87,5 +105,12 @@ __all__ = [
     "NAME_MIN_CHAR",
     "NAME_MAX_CHAR",
     "ProgramInfo",
+    "ProgramLabel",
+    "Program",
+    "find_program_end",
+    "encode_program_raw",
+    "encode_program_dat",
+    "decode_program_raw",
+    "decode_program_dat",
     "Memory",
 ]

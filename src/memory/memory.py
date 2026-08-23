@@ -10,7 +10,7 @@ import re
 from typing import Dict, Optional, Union
 from pathlib import Path
 
-from .registers import Register
+from .registers import Register, DM41LMemoryError
 from .constants import (
     PRIMARY_DATA_END,
     KEY_ASSIGNMENTS_RANGE,
@@ -19,8 +19,9 @@ from .constants import (
     XM_REGIONS,
     MIN_SANE_R00,
 )
-from .program_info import ProgramInfo
+from .program_info import ProgramInfo, ProgramLabel, Program
 from .regions import RegionSpan
+from .opcode_scan import find_program_end
 from . import functions as key_functions
 
 
@@ -799,7 +800,7 @@ class Memory:
         string if the byte(s) don't match any known function. Order
         matches the buffer's own newest-first order (sec 4.4); global
         label assignments (sec 4.6) are NOT included here -- see
-        list_programs()'s `key_assignment` field for those, per
+        list_global_chain()'s `key_assignment` field for those, per
         docs/key_assignments.md sec 6 item 4's shared-data-model note.'''
         results = []
         for fn1, fn2, key_byte in self._decode_key_assignment_entries():
@@ -946,7 +947,7 @@ class Memory:
         )
         return name, key_assignment
 
-    def list_programs(self) -> list:
+    def list_global_chain(self) -> list:
         '''
         Walks the global chain backward from `.END.` toward R00 and
         returns every global alpha label and plain END marker found along
@@ -957,12 +958,18 @@ class Memory:
         `src/tests/data/*.dm41` sample that has any programs in it).
 
         Each entry is one independent chain link (see ProgramInfo) -- do
-        NOT assume labels and END markers pair up one-to-one. The user's
-        own testing (against a modified copy of 6x-xm.dm41) found a single
-        END can have zero, one, or several global labels chained to it, so
-        this makes no attempt to group entries into "programs"; it just
-        reports the raw chain in the order it's found, same as CAT 1 would
-        list it.
+        NOT assume labels and END markers pair up one-to-one, and do NOT
+        assume consecutive entries belong to different programs. The
+        user's own testing (against a modified copy of 6x-xm.dm41) found a
+        single END can have zero, one, or several global labels chained to
+        it, so this makes no attempt to group entries into "programs"; it
+        just reports the raw chain in the order it's found, same as CAT 1
+        would list it. For the grouped, "one row per real program" view --
+        the one the Program tab and program export actually use -- see
+        `list_programs()` below and docs/program.md sec 5.3. This method
+        is still what key-assignment code (`_find_program_by_name()` and
+        friends) uses, since a key assignment lives on one label's own
+        header regardless of how many labels its program has.
 
         Returns [] if program memory is empty, or if R00/.END. don't look
         like a real partition (e.g. a fresh, never-loaded Memory()). The
@@ -1063,6 +1070,199 @@ class Memory:
         programs.reverse()
         return programs
 
+    def _program_memory_top_addr(self) -> int:
+        '''Address just below R00 -- the top of program memory, where the
+        very first program ever written begins (see docs/program.md's
+        "Addressing within program memory"). R00 itself belongs to the
+        free/data-register side of the partition, not to program memory.'''
+        return self._addr_for(self.R00() - 1, 0)
+
+    def list_programs(self) -> list:
+        '''
+        Groups `list_global_chain()`'s raw chain into real, END-delimited
+        programs -- one `Program` per program CAT 1 would show, oldest
+        first. See docs/program.md sec 5.3 for the full derivation; this
+        replaces an earlier version of this method (see
+        `list_global_chain()`, and Program/ProgramInfo's docstrings) that
+        conflated "one chain link" with "one program" and, separately, had
+        a real bug: it could mistake register-alignment zero-padding
+        before the permanent `.END.` marker for a small extra unnamed
+        program. Both are fixed here, verified against the user's own
+        real-hardware `CAT 1` comparisons on two purpose-built fixtures:
+
+          - `tests/data/unlabelled.dm41`: two programs, NEITHER one named
+            (one holds only an ALPHA string, the other only a local
+            numbered label) -- `CAT 1` reports them as 16 and 20 bytes.
+            The old code miscounted this as three programs (16, 20, and a
+            phantom 6-byte one made of nothing but the zero-padding in
+            front of `.END.`).
+          - `tests/data/twolabels.dm41`: ONE program with TWO global
+            labels ("FIRST" and "SECOND") and, notably, no explicit END
+            at all -- only the permanent `.END.` terminates it, which is
+            legal for the single newest program in memory (see `Program`'s
+            docstring). `CAT 1` would show two catalog entries here (one
+            per label) but they are the same underlying program.
+
+        A program is delimited by an explicit plain END marker, never by
+        a global label -- a program can have zero, one, or several labels
+        (`Program.labels`), and per the second fixture above the single
+        newest program in memory does not need an explicit END of its own
+        at all; the permanent `.END.` sentinel can close it out instead.
+        Every OLDER program, by construction, must have a real END, since
+        nothing else could have closed it while a newer one was added
+        after it.
+
+        Walking the chain oldest to newest: every LBL entry is added to
+        the label list for whatever program is currently being
+        accumulated. Every plain END entry (`end_type == 0`) always closes
+        a real program -- its length is computed directly from the
+        address arithmetic already validated for the chain itself (no
+        byte-by-byte opcode scanning needed: the chain's own marker
+        position already tells us exactly where this program's terminator
+        sits), and a fresh, empty label list starts for whatever comes
+        next. The permanent `.END.` entry (`end_type == 2`) is always
+        last, and is handled specially, since it plays two different
+        roles depending on what precedes it:
+
+          - If any labels have been accumulated since the last explicit
+            END (or since the top of program memory, if there's been none
+            yet) -- as in `twolabels.dm41` -- `.END.` is genuinely this
+            program's own terminator, and everything from the oldest of
+            those labels' own header through `.END.`'s own bytes is one
+            real program.
+          - Otherwise (no labels pending), check whether the bytes between
+            wherever the last real program left off and `.END.`'s own
+            marker are ALL zero. If so, that gap is nothing but the
+            register-alignment padding described above -- not a program,
+            not even an empty one -- and is dropped entirely (this is
+            what fixes the `unlabelled.dm41` miscount). If the gap
+            contains any non-zero byte, it's a real final program with no
+            label of its own at all (an HP-41 program doesn't require
+            one, confirmed against tests/data/tower.txt, which opens with
+            a local "LBL 21" instead of a global one) -- `.END.` closes
+            that program too, same as the labeled case.
+
+        Returns [] if `list_global_chain()` does (empty or not-yet-real
+        program memory).
+        '''
+        chain = self.list_global_chain()
+        if not chain:
+            return []
+
+        programs = []
+        pending_labels = []
+        group_start_addr = self._program_memory_top_addr()
+
+        for entry in chain:
+            marker_addr = self._addr_for(entry.header_addr, entry.header_offset)
+
+            if entry.is_named:
+                pending_labels.append(ProgramLabel(
+                    name=entry.name,
+                    key_assignment=entry.key_assignment,
+                    header_addr=entry.header_addr,
+                    header_offset=entry.header_offset,
+                ))
+                continue
+
+            marker_last_byte_addr = marker_addr - 2  # 3-byte marker
+            length = group_start_addr - marker_last_byte_addr + 1
+
+            if entry.end_type == 2:
+                # The permanent .END. -- always the last entry examined.
+                gap = length - 3
+                if not pending_labels and not self._has_nonzero_bytes(
+                    group_start_addr, gap
+                ):
+                    break  # pure padding -- not a program, nothing to add
+            start_reg, start_offset = self._pos_for(group_start_addr)
+            programs.append(Program(
+                start_addr=start_reg,
+                start_offset=start_offset,
+                length=length,
+                labels=pending_labels,
+                terminator=".END." if entry.end_type == 2 else "END",
+            ))
+            pending_labels = []
+            group_start_addr = marker_last_byte_addr - 1
+
+        return programs
+
+    def _has_nonzero_bytes(self, addr: int, count: int) -> bool:
+        '''True if any of the `count` bytes forward from `addr` (same
+        addressing convention as `_read_bytes_forward`) is non-zero.
+        `count <= 0` is trivially False -- used by `list_programs()` to
+        tell real (if unnamed) trailing program content apart from mere
+        register-alignment padding before the permanent `.END.` marker.'''
+        if count <= 0:
+            return False
+        reg, offset = self._pos_for(addr)
+        return any(self._read_bytes_forward(reg, offset, count))
+
+    def get_program_bytes(self, program: Program) -> bytes:
+        '''
+        Returns the raw instruction bytes for one real, END-delimited
+        program (`list_programs()`) -- its own opcodes, in on-calculator
+        reading order (decreasing address, see docs/program.md's
+        "Addressing within program memory"), up to and including its own
+        terminating marker (an explicit END, or the permanent `.END.` for
+        the single newest program in memory -- see `Program`'s
+        docstring). This is the byte sequence a program-file export
+        (RAW/DAT/...) should contain -- see program_files.py.
+
+        A named program (one with at least one global label) is not
+        required for this to work: an HP-41 program can consist of
+        nothing but local (numbered) labels, or no labels at all -- see
+        `list_programs()`'s docstring for how such a program is told
+        apart from mere register-alignment padding before `.END.`.
+        Verified against docs/program.md's own worked APPTEST example (26
+        bytes) and against the user's own real-hardware `CAT 1`
+        comparison for tests/data/unlabelled.dm41 (16 and 20 bytes,
+        neither program named) and tests/data/twolabels.dm41 (28 bytes,
+        one program with two labels and no explicit END).
+
+        A program with more than one global label (twolabels.dm41's case)
+        is exported as the single physical block CAT 1's END-delimited
+        view treats it as -- from its OLDEST label's own header through
+        its own terminator -- not as separate slices per label.
+
+        `length` was already computed directly from the global chain's
+        own validated marker positions (see `list_programs()`); this
+        re-reads exactly that many bytes and, as a defensive
+        cross-check against corrupt data, confirms `find_program_end()`
+        -- an independent forward opcode-stream scan (ported from
+        hp41uc's seek_end(), see opcode_scan.py) -- agrees on exactly
+        where those bytes end.
+
+        Raises ValueError if `program` doesn't match any entry in the
+        current program list (e.g. it's stale, from a `list_programs()`
+        call before the dump changed).
+        Raises DM41LMemoryError if `find_program_end()` disagrees with
+        the chain-derived length -- signals corrupt data or a program
+        that isn't well-formed HP-41 code.
+        '''
+        for candidate in self.list_programs():
+            if (
+                candidate.start_addr == program.start_addr
+                and candidate.start_offset == program.start_offset
+            ):
+                instruction_bytes = self._read_bytes_forward(
+                    candidate.start_addr, candidate.start_offset, candidate.length
+                )
+                if find_program_end(instruction_bytes) != candidate.length:
+                    raise DM41LMemoryError(
+                        f"Program {candidate.names_label!r}'s own bytes "
+                        "don't form one well-formed HP-41 program (forward "
+                        "opcode scan disagrees with the global chain) -- "
+                        "the dump may be corrupt."
+                    )
+                return instruction_bytes
+        raise ValueError(
+            "This program entry doesn't match the current program list -- "
+            "it may be stale (from a list_programs() call taken before "
+            "the dump changed)."
+        )
+
     # -- Global label (program) key assignments (docs/key_assignments.md
     # sec 4.6) -- a completely separate storage mechanism from the Key
     # Assignment Registers above (sec 4.2): the key byte lives in the
@@ -1074,10 +1274,13 @@ class Memory:
 
     def _find_program_by_name(self, name: str) -> Optional[ProgramInfo]:
         '''First named global label matching `name` (oldest-created, i.e.
-        list_programs()' own order, in the rare case of a duplicate name)
-        -- shared by set_program_key_assignment()/
-        clear_program_key_assignment()/get_program_for_key().'''
-        for program in self.list_programs():
+        list_global_chain()'s own order, in the rare case of a duplicate
+        name) -- shared by set_program_key_assignment()/
+        clear_program_key_assignment()/get_program_for_key(). A key
+        assignment lives on one label's own header (sec 4.6/5.2)
+        regardless of how many labels its program has, so this works off
+        the flat per-label chain, not the grouped `list_programs()`.'''
+        for program in self.list_global_chain():
             if program.is_named and program.name == name:
                 return program
         return None
@@ -1105,7 +1308,7 @@ class Memory:
         Does not touch KEYFLAGS -- callers own that, since the bit should
         usually end up set (by whatever new assignment is replacing these)
         rather than cleared.'''
-        for program in self.list_programs():
+        for program in self.list_global_chain():
             if (
                 program.is_named
                 and program.key_assignment == key_byte
@@ -1123,7 +1326,7 @@ class Memory:
         assigned to this key" should check get_key_assignment() first and
         fall back to this (see gui/key_assignments_tab.py).'''
         key_byte = self.key_byte_for(key_number, shifted)
-        for program in self.list_programs():
+        for program in self.list_global_chain():
             if program.is_named and program.key_assignment == key_byte:
                 return program
         return None
