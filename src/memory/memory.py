@@ -22,6 +22,7 @@ from .constants import (
 from .program_info import ProgramInfo, ProgramLabel, Program
 from .regions import RegionSpan
 from .opcode_scan import find_program_end
+from .program_chain import walk_chain, encode_chain_marker
 from . import functions as key_functions
 
 
@@ -244,6 +245,26 @@ class Memory:
         nibbles[8] = (addr >> 8) & 0xF
         nibbles[9] = (addr >> 4) & 0xF
         nibbles[10] = addr & 0xF
+        new_bytes = bytes((nibbles[i] << 4) | nibbles[i + 1] for i in range(0, 14, 2))
+        self.set_register(self.REG_C_ADDR, Register(data=new_bytes))
+
+    def set_DotEnd(self, addr: int):
+        '''
+        Directly rewrites the `.END.` pointer in register c -- the write
+        side `DotEnd()` doesn't have, added for `import_program()` (below)
+        to move the permanent `.END.` sentinel to the top of whatever
+        newly-imported program memory it just wrote. Like `set_R00()`,
+        this only moves the pointer itself; it doesn't touch, clear, or
+        validate any register contents on either side of it.
+        '''
+        if not (0 <= addr <= 0xFFF):
+            raise ValueError(
+                f".END. must fit in a 3-nibble address (0-0xFFF), got 0x{addr:x}"
+            )
+        nibbles = self._reg_c_nibbles()
+        nibbles[11] = (addr >> 8) & 0xF
+        nibbles[12] = (addr >> 4) & 0xF
+        nibbles[13] = addr & 0xF
         new_bytes = bytes((nibbles[i] << 4) | nibbles[i + 1] for i in range(0, 14, 2))
         self.set_register(self.REG_C_ADDR, Register(data=new_bytes))
 
@@ -912,6 +933,24 @@ class Memory:
                 r -= 1
         return bytes(out)
 
+    def _write_bytes_forward(self, addr: int, data: bytes):
+        '''Writes `data` starting at absolute byte-address `addr`,
+        continuing in the same forward/decreasing-address direction
+        `_read_bytes_forward()` reads in (and crossing register
+        boundaries the same way) -- the write-side counterpart used by
+        `import_program()` to splice a program's bytes into program
+        memory. Each byte is its own register read-modify-write, same
+        granularity as `_write_program_key_byte()` already uses below.'''
+        reg, offset = self._pos_for(addr)
+        for byte in data:
+            reg_data = bytearray(self.get_register(reg).get_bytes())
+            reg_data[offset] = byte
+            self.set_register(reg, Register(data=bytes(reg_data)))
+            offset += 1
+            if offset > 6:
+                offset = 0
+                reg -= 1
+
     def _decode_chain_marker(self, reg: int, offset: int) -> Optional[dict]:
         '''Decodes the 3-byte '1100 bbb rrrrrrrrr eeeeffff' marker at
         (reg, offset) -- docs/program.md sec 5.1. Returns None if the byte
@@ -1262,6 +1301,319 @@ class Memory:
             "it may be stale (from a list_programs() call taken before "
             "the dump changed)."
         )
+
+    def _convert_dot_end_to_real_end(self, entry: ProgramInfo):
+        '''Rewrites the permanent `.END.` marker's own end-type nibble
+        (docs/program.md sec 5.1's high `eeee` nibble) from `2` to `0` in
+        place, at its existing (`entry.header_addr`, `entry.header_offset`)
+        position -- turning it into a genuine closing `END` for whatever
+        program it used to terminate, without touching its `bbb`/
+        `distance_registers` fields (still correctly linking back to
+        whatever preceded it -- see `import_program()`'s "Case A"). Used
+        only when the program `.END.` used to terminate is no longer the
+        newest thing in memory -- i.e. right before a fresh `.END.` gets
+        written further down by `import_program()`.'''
+        marker_addr = self._addr_for(entry.header_addr, entry.header_offset)
+        third_byte_addr = marker_addr - 2
+        reg, offset = self._pos_for(third_byte_addr)
+        data = bytearray(self.get_register(reg).get_bytes())
+        data[offset] &= 0x0F  # clear the high (end-type) nibble: 2 -> 0
+        self.set_register(reg, Register(data=bytes(data)))
+
+    def import_program(self, instruction_bytes: bytes) -> Program:
+        '''
+        Splices a standalone program's instruction bytes -- as produced by
+        `get_program_bytes()` above, or by `decode_program_raw()`/
+        `decode_program_dat()` (program_files.py) reading an external
+        RAW/DAT file -- into this Memory's program memory as the newest
+        program, updating the global chain (docs/program.md sec 5) and
+        moving the permanent `.END.` sentinel so the result reads exactly
+        like a program a real calculator wrote there itself. This is the
+        write-side counterpart to `get_program_bytes()`; see that method
+        and `program_files.py`'s module docstring for the read side, and
+        `program_chain.py` for the byte-level chain parsing this leans on.
+
+        Only ever appends as the newest program -- there's no "insert at
+        an arbitrary position" here, matching the project's own scope
+        decision that Import should be as low-risk as the data model
+        allows (see project notes). Splicing anywhere else in the middle
+        of an existing chain would need a fundamentally different (and
+        much riskier) algorithm.
+
+        **The algorithm**, in the order it runs:
+
+        1. Confirm `instruction_bytes` is one well-formed program (
+           `find_program_end()` agrees with its own length) -- the same
+           cross-check `get_program_bytes()` already relies on.
+        2. `program_chain.walk_chain()` finds every chain marker inside
+           `instruction_bytes` -- its own trailing terminator, plus any
+           internal global labels, backward-linked to each other exactly
+           as `list_global_chain()` links live registers. Every one of
+           these internal links is already correct and stays untouched;
+           only the *outermost* one (`walk_chain()`'s last entry -- the
+           one whose distance pointed outside `instruction_bytes` in its
+           original source memory) needs a new distance computed, since
+           the destination memory it's being copied into is a different
+           place entirely.
+        3. Block the import if any global label name found in step 2
+           already exists somewhere in this memory's own global chain --
+           see project notes for why duplicates are refused rather than
+           silently created.
+        4. Every label's own key-assignment byte (the header's 4th byte,
+           docs/program.md sec 5.2) is zeroed (unassigned) in the copy
+           about to be written -- an imported program shouldn't silently
+           steal a key from whatever else already holds it in this
+           buffer; the user can reassign it afterward (Key Assignments
+           tab / `ASN`).
+        5. Figure out where the new program goes and what its outermost
+           marker's distance should now point back to:
+           - If this memory has no programs at all yet, it starts at
+             `_program_memory_top_addr()` and the outermost marker gets
+             `bbb = distance_registers = 0` ("no predecessor" -- the
+             chain's own way of saying "first program in memory").
+           - Otherwise, the permanent `.END.` entry (`list_global_chain()`'s
+             own last entry) is always the link point, but plays one of
+             two roles depending on what `list_programs()` says about it
+             (mirroring that method's own "Case A"/"Case B" split, see its
+             docstring): if it was genuinely serving as the newest
+             program's own terminator (pending label(s), or real
+             unlabelled trailing content -- `twolabels.dm41`'s case),
+             it's converted in place into a real closing `END`
+             (`_convert_dot_end_to_real_end()`) and left as the new link
+             target. Otherwise a real `END` already exists further up
+             (`simple.dm41`'s case, where `.END.` is pure register-
+             alignment padding) -- that untouched entry is the link
+             target instead, and the padding-plus-`.END.` bytes below it
+             are simply about to be overwritten by the new program's own
+             content.
+        6. If `instruction_bytes`' own trailing marker happens to be a
+           `.END.`-type one itself (`end_type == 2` -- true when the
+           program being imported was originally exported as the single
+           newest, `.END.`-terminated program in *its* source memory,
+           e.g. a `twolabels.dm41`-style export), it's forced to a normal
+           closing `END` here too, in the copy -- it's not going to be the
+           top of memory anymore once step 8 writes a fresh `.END.` below
+           it.
+        7. Enough free program memory to hold all of this (the program's
+           own bytes, plus whatever zero-padding is needed to land the
+           fresh `.END.` on a register boundary, plus its own 3 bytes)?
+           If not, raises `DM41LMemoryError` rather than overwriting the
+           Key Assignments/Alarms regions below it.
+        8. Writes the (patched) instruction bytes into registers
+           (`_write_bytes_forward()`), zero-pads up to the next register
+           boundary (`.END.` is always found in the last 3 bytes of a
+           register -- docs/program.md sec 5.1), writes a fresh `.END.`
+           marker there linking back to the program's own trailing
+           marker, and moves the `.END.` pointer (`set_DotEnd()`) to it.
+           `R00()` is never touched -- growing into the Key
+           Assignments/Alarms regions is refused outright (step 7) rather
+           than silently reclaiming data-register space to make room.
+
+        Returns the newly-imported `Program`, freshly re-read via
+        `list_programs()` as a sanity check that the splice produced a
+        well-formed chain (defensive -- mirrors `get_program_bytes()`'s
+        own independent-verification habit).
+
+        Raises `ValueError` if `instruction_bytes` isn't one well-formed
+        program, or contains a global label name that already exists in
+        this memory. Raises `DM41LMemoryError` if there's no valid R00/
+        `.END.` partition loaded yet, if there isn't enough free program
+        memory, or if the computed link distance doesn't fit the format's
+        9-bit register-count field (a *very* large program landing right
+        at the edge of addressable program memory).
+        '''
+        if not instruction_bytes:
+            raise ValueError("Nothing to import -- the program is empty.")
+        if find_program_end(instruction_bytes) != len(instruction_bytes):
+            raise ValueError(
+                "This doesn't decode as one well-formed HP-41 program -- "
+                "find_program_end() disagrees with the file's own length."
+            )
+        if not (MIN_SANE_R00 <= self.R00() <= PRIMARY_DATA_END):
+            raise DM41LMemoryError(
+                "No valid program memory partition is loaded -- load or "
+                "start a memory buffer first."
+            )
+
+        chain_entries = walk_chain(instruction_bytes)
+        if not chain_entries:
+            raise DM41LMemoryError(
+                "Could not find a valid END/label marker in this "
+                "program's own bytes -- it may be corrupt."
+            )
+        self._check_no_duplicate_labels(chain_entries)
+
+        data = bytearray(instruction_bytes)
+
+        # Step 4: zero every label's own key-assignment byte in the copy.
+        for entry in chain_entries:
+            if entry["is_label"]:
+                data[entry["index"] + 3] = 0x00
+
+        # Step 5: where this goes, and what the outermost marker should
+        # now link back to. `dot_end_to_convert` records whether Case A
+        # applies (see _resolve_import_link()'s docstring) -- nothing
+        # touches a live register yet.
+        insertion_addr, link_addr, dot_end_to_convert = self._resolve_import_link()
+
+        # Step 6: force a copied `.END.`-type trailing marker to a real END.
+        trailing = chain_entries[0]
+        if not trailing["is_label"] and trailing["end_type"] == 2:
+            data[trailing["index"] + 2] &= 0x0F
+
+        # Step 2 (continued): recompute the outermost marker's own link.
+        self._relink_outermost_marker(data, chain_entries[-1], insertion_addr, link_addr)
+
+        # Step 7: is there room? This has to run -- and be allowed to
+        # raise -- before anything below actually touches a live register
+        # (including converting `.END.` in Case A), so a rejected import
+        # leaves this Memory completely unchanged rather than partially
+        # spliced.
+        end_marker_addr, next_free_addr = self._check_import_room(insertion_addr, len(data))
+
+        # Step 8: write it -- starting with the Case A conversion deferred
+        # from step 5, now that every earlier check has passed.
+        if dot_end_to_convert is not None:
+            self._convert_dot_end_to_real_end(dot_end_to_convert)
+        self._write_bytes_forward(insertion_addr, bytes(data))
+        padding = next_free_addr - end_marker_addr
+        if padding > 0:
+            self._write_bytes_forward(next_free_addr, bytes(padding))
+
+        trailing_dest_addr = insertion_addr - trailing["index"]
+        end_dr, end_bbb = divmod(trailing_dest_addr - end_marker_addr, 7)
+        end_marker_bytes = encode_chain_marker(end_bbb, end_dr, 0x20)
+        self._write_bytes_forward(end_marker_addr, end_marker_bytes)
+
+        new_dot_end_reg, _ = self._pos_for(end_marker_addr)
+        self.set_DotEnd(new_dot_end_reg)
+
+        programs = self.list_programs()
+        if not programs or programs[-1].length != len(instruction_bytes):
+            raise DM41LMemoryError(
+                "Import produced an inconsistent program chain -- this "
+                "looks like a bug, please report it."
+            )
+        return programs[-1]
+
+    def _check_no_duplicate_labels(self, chain_entries: list):
+        '''Raises ValueError if any global label name found by
+        `walk_chain()` (in a program about to be imported) already exists
+        somewhere in this memory's own global chain -- see
+        `import_program()`'s step 3.'''
+        existing_names = {p.name for p in self.list_global_chain() if p.is_named}
+        for entry in chain_entries:
+            if entry["is_label"] and entry["name"] in existing_names:
+                raise ValueError(
+                    f"A global label named {entry['name']!r} already exists "
+                    "in this memory -- rename or delete the existing "
+                    "program before importing this one."
+                )
+
+    def _resolve_import_link(self) -> tuple:
+        '''
+        `import_program()`'s step 5: figures out where a new program
+        should be written (the highest address it can start at) and what
+        its outermost marker's distance should now point back to.
+
+        Returns `(insertion_addr, link_addr, dot_end_to_convert)`:
+        - `insertion_addr`: the highest address the new program's own
+          first byte can occupy.
+        - `link_addr`: the address the new program's outermost marker
+          should now link back to, or `None` if this memory has no
+          programs at all yet (the new marker gets `bbb =
+          distance_registers = 0`, "no predecessor").
+        - `dot_end_to_convert`: the permanent `.END.` `ProgramInfo` to
+          convert into a real closing `END` (Case A -- see
+          `_convert_dot_end_to_real_end()`), or `None` if no conversion
+          is needed (Case B, or no existing programs at all). Deliberately
+          not converted here -- see `import_program()`'s own comment on
+          why that has to wait until after the room check.
+
+        Raises `DM41LMemoryError` if this memory's program chain is
+        non-empty but doesn't resolve to any real program at all (would
+        only happen for corrupt data -- see `list_programs()`'s
+        docstring).
+        '''
+        chain = self.list_global_chain()
+        if not chain:
+            return self._program_memory_top_addr(), None, None
+
+        boundary = chain[-1]  # always the permanent .END. entry
+        programs = self.list_programs()
+        if not programs:
+            raise DM41LMemoryError(
+                "This memory's program chain doesn't resolve to any "
+                "real program -- it may be corrupt."
+            )
+        if programs[-1].terminator == ".END.":
+            # Case A: `.END.` was genuinely serving as the newest
+            # program's own terminator -- it'll be converted in place
+            # into a real closing END (its own link, unchanged, is still
+            # valid) and used as the new link target.
+            link_entry = boundary
+            dot_end_to_convert = boundary
+        else:
+            # Case B: a real END already exists further up; `.END.`
+            # itself (plus any padding before it) is pure register-
+            # alignment filler about to be overwritten.
+            link_entry = chain[-2]
+            dot_end_to_convert = None
+
+        link_addr = self._addr_for(link_entry.header_addr, link_entry.header_offset)
+        insertion_addr = link_addr - 2 - 1  # one below the link marker's own last byte
+        return insertion_addr, link_addr, dot_end_to_convert
+
+    @staticmethod
+    def _relink_outermost_marker(
+        data: bytearray, outermost: dict, insertion_addr: int, link_addr: Optional[int]
+    ):
+        '''`import_program()`'s step 2 finish: overwrites `outermost`'s
+        `bbb`/`distance_registers` fields in `data` (in place) so it
+        correctly links back to `link_addr` once `data` is written
+        starting at `insertion_addr` -- or to "no predecessor" (`bbb =
+        distance_registers = 0`) if `link_addr` is `None` (this is the
+        first program in memory). Its own third byte is preserved as-is.
+        Raises `DM41LMemoryError` if the computed distance doesn't fit
+        the format's 9-bit register-count field.'''
+        if link_addr is None:
+            new_bbb, new_dr = 0, 0
+        else:
+            outermost_dest_addr = insertion_addr - outermost["index"]
+            new_dr, new_bbb = divmod(link_addr - outermost_dest_addr, 7)
+            if new_dr > 0x1FF:
+                raise DM41LMemoryError(
+                    "This program lands too far from the existing program "
+                    "chain to encode -- program memory may be unusually "
+                    "large or fragmented."
+                )
+        index = outermost["index"]
+        third = data[index + 2]
+        data[index : index + 3] = encode_chain_marker(new_bbb, new_dr, third)
+
+    def _check_import_room(self, insertion_addr: int, data_len: int) -> tuple:
+        '''`import_program()`'s step 7: works out where the fresh `.END.`
+        marker would land -- register-aligned to the last 3 bytes of a
+        register, right after `data_len` bytes written starting at
+        `insertion_addr` and however much zero-padding gets it to that
+        boundary -- and checks that against the Alarms/Key Assignments
+        boundary (`alarms_end()`). Returns `(end_marker_addr,
+        next_free_addr)` if there's room; raises `DM41LMemoryError` if
+        not.'''
+        program_end_addr = insertion_addr - data_len + 1
+        next_free_addr = program_end_addr - 1
+        end_marker_addr = next_free_addr - ((next_free_addr - 2) % 7)
+        end_marker_last_addr = end_marker_addr - 2
+        end_marker_reg, _ = self._pos_for(end_marker_last_addr)
+        if end_marker_reg < self.alarms_end():
+            lowest_free_addr = self._addr_for(self.alarms_end(), 6)
+            available = insertion_addr - lowest_free_addr + 1
+            needed = insertion_addr - end_marker_last_addr + 1
+            raise DM41LMemoryError(
+                f"Not enough free program memory to import this program "
+                f"(needs {needed} bytes, only {max(available, 0)} available)."
+            )
+        return end_marker_addr, next_free_addr
 
     # -- Global label (program) key assignments (docs/key_assignments.md
     # sec 4.6) -- a completely separate storage mechanism from the Key

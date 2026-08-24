@@ -40,8 +40,10 @@ from memory import (
     Program,
     encode_program_raw,
     encode_program_dat,
+    encode_program_ppc,
     decode_program_raw,
     decode_program_dat,
+    decode_program_ppc,
 )
 from memory.opcode_scan import find_program_end
 
@@ -260,3 +262,78 @@ def test_decode_program_dat_rejects_corrupt_checksum():
 def test_decode_program_dat_rejects_truncated_file():
     with pytest.raises(DM41LMemoryError):
         decode_program_dat(b"001A")  # header only, no body/checksum
+
+
+# -- PPC: a third, non-hp41uc format found alongside real RAW/DAT/TXT
+# files for the same programs (~/Work/DM41/TowerOfSkelos, given the
+# ".ppc" suffix by whoever saved them) --------------------------------
+#
+# Reverse-engineered by comparing two real *.ppc files against their own
+# *.dat siblings directly: byte-for-byte identical except for a newline
+# (0x0A) inserted every 50 characters, plus one trailing newline -- i.e.
+# PPC is just DAT's own hex text, word-wrapped for display/printing, not
+# a distinct binary layout. See program_files.py's module docstring for
+# the full story (including why DM41L_Explorer's own DAT import was
+# choking on these files when tried under a renamed .dat/.raw
+# extension: decode_program_dat()'s fixed-byte-offset slicing and
+# decode_program_raw()'s opcode scan both assume no embedded whitespace).
+#
+# These tests build synthetic PPC input by wrapping a known-good DAT
+# file's own hex text (_wrap_like_ppc(), independent of
+# encode_program_ppc()) rather than adding new binary fixtures -- the
+# format is fully defined in terms of DAT, and this also keeps
+# decode_program_ppc() from only ever being checked against its own
+# encoder's exact inverse.
+
+
+def _wrap_like_ppc(dat_text: bytes, width: int = 50) -> bytes:
+    """Word-wraps DAT hex text the same way a real PPC file does, without
+    going through encode_program_ppc() itself."""
+    lines = [dat_text[i : i + width] for i in range(0, len(dat_text), width)]
+    return b"\n".join(lines) + b"\n"
+
+
+def test_decode_program_ppc_round_trips_apptest():
+    ppc_bytes = encode_program_ppc(APPTEST_BYTES)
+    assert b"\n" in ppc_bytes  # APPTEST's 58-char DAT text wraps at least once
+    assert decode_program_ppc(ppc_bytes) == APPTEST_BYTES
+
+
+def test_encode_program_ppc_wraps_dat_text_at_50_chars():
+    dat_text = encode_program_dat(APPTEST_BYTES)
+    ppc_bytes = encode_program_ppc(APPTEST_BYTES)
+    assert ppc_bytes.replace(b"\n", b"") == dat_text
+    lines = ppc_bytes.split(b"\n")
+    assert lines[-1] == b""  # trailing newline leaves an empty final split
+    assert all(len(line) == 50 for line in lines[:-2])
+    assert 0 < len(lines[-2]) <= 50
+
+
+def test_decode_program_ppc_and_dat_agree_on_tower():
+    dat_bytes = decode_program_dat((DATA_DIR / "tower.dat").read_bytes())
+    wrapped = _wrap_like_ppc((DATA_DIR / "tower.dat").read_bytes())
+    assert decode_program_ppc(wrapped) == dat_bytes
+
+
+def test_encode_program_ppc_round_trips_tower():
+    instruction_bytes = decode_program_dat((DATA_DIR / "tower.dat").read_bytes())
+    ppc_bytes = encode_program_ppc(instruction_bytes)
+    assert decode_program_ppc(ppc_bytes) == instruction_bytes
+    assert ppc_bytes.replace(b"\n", b"") == (DATA_DIR / "tower.dat").read_bytes()
+
+
+def test_decode_program_ppc_tolerates_crlf_line_endings():
+    # Only the two real sample files (LF only) were available to reverse-
+    # engineer this format from, so this guards the whitespace-stripping
+    # being deliberately broader than just "\n" -- in case a PPC file
+    # picks up CRLF line endings somewhere along the way (e.g. opened and
+    # resaved on Windows).
+    ppc_bytes = encode_program_ppc(APPTEST_BYTES).replace(b"\n", b"\r\n")
+    assert decode_program_ppc(ppc_bytes) == APPTEST_BYTES
+
+
+def test_decode_program_ppc_rejects_corrupt_checksum():
+    data = bytearray(encode_program_ppc(APPTEST_BYTES))
+    data[-2] ^= 0x0F  # perturb the checksum's last hex digit (data[-1] is "\n")
+    with pytest.raises(DM41LMemoryError):
+        decode_program_ppc(bytes(data))

@@ -39,10 +39,22 @@ individual submodules for what lives where:
   program_files.py encode_program_raw/encode_program_dat and
                     decode_program_raw/decode_program_dat -- hp41uc-
                     compatible single-program file formats (RAW/DAT;
-                    see ~/Work/hp41uc/Source/convert.c)
+                    see ~/Work/hp41uc/Source/convert.c) -- plus
+                    encode_program_ppc/decode_program_ppc for the
+                    reverse-engineered, non-hp41uc "PPC" format (DAT's
+                    own hex text, word-wrapped)
+  program_chain.py byte-level global-chain marker parsing/encoding
+                    (walk_chain/decode_chain_marker/decode_label_name/
+                    encode_chain_marker) operating on a plain bytes
+                    buffer rather than register-addressed Memory state --
+                    what Memory.import_program() (memory.py) uses to
+                    inspect/patch a standalone program's bytes before
+                    splicing them into program memory
   memory.py        Memory (the top-level dump: parsing, raw register
                     access, and the R00/.END./flags/program-chain
-                    accessors built on top of it)
+                    accessors built on top of it, including
+                    get_program_bytes()/import_program() for program-file
+                    export/import)
 '''
 
 from .registers import (
@@ -73,8 +85,16 @@ from .opcode_scan import find_program_end
 from .program_files import (
     encode_program_raw,
     encode_program_dat,
+    encode_program_ppc,
     decode_program_raw,
     decode_program_dat,
+    decode_program_ppc,
+)
+from .program_chain import (
+    walk_chain,
+    decode_chain_marker,
+    decode_label_name,
+    encode_chain_marker,
 )
 from .memory import Memory
 
@@ -110,7 +130,13 @@ __all__ = [
     "find_program_end",
     "encode_program_raw",
     "encode_program_dat",
+    "encode_program_ppc",
     "decode_program_raw",
     "decode_program_dat",
+    "decode_program_ppc",
+    "walk_chain",
+    "decode_chain_marker",
+    "decode_label_name",
+    "encode_chain_marker",
     "Memory",
 ]

@@ -269,7 +269,9 @@ class DM41LExplorerApp(ctk.CTk):
         self.hex_view_tab = HexViewTab(self.tabview.tab("Hex View"))
         self.hex_view_tab.pack(fill="both", expand=True)
 
-        self.program_tab = ProgramTab(self.tabview.tab("Programs"))
+        self.program_tab = ProgramTab(
+            self.tabview.tab("Programs"), on_change=self._on_memory_changed
+        )
         self.program_tab.pack(fill="both", expand=True)
 
         self.key_assignments_tab = KeyAssignmentsTab(

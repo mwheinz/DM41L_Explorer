@@ -30,6 +30,23 @@ These decoders are not wired into a GUI Import yet (that also needs
 program-memory chain-splicing logic -- see project notes); they exist so
 a RAW/DAT file's instruction bytes can be recovered and inspected/
 verified without hand-parsing the format.
+
+`encode_program_ppc()`/`decode_program_ppc()` handle a third, unlabeled
+format found alongside real RAW/DAT/TXT files for the same programs
+(~/Work/DM41/TowerOfSkelos, given the ".ppc" suffix by whoever saved them
+-- no hp41uc mode produces it, and it isn't HP's WND format either).
+Reverse-engineered by comparing those files directly: a PPC file turned
+out to be byte-for-byte identical to its own DAT sibling, except with a
+newline (0x0A) inserted every 50 characters and one trailing newline --
+i.e. it's just DAT's hex text word-wrapped for display or printing, not a
+distinct binary layout. (The programs in that sample set were originally
+a magazine listing in the PPC Calculator Journal, which may explain both
+the name and the wrapping -- printed hex dumps need line breaks -- but
+that's a guess, not confirmed.) `decode_program_ppc()` strips whitespace
+and defers to `decode_program_dat()`; `encode_program_ppc()` wraps
+`encode_program_dat()`'s own output. Verified against the two real PPC
+files this was reverse-engineered from: decoding either one and
+re-encoding the result reproduces the original file exactly.
 '''
 
 from .opcode_scan import find_program_end
@@ -159,3 +176,44 @@ def decode_program_dat(data: bytes) -> bytes:
             f"found 0x{checksum:02X}."
         )
     return instruction_bytes
+
+
+_PPC_LINE_WIDTH = 50
+
+# ASCII whitespace decode_program_ppc() strips before handing off to
+# decode_program_dat() -- covers the plain "\n" the two real PPC sample
+# files use, plus "\r" in case a file has picked up CRLF line endings
+# (e.g. from being opened/resaved on Windows) along the way.
+_PPC_WHITESPACE = b" \t\r\n\v\f"
+
+
+def encode_program_ppc(data: bytes) -> bytes:
+    '''
+    PPC format (see this module's docstring): `encode_program_dat()`'s own
+    output, word-wrapped to `_PPC_LINE_WIDTH` (50) characters per line,
+    with a trailing newline after the last line. Verified byte-for-byte
+    against the two real PPC files this format was reverse-engineered
+    from (~/Work/DM41/TowerOfSkelos's pack.ppc/tower-orig.ppc) --
+    re-wrapping `encode_program_dat()`'s output for their own decoded
+    instruction bytes reproduces both files exactly.
+    '''
+    dat_text = encode_program_dat(data)
+    lines = [
+        dat_text[i : i + _PPC_LINE_WIDTH]
+        for i in range(0, len(dat_text), _PPC_LINE_WIDTH)
+    ]
+    return b"\n".join(lines) + b"\n"
+
+
+def decode_program_ppc(data: bytes) -> bytes:
+    '''
+    Recovers a program's instruction bytes from a PPC file (see this
+    module's docstring): strips the line-wrap whitespace back out and
+    decodes what's left as a DAT file (`decode_program_dat()`), including
+    that format's own checksum check.
+
+    Raises DM41LMemoryError under the same conditions `decode_program_dat()`
+    does, once whitespace has been removed.
+    '''
+    stripped = bytes(b for b in data if b not in _PPC_WHITESPACE)
+    return decode_program_dat(stripped)
