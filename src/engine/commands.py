@@ -51,7 +51,7 @@ class LoadMemoryStringCommand(BaseCommand):
     def __init__(self, args: list, timeout: float = 5.0, serial=None):
         super().__init__(args=args, timeout=timeout, serial=serial)
         if not args or len(args) < 1:
-            raise Exception("No data provided for LoadMemoryStringCommand.")
+            raise ValueError("No data provided for LoadMemoryStringCommand.")
         self.source = args[0]
 
     @property

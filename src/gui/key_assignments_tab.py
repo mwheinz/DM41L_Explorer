@@ -338,25 +338,29 @@ class KeyAssignmentsTab(ctk.CTkFrame):
             )
 
         def save(kind, value):
-            if kind == "function":
-                self._memory.set_key_assignment(key_number, shifted, value)
-                logger.info(
-                    "Key %02d (%s) assigned function: %s",
-                    key_number,
-                    "shifted" if shifted else "unshifted",
-                    value,
-                )
-            else:  # "program"
-                self._memory.set_program_key_assignment(value, key_number, shifted)
-                logger.info(
-                    "Key %02d (%s) assigned program: %s",
-                    key_number,
-                    "shifted" if shifted else "unshifted",
-                    value,
-                )
-            self._notify_change()
-            self._refresh_buttons()
-            update_header()
+            try:
+                if kind == "function":
+                    self._memory.set_key_assignment(key_number, shifted, value)
+                    logger.info(
+                        "Key %02d (%s) assigned function: %s",
+                        key_number,
+                        "shifted" if shifted else "unshifted",
+                        value,
+                    )
+                else:  # "program"
+                    self._memory.set_program_key_assignment(value, key_number, shifted)
+                    logger.info(
+                        "Key %02d (%s) assigned program: %s",
+                        key_number,
+                        "shifted" if shifted else "unshifted",
+                        value,
+                    )
+                self._notify_change()
+                self._refresh_buttons()
+                update_header()
+            except Exception as e:
+                logger.error("Failed to save key assignment: %s", str(e))
+
 
         def delete():
             # Clear both storage mechanisms -- normally only one is ever
@@ -364,17 +368,20 @@ class KeyAssignmentsTab(ctk.CTkFrame):
             # and safe (both calls no-op when there's nothing to clear)
             # and avoids leaving a stale assignment behind on a dump
             # that's somehow in an inconsistent state.
-            self._memory.delete_key_assignment(key_number, shifted)
-            if program is not None:
-                self._memory.clear_program_key_assignment(program.name)
-            logger.info(
-                "Key %02d (%s) assignment deleted",
-                key_number,
-                "shifted" if shifted else "unshifted",
-            )
-            self._notify_change()
-            self._refresh_buttons()
-            update_header()
+            try:
+                self._memory.delete_key_assignment(key_number, shifted)
+                if program is not None:
+                    self._memory.clear_program_key_assignment(program.name)
+                logger.info(
+                    "Key %02d (%s) assignment deleted",
+                    key_number,
+                    "shifted" if shifted else "unshifted",
+                )
+                self._notify_change()
+                self._refresh_buttons()
+                update_header()
+            except Exception as e:
+                logger.error("Failed to delete key assignment: %s", str(e))
 
         KeyAssignmentEditDialog(
             self, key_number, shifted, assignment, program, program_names, save, delete

@@ -239,8 +239,13 @@ class PreferencesDialog(ctk.CTkToplevel):
             logger.warning("Invalid font size %r, not saved: %s", size_choice, e)
         self._config.log_directory = log_dir_str
 
-        self._config.save()
-        logger.info("Preferences saved.")
+        try:
+            self._config.save()
+            logger.info("Preferences saved.")
+        except Exception as e:
+            messagebox.showerror("Preferences",
+                f"Unable to save preferences {e}")
+            logger.warning("Unable to save preferences %s", str(e))
 
         if self._on_saved:
             self._on_saved()

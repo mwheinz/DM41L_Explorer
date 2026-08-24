@@ -561,7 +561,12 @@ class DM41LExplorerApp(ctk.CTk):
             return
 
         self.config_store.serial_port = port
-        self.config_store.save()
+        try:
+            self.config_store.save()
+        except Exception as e:
+            logger.error("Could not save preferences to %s: %s", ProjectConfig.PREFS_FILE, e)
+            messagebox.showerror("Could not save preferences",
+                                 f"{ProjectConfig.PREFS_FILE}, {e}")
         self._set_status(f"Connected to {port} -- verifying...")
 
         self.engine.execute(

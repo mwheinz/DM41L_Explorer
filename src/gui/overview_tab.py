@@ -330,7 +330,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
     def _apply_r00(self):
         text = self._r00_var.get().strip()
         try:
-            value = int(text, 16) if text.lower().startswith("0x") else int(text, 16)
+            value = int(text, 16)
         except ValueError:
             logger.warning("Invalid R00 entry: %r", text)
             messagebox.showerror("Invalid R00", f"'{text}' is not a valid hex address.")
