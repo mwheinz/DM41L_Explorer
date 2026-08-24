@@ -1,0 +1,44 @@
+LBL "PK-N" ;Pack Numbers to Text String
+6
+STO 00
+CLA
+LBL 01
+RCL IND 00
+STO M
+>"*" ;Append asterisk
+DSE 00
+GTO 01
+CLX
+X<> N
+STO M
+ASTO X
+RTN
+LBL "UP-N" ;Unpack Numbers from String
+0
+X<>Y
+X=Y?
+GTO 00
+CLA
+STO M
+>"*" ;Append asterisk
+6
+STO 00
+LBL 02
+>"*" ;Append asterisk
+CLX
+X<> M
+>"******" ;Append 6 asterisks
+X<> M
+RCL N
+STO IND 00
+DSE 00
+GTO 02
+RTN
+LBL 00
+STO 01
+STO 02
+STO 03
+STO 04
+STO 05
+STO 06
+END ;88 BYTES
