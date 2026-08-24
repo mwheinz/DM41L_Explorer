@@ -29,25 +29,25 @@ class ProjectConfig:
     }
 
     def __init__(self):
-        """Initializes the config with values loaded from disk."""
-        self._prefs = self.load()
+        """Initializes the config with default values"""
+        self._prefs = self.DEFAULT_PREFS.copy()
 
     def load(self) -> dict:
-        """Loads preferences from disk, returning defaults if loading fails."""
-        prefs = self.DEFAULT_PREFS.copy()
+        """
+        Loads preferences from disk. Throws an exception if the preference
+        file cannot be found or is otherwise unreadable.
+        """
         loaded_data = {}
         try:
             if self.PREFS_FILE.exists():
                 with open(self.PREFS_FILE, "r", encoding="utf-8") as f:
                     loaded_data = json.load(f)
-                    prefs.update(loaded_data)
+                    self._prefs.update(loaded_data)
         except Exception as e:
-            logger.warning("Could not load preferences from %s: %s", self.PREFS_FILE, e)
-            raise Exception(
+            raise IOError(
                 f"Warning: Could not load preferences from {self.PREFS_FILE}"
             ) from e
 
-        return prefs
 
     def save(self, prefs: dict = None) -> None:
         """Saves current preferences to disk."""
@@ -58,7 +58,6 @@ class ProjectConfig:
             with open(self.PREFS_FILE, "w", encoding="utf-8") as f:
                 json.dump(self._prefs, f, indent=2)
         except Exception as e:
-            logger.error("Could not save preferences to %s: %s", self.PREFS_FILE, e)
             raise Exception(
                 f"Error: Could not save preferences to {self.PREFS_FILE}"
                 ) from e

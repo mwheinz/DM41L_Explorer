@@ -158,6 +158,12 @@ class DM41LExplorerApp(ctk.CTk):
         super().__init__()
 
         self.config_store = ProjectConfig()
+        try:
+            self.config_store.load()
+        except Exception as e:
+            messagebox.showerror("Unable to load preferences",
+                                  str(e))
+
         _setup_logging(self.config_store)
 
         ctk.set_appearance_mode(self.config_store.appearance_mode)
