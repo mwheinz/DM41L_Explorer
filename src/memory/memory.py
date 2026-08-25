@@ -21,7 +21,7 @@ from .constants import (
 )
 from .program_info import ProgramInfo, ProgramLabel, Program
 from .regions import RegionSpan
-from .opcode_scan import find_program_end
+from .opcode_scan import find_program_end, scan_global_markers_forward
 from .program_chain import walk_chain, encode_chain_marker
 from . import functions as key_functions
 
@@ -1615,6 +1615,156 @@ class Memory:
             )
         return end_marker_addr, next_free_addr
 
+    def _forward_scan_programs(self) -> list:
+        '''
+        Physically re-derives every program in program memory by scanning
+        its raw opcodes forward -- from `_program_memory_top_addr()` (the
+        oldest program's fixed starting point) down to `.END.`'s own
+        floor (`self._addr_for(self.DotEnd(), 6)`) -- entirely independent
+        of the existing backward chain-link ("backlink") fields
+        `list_global_chain()`/`list_programs()` rely on. This is `pack()`'s
+        primary job (below), per the user's own real-hardware
+        investigation (project notes,
+        `pack_anomaly_investigation_2026-08-24.md`): a dump written by a
+        tool other than a real HP-41/DM41L (or this app) can leave those
+        backlinks zeroed or simply never set, even though real,
+        well-formed FOCAL code sits right there in the raw bytes --
+        `list_global_chain()` then reports no programs at all, and no
+        global label in that memory can be viewed, exported, or assigned
+        to a key, even though it is genuinely present. This is real
+        PACK's actual documented job: walk the opcodes forward and
+        rebuild the chain from scratch, the same way
+        `scan_global_markers_forward()` (opcode_scan.py) does.
+
+        Trusts `R00()`/`DotEnd()` themselves as sane boundary pointers --
+        confirmed by the user's own investigation to remain correct even
+        when the chain *inside* that span is broken -- but nothing about
+        the marker bytes within that span, including a marker's own
+        distance/`bbb` fields, its end-type nibble, or whether `.END.`
+        itself decodes at all.
+
+        Because `import_program()` (used by `_rebuild_program_memory()`
+        below to actually re-splice each program found here) itself
+        trusts `program_chain.walk_chain()` to find every *embedded*
+        label within one program's own bytes -- which depends on exactly
+        the same backlink fields that may be broken, not just for the
+        outermost link but for any internal one -- this does not just
+        slice out each program's bytes unchanged. It first rewrites every
+        marker's own `bbb`/`distance_registers` fields, in a local
+        working copy, to the true physical gap back to whichever marker
+        `scan_global_markers_forward()` found immediately before it (0
+        for the very first marker in the whole span -- "no predecessor",
+        the same convention `_resolve_import_link()` uses for an empty
+        memory). Only then are the (now internally self-consistent)
+        per-program byte ranges sliced out. A marker's own third byte
+        (end-type, or a label's length-plus-key-length byte, docs/
+        program.md sec 5.1/5.2) is never touched -- only its link.
+
+        Returns a list of `(instruction_bytes, key_assignments)` tuples,
+        oldest program first -- the same shape `pack()`/`remove_program()`
+        already pass to `_rebuild_program_memory()` -- or `[]` if program
+        memory holds nothing at all, or if R00/`.END.` do not look like a
+        real partition yet (matching `list_global_chain()`'s own guard).
+
+        Raises `DM41LMemoryError` if the scan cannot safely determine
+        where real content ends: if real (non-zero) bytes are found but
+        no marker at all could be located in them, if the very last
+        marker found is a label with nothing closing it, or if non-zero
+        bytes remain between the last marker found and `DotEnd()`'s own
+        floor. Any of these mean the scan cannot be sure it has found
+        every real program without risking silently dropping one --
+        matching this project's existing preference (see
+        `get_program_bytes()`, `import_program()`) for raising over
+        guessing when a dump does not look well-formed.
+        '''
+        r00 = self.R00()
+        dend = self.DotEnd()
+        if not (MIN_SANE_R00 <= r00 <= PRIMARY_DATA_END) or not (
+            KEY_ASSIGNMENTS_RANGE[0] <= dend < r00
+        ):
+            return []
+
+        top_addr = self._addr_for(r00 - 1, 0)
+        floor_addr = self._addr_for(dend, 6)
+        top_reg, top_offset = self._pos_for(top_addr)
+        data = bytearray(
+            self._read_bytes_forward(top_reg, top_offset, top_addr - floor_addr + 1)
+        )
+
+        markers = scan_global_markers_forward(bytes(data))
+        if not markers:
+            if any(data):
+                raise DM41LMemoryError(
+                    "Program memory contains data, but no recognizable "
+                    "global chain marker (a label or END) could be found "
+                    "in it -- pack() can't safely determine where a "
+                    "program boundary is."
+                )
+            return []
+
+        last_marker = markers[-1]
+        if last_marker["is_label"]:
+            raise DM41LMemoryError(
+                "Program memory ends with a global label that's never "
+                "closed by an END -- pack() can't safely determine where "
+                "that program ends."
+            )
+        tail_start = last_marker["index"] + 3
+        if any(data[tail_start:]):
+            raise DM41LMemoryError(
+                "Program memory has unrecognized data after its last "
+                "global chain marker -- pack() can't safely determine "
+                "where program memory's real boundary is."
+            )
+
+        # Repair every marker's own link, in a local working copy, to the
+        # true physical gap back to whichever marker was found just
+        # before it -- see docstring. Nothing here touches a live
+        # register; _rebuild_program_memory() does that once these byte
+        # ranges are re-imported.
+        for i, marker in enumerate(markers):
+            distance_bytes = (
+                0 if i == 0 else marker["index"] - markers[i - 1]["index"]
+            )
+            distance_registers, bbb = divmod(distance_bytes, 7)
+            if distance_registers > 0x1FF:
+                raise DM41LMemoryError(
+                    "Two global chain markers are too far apart to "
+                    "re-link -- program memory may be unusually large or "
+                    "fragmented."
+                )
+            start = marker["index"]
+            data[start : start + 3] = encode_chain_marker(
+                bbb, distance_registers, marker["third_byte"]
+            )
+
+        programs = []
+        pending_labels = []
+        group_start_index = 0
+
+        for marker in markers:
+            if marker["is_label"]:
+                pending_labels.append((marker["name"], marker["key_assignment"]))
+                continue
+
+            marker_last_byte_index = marker["index"] + 2
+            if (
+                marker is last_marker
+                and not pending_labels
+                and not any(data[group_start_index : marker["index"]])
+            ):
+                break  # pure register-alignment padding -- not a program
+
+            instruction_bytes = bytes(
+                data[group_start_index : marker_last_byte_index + 1]
+            )
+            key_assignments = {name: key for name, key in pending_labels if key}
+            programs.append((instruction_bytes, key_assignments))
+            pending_labels = []
+            group_start_index = marker_last_byte_index + 1
+
+        return programs
+
     def _rebuild_program_memory(self, programs: list):
         '''
         Physically rewrites program memory from scratch so it exactly
@@ -1832,44 +1982,51 @@ class Memory:
         dump this class has only ever edited itself, but self-heals one
         loaded from disk with a pre-existing gap (e.g. a real
         calculator's own dump, or one hand-edited outside this app).
-        Program memory (docs/program.md sec 5) gets the equivalent
-        treatment: `list_programs()` walks it fresh from scratch
-        ("manually walking program memory to identify labels", per the
-        issue) and every program found is rewritten back tightly against
-        `R00()` with `_rebuild_program_memory()`, reclaiming any
-        accumulated register-alignment drift the same way
-        `remove_program()` does for the program it deletes.
+
+        Program memory (docs/program.md sec 5) gets more than a repack:
+        per the user's own correction to this method's first version,
+        packing has to *rebuild* the global chain, not just compact
+        whatever it already recognizes -- `_forward_scan_programs()`
+        walks the raw opcodes forward, entirely independent of the
+        existing (possibly zeroed, possibly never-set) backward chain-
+        link fields, so a global label that's physically present but not
+        currently chain-linked -- confirmed on real hardware, see project
+        notes `pack_anomaly_investigation_2026-08-24.md` -- becomes
+        visible again via `list_programs()`/`list_global_chain()`, and
+        assignable to a key, exactly like this method's issue asked for
+        ("manually walking program memory to identify labels"). Every
+        program found is then rewritten back tightly against `R00()`
+        with `_rebuild_program_memory()`, reclaiming any accumulated
+        register-alignment drift the same way `remove_program()` does for
+        the program it deletes.
 
         Meant to be run explicitly before an Import (the issue's own
         suggested use) to guarantee the maximum possible free space is
-        available for it -- this project deliberately doesn't run it
-        automatically on every edit, so what's in memory always matches
-        exactly what the user last loaded or changed until they ask for
-        this.
+        available for it, and to make sure every label actually present
+        is visible for assignment -- this project deliberately doesn't
+        run it automatically on every edit, so what's in memory always
+        matches exactly what the user last loaded or changed until they
+        ask for this.
 
         Returns the number of additional registers now free as a result
         (the change in `DotEnd() - alarms_end()`) -- 0 if nothing needed
         packing. Safe to call on a buffer with no programs at all (still
         repacks Key Assignments/Alarms; program memory is left untouched
         rather than guessing at a DotEnd for an empty partition this
-        method didn't create).
+        method did not create).
+
+        Raises `DM41LMemoryError` if `_forward_scan_programs()` cannot
+        safely determine program memory's real content -- see that
+        method's own docstring for exactly when that happens. This
+        method makes no changes at all if that happens: the scan runs,
+        and can raise, before anything about program memory is touched.
         '''
         before_free = self.DotEnd() - self.alarms_end()
 
         self._encode_key_assignment_entries(self._decode_key_assignment_entries())
 
-        programs = self.list_programs()
-        if programs:
-            keep = [
-                (
-                    self.get_program_bytes(p),
-                    {
-                        l.name: l.key_assignment
-                        for l in p.labels if l.key_assignment
-                    },
-                )
-                for p in programs
-            ]
+        keep = self._forward_scan_programs()
+        if keep:
             self._rebuild_program_memory(keep)
 
         after_free = self.DotEnd() - self.alarms_end()

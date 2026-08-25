@@ -81,7 +81,7 @@ from .constants import (
 from .regions import MemoryRegion, StatusRegisters, RegionSpan
 from .xm_file import XMFile, ExtendedMemory, NAME_MIN_CHAR, NAME_MAX_CHAR
 from .program_info import ProgramInfo, ProgramLabel, Program
-from .opcode_scan import find_program_end
+from .opcode_scan import find_program_end, scan_global_markers_forward
 from .program_files import (
     encode_program_raw,
     encode_program_dat,
@@ -128,6 +128,7 @@ __all__ = [
     "ProgramLabel",
     "Program",
     "find_program_end",
+    "scan_global_markers_forward",
     "encode_program_raw",
     "encode_program_dat",
     "encode_program_ppc",

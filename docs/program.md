@@ -376,10 +376,9 @@ removed program's own labels that held a key assignment, since its header
 is gone and `get_program_for_key()` can never find it there again.
 
 **`Memory.pack()`** (issue #31 -- "DM41L_Explorer needs PACK
-functionality") calls this with *every* current program, unchanged --
-reclaiming only incidental register-alignment drift (e.g. from a dump
-loaded from real hardware, or hand-edited outside this app) rather than
-removing anything. It also explicitly re-runs the Key Assignments/Alarms
+functionality") calls this with every program `_forward_scan_programs()`
+(below) finds, unchanged, reclaiming any incidental register-alignment
+drift the same way. It also explicitly re-runs the Key Assignments/Alarms
 canonical repack (`_encode_key_assignment_entries()`) that every
 `set_key_assignment()`/`delete_key_assignment()` call already keeps
 current as a side effect -- a no-op for a dump this app has only ever
@@ -392,3 +391,69 @@ nothing needed packing; verified never negative and idempotent (a second
 Meant to be run explicitly (Tools > Pack Memory... in the GUI) before an
 Import, per the issue's own suggested use -- this project deliberately
 doesn't run it automatically on every edit.
+
+**Rebuilding the chain, not just compacting it.** The first version of
+`pack()` captured its programs via `list_programs()` -- i.e. it only
+compacted whatever the *existing* backward chain-link (`bbb`/
+`distance_registers`, §5.1) fields already resolved to. The user's own
+real-hardware investigation (project notes,
+`pack_anomaly_investigation_2026-08-24.md`) had already found real
+PACK's actual job to be broader: a dump written by a tool other than a
+real HP-41/DM41L (or this app) can leave those backlink fields zeroed or
+never set at all, even though real, well-formed FOCAL programs are
+physically sitting right there in the raw bytes -- `list_global_chain()`
+then reports nothing at all, and nothing in that dump can be viewed,
+exported, or assigned to a key. `src/tests/data/lander.dm41`/`targ.dm41`
+are exactly this: real dumps from a third-party tool whose LANDER/TARG
+programs are entirely invisible to `list_programs()` until packed;
+`lander-packed.dm41`/`targ-packed.dm41` are the same content after a
+real PACK on real hardware, used as this project's own ground truth.
+
+`Memory._forward_scan_programs()` is what actually does this: it reads
+program memory as one flat span, from `_program_memory_top_addr()` (the
+oldest program's fixed, unmovable start) down to `.END.`'s own floor
+(`_addr_for(DotEnd(), 6)`) -- trusting `R00()`/`DotEnd()` themselves as
+sane boundary pointers, per the investigation's own finding that those
+stay correct even when the chain *inside* that span is broken -- and
+hands the whole span to `opcode_scan.scan_global_markers_forward()`. That
+function is `find_program_end()`'s own forward, opcode-length-classifying
+state machine (§5's introduction), except it does not stop at the first
+END-type marker it finds; it walks the entire span and records every
+marker (label or END) it passes, in physical/forward-discovery order,
+using none of their `bbb`/`distance_registers` fields at all -- only
+their physical position.
+
+That physical position is then used to *repair* the chain: for every
+marker found, `_forward_scan_programs()` rewrites its own `bbb`/
+`distance_registers` fields, in a local working copy, to the true byte
+distance back to whichever marker was found immediately before it (zero
+for the very first marker in the whole span -- "no predecessor", same as
+an empty memory). This matters even for markers *inside* one program, not
+just the boundary between programs: `import_program()` (used to actually
+re-splice each program found here into a rebuilt memory) trusts
+`program_chain.walk_chain()` to find every label embedded within one
+program's own bytes by following that program's own internal backlinks,
+so if those were broken too, simply slicing the raw bytes out unchanged
+and re-importing them would silently reproduce the same invisible-label
+problem in the rebuilt memory. Repairing every link first, before
+grouping the (now internally self-consistent) per-program byte ranges,
+avoids that.
+
+Because this only trusts `R00()`/`DotEnd()` and the physical opcode
+bytes -- nothing about the existing chain -- it raises `DM41LMemoryError`
+(and changes nothing) rather than guessing wherever it cannot be sure it
+has found every real program without risking silently dropping one: if
+real (non-zero) data is present but no marker at all can be found in it,
+if the very last marker found is a label with nothing closing it, or if
+non-zero bytes remain between the last marker found and `DotEnd()`'s own
+floor. See `src/tests/test_pack.py`'s own corruption tests for each case.
+
+Verified against `lander.dm41`/`targ.dm41`: after `pack()`, both
+programs' real content (opcodes, embedded labels, key bytes) matches
+their real-hardware-packed references exactly; the only difference is a
+few bytes of harmless zero-alignment padding in front of the final chain
+marker, the same register-alignment tradeoff `_rebuild_program_memory()`
+already accepted for the "already-recognized" case (see point 4 above).
+Both labels are then assignable to a key exactly like any other global
+label -- the fix the user actually asked for ("global labels can be
+viewed and assigned to keys").

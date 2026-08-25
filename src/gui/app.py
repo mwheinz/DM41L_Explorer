@@ -721,31 +721,41 @@ class DM41LExplorerApp(ctk.CTk):
         '''GitHub issue #31 ("DM41L_Explorer needs PACK functionality"):
         explicitly repacks Key Assignments/Alarms and program memory
         (Memory.pack() -- see that method's own docstring for exactly
-        what it does and why). Meant to be run before an Import to
-        guarantee the maximum possible free space is available for it,
-        per the issue's own suggested use -- lives in its own menu
-        (rather than on the Program tab, next to Import) since it also
-        touches Key Assignments/Alarms, which aren't shown there.'''
+        what it does and why, including the chain-repair case per the
+        user's own correction to this method's first version). Meant to
+        be run before an Import to guarantee the maximum possible free
+        space is available for it, per the issue's own suggested use --
+        lives in its own menu (rather than on the Program tab, next to
+        Import) since it also touches Key Assignments/Alarms, which
+        aren't shown there.'''
         if self.memory is None:
             messagebox.showwarning(
                 "No Memory Loaded", "Load or start a memory buffer first."
             )
             return
+        before_count = len(self.memory.list_programs())
         try:
             freed = self.memory.pack()
         except Exception as e:
             logger.warning("Could not pack memory: %s", e)
             messagebox.showerror("Could Not Pack Memory", str(e))
             return
-        logger.info("Packed memory: %d register(s) reclaimed", freed)
+        recovered = len(self.memory.list_programs()) - before_count
+        logger.info(
+            "Packed memory: %d register(s) reclaimed, %d program(s) recovered",
+            freed, recovered,
+        )
         self._on_memory_changed()
         self._render_tabs()
-        if freed > 0:
-            self._set_status(f"Packed memory -- {freed} register(s) reclaimed.")
-            messagebox.showinfo(
-                "Pack Memory",
-                f"Packed memory: {freed} register(s) reclaimed.",
-            )
+        if freed > 0 or recovered > 0:
+            summary = f"{freed} register(s) reclaimed"
+            if recovered > 0:
+                summary += (
+                    f", {recovered} program(s) recovered -- their global "
+                    "labels are now visible and can be assigned to a key"
+                )
+            self._set_status(f"Packed memory -- {summary}.")
+            messagebox.showinfo("Pack Memory", f"Packed memory: {summary}.")
         else:
             self._set_status("Packed memory -- already fully packed.")
             messagebox.showinfo(
