@@ -14,7 +14,7 @@ from tkinter import filedialog, messagebox, Menu
 import customtkinter as ctk
 
 from memory import Memory
-from serial_manager import SerialManager
+from engine.serial_manager import SerialManager
 from engine.command_engine import CommandEngine
 from engine.commands import (
     BatteryCheckCommand,

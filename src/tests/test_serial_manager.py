@@ -2,7 +2,7 @@ import pytest
 import threading
 import time
 from unittest.mock import MagicMock, patch
-from serial_manager import SerialManager
+from engine.serial_manager import SerialManager
 
 
 @pytest.fixture
