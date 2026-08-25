@@ -403,6 +403,15 @@ class DM41LExplorerApp(ctk.CTk):
         )
         menubar.add_cascade(label="View", menu=view_menu)
 
+        # Tools Menu
+        tools_menu = Menu(menubar, tearoff=0)
+        tools_menu.add_command(
+            label="Pack Memory...",
+            command=self.pack_memory,
+            underline=0,
+        )
+        menubar.add_cascade(label="Tools", menu=tools_menu)
+
         # Help Menu
         help_menu = Menu(menubar, tearoff=0)
         if PLATFORM_SYSTEM != "Darwin":
@@ -705,6 +714,44 @@ class DM41LExplorerApp(ctk.CTk):
         self._update_source_label()
         self._render_tabs()
         self._set_status("Started a new, empty memory buffer.")
+
+    # -- Tools menu actions --------------------------------------------------
+
+    def pack_memory(self):
+        '''GitHub issue #31 ("DM41L_Explorer needs PACK functionality"):
+        explicitly repacks Key Assignments/Alarms and program memory
+        (Memory.pack() -- see that method's own docstring for exactly
+        what it does and why). Meant to be run before an Import to
+        guarantee the maximum possible free space is available for it,
+        per the issue's own suggested use -- lives in its own menu
+        (rather than on the Program tab, next to Import) since it also
+        touches Key Assignments/Alarms, which aren't shown there.'''
+        if self.memory is None:
+            messagebox.showwarning(
+                "No Memory Loaded", "Load or start a memory buffer first."
+            )
+            return
+        try:
+            freed = self.memory.pack()
+        except Exception as e:
+            logger.warning("Could not pack memory: %s", e)
+            messagebox.showerror("Could Not Pack Memory", str(e))
+            return
+        logger.info("Packed memory: %d register(s) reclaimed", freed)
+        self._on_memory_changed()
+        self._render_tabs()
+        if freed > 0:
+            self._set_status(f"Packed memory -- {freed} register(s) reclaimed.")
+            messagebox.showinfo(
+                "Pack Memory",
+                f"Packed memory: {freed} register(s) reclaimed.",
+            )
+        else:
+            self._set_status("Packed memory -- already fully packed.")
+            messagebox.showinfo(
+                "Pack Memory",
+                "Memory is already fully packed -- nothing to reclaim.",
+            )
 
     def set_calculator_time(self):
         if not self.serial.is_connected:

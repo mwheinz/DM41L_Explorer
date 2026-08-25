@@ -331,3 +331,64 @@ gap was ever large enough, and non-`.END.`-adjacent, to have been
 mistaken for a real program.
 
 
+### 5.4 Removing a Program, and Pack (GitHub issues #6/#31)
+
+Both operations are implemented in terms of a single shared primitive,
+`Memory._rebuild_program_memory()`, rather than any new low-level marker
+arithmetic of their own:
+
+1. Capture every program to be kept (`Memory.get_program_bytes()`, oldest
+   first) plus, for each of its labels, whatever key assignment (§4.6) it
+   currently holds -- `import_program()` always zeroes a freshly-spliced
+   label's own key-assignment byte (see its own docstring, step 4), so
+   this has to be restored afterward rather than assumed preserved.
+2. Zero every register from `alarms_end()` up to (not including) `R00()`
+   and set `.END.` to `R00()` itself -- `list_global_chain()`'s own
+   definition of "no programs at all yet" (its `dend < r00` check).
+3. Re-`import_program()` each captured program in order, restoring its
+   labels' key assignments (but not touching KEYFLAGS -- §4.5 -- which
+   live in a separate register and were never cleared in the first
+   place).
+4. Best-effort cleanup: `import_program()`'s own step 8 always writes a
+   *separate*, freshly register-aligned `.END.` sentinel after whatever
+   it just imported, even when that program is the last one being
+   rebuilt -- leaving it `terminator == "END"` rather than the more
+   compact `".END."` a real newest program doesn't strictly need (see
+   `Program`'s own docstring). Whenever that redundant sentinel's
+   predecessor marker happens to already sit register-aligned at offset 4
+   of its own register (i.e. it would have been a legal `.END.` position
+   on its own), `_collapse_trailing_end_into_dot_end()` rewrites it in
+   place as the permanent `.END.` and reclaims the now-superfluous
+   sentinel's register(s). When it isn't aligned, this step is skipped --
+   the result is still correct, just not maximally compact, the same
+   tradeoff every single `import_program()` call already accepts.
+
+**`Memory.remove_program(program)`** (issue #6 -- "add the ability to
+remove programs"; Export/Import already covered "add"/"edit", see §5.3's
+own tab and `program_files.py`) calls this with every *other* current
+program. This matters for more than just the newest program: the oldest
+program in memory always starts at a fixed address (`_program_memory_top_
+addr()`, right below `R00()`), so deleting anything older than the newest
+can't just erase bytes in place -- without a rebuild, the freed space
+would sit *above* wherever `.END.`/the free-space accounting looks,
+genuinely unreachable. Also clears the KEYFLAGS bit (§4.5) for any of the
+removed program's own labels that held a key assignment, since its header
+is gone and `get_program_for_key()` can never find it there again.
+
+**`Memory.pack()`** (issue #31 -- "DM41L_Explorer needs PACK
+functionality") calls this with *every* current program, unchanged --
+reclaiming only incidental register-alignment drift (e.g. from a dump
+loaded from real hardware, or hand-edited outside this app) rather than
+removing anything. It also explicitly re-runs the Key Assignments/Alarms
+canonical repack (`_encode_key_assignment_entries()`) that every
+`set_key_assignment()`/`delete_key_assignment()` call already keeps
+current as a side effect -- a no-op for a dump this app has only ever
+edited itself, but self-healing for one that wasn't. Returns the number
+of registers reclaimed (`DotEnd() - alarms_end()`'s increase), 0 if
+nothing needed packing; verified never negative and idempotent (a second
+`pack()` call always returns 0) across every sample dump in
+`src/tests/data/` -- see `src/tests/test_pack.py`.
+
+Meant to be run explicitly (Tools > Pack Memory... in the GUI) before an
+Import, per the issue's own suggested use -- this project deliberately
+doesn't run it automatically on every edit.

@@ -1615,6 +1615,266 @@ class Memory:
             )
         return end_marker_addr, next_free_addr
 
+    def _rebuild_program_memory(self, programs: list):
+        '''
+        Physically rewrites program memory from scratch so it exactly
+        contains `programs` -- a list of `(instruction_bytes,
+        key_assignments)` tuples, oldest program first (`key_assignments`
+        is a `{label_name: key_byte}` dict, for that program's own labels
+        that currently hold a real key assignment, i.e. `key_byte != 0`).
+        Shared by `remove_program()` (called with every *other* existing
+        program, physically closing the gap the removed one leaves
+        behind) and `pack()` (called with every existing program,
+        unchanged -- reclaims only incidental drift, e.g. from a
+        hand-edited or externally-loaded dump).
+
+        Every entry in `programs` is assumed to already be well-formed
+        (each `instruction_bytes` came from this same Memory's own
+        `get_program_bytes()`, captured by the caller *before* this
+        method touches anything) and to contain no label name duplicated
+        elsewhere in `programs` -- both guaranteed by construction, since
+        these are exactly the programs that were already coexisting
+        validly in this Memory before the call.
+
+        First clears every register from `alarms_end()` up to (not
+        including) `R00()` and resets `.END.` to `R00()` itself --
+        `list_global_chain()`'s own definition of "no programs at all
+        yet" (its `dend < r00` check) -- then re-`import_program()`s each
+        entry in order. Reusing `import_program()` here, rather than
+        re-deriving its splicing/linking arithmetic, is deliberate: it's
+        already the thoroughly-tested single source of truth for "how
+        does one program get spliced onto the current chain," and every
+        program here is by definition importable (no duplicate names,
+        each already well-formed, and the total result can only be
+        smaller than or equal to what was already fitting in this same
+        space before the call).
+
+        `import_program()` always zeroes a freshly-spliced program's own
+        label key-assignment bytes (it can't tell "this is a foreign
+        import" from "this is the exact same program moving to a new
+        address" -- see its own docstring, step 4); this method restores
+        each label's original key-assignment byte immediately afterward
+        instead, straight from the `key_assignments` dict passed in for
+        it. The corresponding KEYFLAGS bits (sec 4.5) are never touched
+        by any of this -- they live in a completely different register
+        (`set_key_flag()`) -- so as long as they were already correct
+        before this call, restoring the header byte alone is enough to
+        leave a kept program's key assignment exactly as it was.
+        '''
+        for reg in range(self.alarms_end(), self.R00()):
+            self.set_register(reg, Register(size=7))
+        self.set_DotEnd(self.R00())
+
+        for instruction_bytes, key_assignments in programs:
+            imported = self.import_program(instruction_bytes)
+            for label in imported.labels:
+                key_byte = key_assignments.get(label.name)
+                if key_byte:
+                    self._write_program_key_byte(
+                        label.header_addr, label.header_offset, key_byte
+                    )
+
+        if programs:
+            self._collapse_trailing_end_into_dot_end()
+
+    def _collapse_trailing_end_into_dot_end(self):
+        '''
+        `_rebuild_program_memory()`'s own best-effort cleanup pass: every
+        call it makes to `import_program()` -- including the very last
+        one, for the newest program being kept -- always writes a real,
+        explicit END for whatever it just imported and then a *separate*,
+        freshly written permanent `.END.` sentinel right after it (see
+        `import_program()`'s own step 8; it has no way to know, on any
+        given call, whether another program is about to be imported right
+        after it). Left alone, that can leave the newest kept program
+        genuinely `terminator == "END"` in `list_programs()`'s eyes,
+        wasting up to a full register on a redundant second marker that
+        the `Program`/`import_program()` docstrings' own stated invariant
+        says shouldn't exist -- the single newest program in memory is
+        supposed to be closed out by the permanent `.END.` sentinel
+        directly, with no explicit END of its own.
+
+        This collapses the two back into that canonical single-marker
+        form -- but ONLY when it's actually safe to: `.END.` is only ever
+        valid register-aligned, sitting in the last 3 bytes of whatever
+        register `DotEnd()` names (docs/program.md sec 5.1), while an
+        ordinary internal chain marker (what the last-imported program's
+        own real END now is) can legally sit at any byte offset within
+        its own register -- most of the time it won't happen to be
+        exactly offset 4. When it IS (i.e. this program's own real END
+        already happens to occupy the same 3 bytes a `.END.` marker would
+        need), it's rewritten in place as the permanent `.END.` itself
+        (only its end-type nibble changes -- its `bbb`/`distance_registers`
+        fields already correctly link back to whatever precedes it and
+        are left untouched), `.END.` is moved to point at it, and the now
+        -superfluous separate sentinel above it (pure zero padding by
+        construction) is zeroed out and reclaimed as free space. This is
+        exactly what recovers `twolabels.dm41`-style dumps (a single
+        program with no explicit END of its own, terminated only by
+        `.END.`) back to their original, maximally-compact layout after a
+        `pack()` that changed nothing else about them.
+
+        When it's NOT offset-4-aligned, this leaves memory exactly as
+        `import_program()` itself already produces it -- correct, just
+        not maximally compact, the same tradeoff every single call to
+        that method already makes and that the rest of this project
+        already accepts (see e.g. `test_import_apptest_into_empty_memory
+        _matches_simple_dm41_exactly()`, which only round-trips exactly
+        because APPTEST happens to already be offset-4-aligned).
+
+        Only ever called when `_rebuild_program_memory()` actually
+        imported at least one program -- with none, `.END.` is already
+        sitting at `R00()` (no separate sentinel was ever written) and
+        there is nothing to collapse.
+        '''
+        chain = self.list_global_chain()
+        sentinel = chain[-1]  # the fresh, empty .END. just written
+        sentinel_addr = self._addr_for(sentinel.header_addr, sentinel.header_offset)
+        target_addr = sentinel_addr + sentinel.distance_bytes
+        pred_reg, pred_offset = self._pos_for(target_addr)
+        if pred_offset != 4:
+            return  # not register-aligned -- can't collapse without moving bytes
+
+        third_byte_addr = self._addr_for(pred_reg, pred_offset) - 2
+        reg, offset = self._pos_for(third_byte_addr)
+        data = bytearray(self.get_register(reg).get_bytes())
+        data[offset] = (data[offset] & 0x0F) | 0x20  # end-type nibble -> 2 (.END.)
+        self.set_register(reg, Register(data=bytes(data)))
+
+        old_dot_end_reg = self.DotEnd()
+        self.set_DotEnd(pred_reg)
+        for stale in range(pred_reg + 1, old_dot_end_reg + 1):
+            self.set_register(stale, Register(size=7))
+
+    def remove_program(self, program: Program):
+        '''
+        Removes `program` from program memory entirely and closes up the
+        gap it leaves behind, so every remaining program stays exactly as
+        contiguous as it was before -- the write-side counterpart to
+        `get_program_bytes()`/`import_program()`, and this project's
+        answer to GitHub issue #6 ("add the ability to remove programs";
+        Import/Export already covered "add"/"edit").
+
+        Removing anything other than the single newest program
+        (`is_last`) is not simply "erase these bytes": every OLDER
+        program sits at a fixed, unmovable address (the oldest one
+        always starts exactly at `_program_memory_top_addr()`, right
+        below `R00()` -- see that method's docstring), so deleting one
+        from the middle (or the very oldest one) would otherwise leave a
+        hole of genuinely unreachable register space wedged between
+        `R00()` and whatever programs remain above it -- space
+        `regions()`'s own "Unused / Free" accounting would never see,
+        since it only ever looks at the gap between `alarms_end()` and
+        `.END.`. This reclaims that space by rebuilding the entire
+        program area from scratch, keeping everything except `program`
+        (`_rebuild_program_memory()`).
+
+        Also clears the KEYFLAGS bit (sec 4.5) for any of `program`'s own
+        labels that currently hold a key assignment (sec 4.6) -- once its
+        header is gone, `get_program_for_key()` can never find it there
+        again, so leaving the flag set would misreport that key as still
+        assigned to something. Key Assignment Register entries (sec 4.1
+        -- the *other* storage mechanism, see `set_key_assignment()`) are
+        completely unrelated to any program and are left untouched.
+
+        Raises ValueError if `program` doesn't match any entry in the
+        current program list (e.g. it's stale, from a `list_programs()`
+        call taken before the dump changed) -- same defensive check as
+        `get_program_bytes()`.
+        '''
+        programs = self.list_programs()
+        match = next(
+            (
+                p for p in programs
+                if p.start_addr == program.start_addr
+                and p.start_offset == program.start_offset
+            ),
+            None,
+        )
+        if match is None:
+            raise ValueError(
+                "This program entry doesn't match the current program "
+                "list -- it may be stale (from a list_programs() call "
+                "taken before the dump changed)."
+            )
+
+        for label in match.labels:
+            if label.key_assignment:
+                try:
+                    key_number, shifted = self._key_number_for_byte(
+                        label.key_assignment
+                    )
+                    self.set_key_flag(key_number, shifted, False)
+                except ValueError:
+                    pass  # didn't decode to a real key position
+
+        keep = []
+        for p in programs:
+            if p is match:
+                continue
+            raw = self.get_program_bytes(p)
+            key_assignments = {
+                l.name: l.key_assignment for l in p.labels if l.key_assignment
+            }
+            keep.append((raw, key_assignments))
+
+        self._rebuild_program_memory(keep)
+
+    def pack(self) -> int:
+        '''
+        Explicitly repacks user memory -- GitHub issue #31 ("DM41L_Explorer
+        needs PACK functionality"). Key Assignments (sec 4) and Alarms
+        (sec 3/4, docs/alarms.md) already stay perfectly packed as a side
+        effect of every one of this class's own
+        `set_key_assignment()`/`delete_key_assignment()` calls (see
+        `_encode_key_assignment_entries()`'s docstring) -- this re-runs
+        that same canonical repack explicitly, which is a no-op for a
+        dump this class has only ever edited itself, but self-heals one
+        loaded from disk with a pre-existing gap (e.g. a real
+        calculator's own dump, or one hand-edited outside this app).
+        Program memory (docs/program.md sec 5) gets the equivalent
+        treatment: `list_programs()` walks it fresh from scratch
+        ("manually walking program memory to identify labels", per the
+        issue) and every program found is rewritten back tightly against
+        `R00()` with `_rebuild_program_memory()`, reclaiming any
+        accumulated register-alignment drift the same way
+        `remove_program()` does for the program it deletes.
+
+        Meant to be run explicitly before an Import (the issue's own
+        suggested use) to guarantee the maximum possible free space is
+        available for it -- this project deliberately doesn't run it
+        automatically on every edit, so what's in memory always matches
+        exactly what the user last loaded or changed until they ask for
+        this.
+
+        Returns the number of additional registers now free as a result
+        (the change in `DotEnd() - alarms_end()`) -- 0 if nothing needed
+        packing. Safe to call on a buffer with no programs at all (still
+        repacks Key Assignments/Alarms; program memory is left untouched
+        rather than guessing at a DotEnd for an empty partition this
+        method didn't create).
+        '''
+        before_free = self.DotEnd() - self.alarms_end()
+
+        self._encode_key_assignment_entries(self._decode_key_assignment_entries())
+
+        programs = self.list_programs()
+        if programs:
+            keep = [
+                (
+                    self.get_program_bytes(p),
+                    {
+                        l.name: l.key_assignment
+                        for l in p.labels if l.key_assignment
+                    },
+                )
+                for p in programs
+            ]
+            self._rebuild_program_memory(keep)
+
+        after_free = self.DotEnd() - self.alarms_end()
+        return after_free - before_free
+
     # -- Global label (program) key assignments (docs/key_assignments.md
     # sec 4.6) -- a completely separate storage mechanism from the Key
     # Assignment Registers above (sec 4.2): the key byte lives in the

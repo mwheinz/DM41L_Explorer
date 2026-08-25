@@ -47,6 +47,16 @@ newest program into a real closing END, register-aligning a fresh
 header is always cleared on the way in, and a duplicate global label name
 blocks the import outright -- both deliberate project decisions, not
 defaults `import_program()` picked on its own.
+
+Remove (GitHub issue #6 -- "add the ability to remove programs", the last
+of "add"/"edit"/"remove" to land, after Export/Import already covered
+"add"/"edit") IS selection-driven, unlike Import: it deletes the selected
+row's own program (Memory.remove_program()) and closes up whatever gap
+that leaves behind, so every other program stays exactly as contiguous as
+before -- this works for any program, not just the newest, unlike Import.
+Any key assignment(s) the removed program's own label(s) held are cleared
+as part of the removal (see remove_program()'s own docstring); the
+confirmation dialog says so up front rather than only after the fact.
 """
 
 import logging
@@ -113,6 +123,14 @@ class ProgramTab(ctk.CTkFrame):
             width=90,
             command=self._import_program,
         ).pack(side="right", padx=(0, 8))
+        ctk.CTkButton(
+            header,
+            text="Remove",
+            width=90,
+            fg_color="#a03e3e",
+            hover_color="#832f2f",
+            command=self._remove_selected,
+        ).pack(side="right", padx=(0, 8))
 
         self._caption = build_caption_label(
             self,
@@ -122,8 +140,9 @@ class ProgramTab(ctk.CTkFrame):
             "program can have zero, one, or several. Labels lists every "
             "global label a program contains, or \"(unlabelled)\" if it "
             "has none. Select a row and click Export... to save that "
-            "program as a standalone HP-41 program file, or click "
-            "Import... to add a RAW/DAT/PPC program file as a new program.",
+            "program as a standalone HP-41 program file, Remove to delete "
+            "it from program memory, or click Import... to add a "
+            "RAW/DAT/PPC program file as a new program.",
         )
 
         _, self._tree = build_tab_treeview(self, _TREE_COLUMNS, style=_TREE_STYLE)
@@ -375,4 +394,61 @@ class ProgramTab(ctk.CTkFrame):
             "Imported",
             f"{imported.names_label} ({imported.length} bytes) "
             f"imported from {path} as the newest program.",
+        )
+
+    def _remove_selected(self):
+        """Header-button version of Remove, acting on whatever row is
+        currently selected -- same pattern as gui/xm_files_tab.py's own
+        _remove_selected()/_remove_file(). Unlike Import, this is
+        selection-driven: any program can be removed, not just the
+        newest one (Memory.remove_program() closes up the gap that
+        leaves behind, wherever it is -- see that method's docstring)."""
+        if self._memory is None:
+            messagebox.showwarning(
+                "No Program Memory", "Load or start a memory buffer first."
+            )
+            return
+
+        program = self._selected_program()
+        if program is None:
+            messagebox.showinfo("No Selection", "Select a program row first.")
+            return
+        self._remove_program(program)
+
+    def _remove_program(self, program):
+        """Confirms and removes `program` (Memory.remove_program()) --
+        the write-side counterpart to _export_selected(). Mentions any
+        key assignment(s) the program's own label(s) hold up front in the
+        confirmation, since removing it clears them (see
+        Memory.remove_program()'s own docstring)."""
+        assignment_note = ""
+        if any(label.key_assignment for label in program.labels):
+            assignment_note = (
+                "\n\nIts key assignment(s) will be cleared as part of this."
+            )
+        if not messagebox.askyesno(
+            "Remove Program",
+            f"Remove {program.names_label} ({program.length_label}) from "
+            f"program memory?{assignment_note}",
+        ):
+            return
+
+        try:
+            self._memory.remove_program(program)
+        except (ValueError, DM41LMemoryError) as e:
+            logger.warning(
+                "Could not remove program %r: %s", program.names_label, e
+            )
+            messagebox.showerror("Could Not Remove Program", str(e))
+            return
+
+        logger.info(
+            "Program removed: %r (%s)", program.names_label, program.length_label
+        )
+        self._notify_change()
+        self.render(self._memory)
+        messagebox.showinfo(
+            "Removed",
+            f"{program.names_label} ({program.length_label}) removed "
+            "from program memory.",
         )
