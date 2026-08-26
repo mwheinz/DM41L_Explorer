@@ -1,0 +1,54 @@
+LBL "DX"
+STO 00
+CLA
+LBL 01
+16
+MOD
+9
+-
+-7
+X<>Y
+X<=0?
++
+64
++
+XTOA  ;XROM 25,47
+-1
+AROT  ;XROM 25,06
+RCL 00
+16
+X>Y?
+GTO 02
+/
+INT
+STO 00
+GTO 01
+LBL 02
+0
+AVIEW
+END
+LBL "HX"
+0
+LBL 01
+ATOX  ;XROM 25,07
+X=0?
+GTO 02
+16
+ST* Z
+RDN
+64
+-
+7
+X<>Y
+X<0?
+ST+ Y
+X>0?
+STO Y
+RDN
+9
++
++
+GTO 01
+LBL 02
+RDN
+END
