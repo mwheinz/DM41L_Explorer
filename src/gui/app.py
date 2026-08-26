@@ -45,6 +45,34 @@ ENGINE_POLL_MS = 50
 
 PLATFORM_SYSTEM = platform.system()
 
+# Header-button methods that Cmd/Ctrl+E / Cmd/Ctrl+I forward to, for
+# whichever tab is currently active -- see _bind_keys() and
+# DM41LExplorerApp._dispatch_tab_action() below. A tab name missing
+# from one of these dicts means that shortcut is a silent no-op there
+# (e.g. Overview has no Import/Export at all).
+_EXPORTABLE_TABS = {
+    "Data Registers": "_export_registers",
+    "XM Files": "_export_selected",
+    "Programs": "_export_selected",
+}
+_IMPORTABLE_TABS = {
+    "Data Registers": "_import_registers",
+    "XM Files": "_import_file",
+    "Programs": "_import_program",
+}
+
+# File > Open Recent: long paths are shortened by keeping the tail
+# (the part that actually distinguishes files living in different
+# folders) rather than the head.
+_MAX_RECENT_LABEL_LEN = 60
+
+
+def _format_recent_label(path_str: str) -> str:
+    if len(path_str) <= _MAX_RECENT_LABEL_LEN:
+        return path_str
+    return "\u2026" + path_str[-(_MAX_RECENT_LABEL_LEN - 1) :]
+
+
 logger = logging.getLogger(__name__)
 
 # Cap the log file at 2MB with 3 rotated backups (dm41l_explorer.log,
@@ -328,6 +356,8 @@ class DM41LExplorerApp(ctk.CTk):
             accelerator=f"{acc}+O",
             underline=0,
         )
+        self._recent_menu = Menu(file_menu, tearoff=0)
+        file_menu.add_cascade(label="Open Recent", menu=self._recent_menu, underline=5)
         file_menu.add_command(
             label="Save Dump",
             command=self.save_dump_to_file,
@@ -423,6 +453,7 @@ class DM41LExplorerApp(ctk.CTk):
         menubar.add_cascade(label="Help", menu=help_menu)
 
         self.config(menu=menubar)
+        self._rebuild_recent_files_menu()
         return menubar
 
     def _bind_keys(self):
@@ -432,7 +463,20 @@ class DM41LExplorerApp(ctk.CTk):
         self.bind(f"<{acc}-o>", lambda e: self.load_dump_from_file())
         self.bind(f"<{acc}-s>", lambda e: self.save_dump_to_file())
         self.bind(f"<{acc}-q>", lambda e: self.on_close())
+        # Preferences' menu accelerator (Cmd/Ctrl+,) never actually had
+        # a matching bind() -- the menu's `accelerator=` text is purely
+        # cosmetic in Tk, so this shortcut has silently never worked
+        # until now.
+        self.bind(f"<{acc}-comma>", lambda e: self.show_preferences())
         self.bind("<F5>", lambda e: self._render_tabs())
+
+        # GitHub issue #7 follow-up: Export.../Import... are tab-scoped
+        # header buttons (Data Registers, XM Files, Programs), not menu
+        # items, so their shortcuts are bound globally here and just
+        # forward to whichever tab is currently active -- see
+        # _dispatch_tab_action().
+        self.bind(f"<{acc}-e>", lambda e: self._export_current_tab())
+        self.bind(f"<{acc}-i>", lambda e: self._import_current_tab())
 
         # Connect menu (GitHub issue #9) -- each of these already no-ops
         # with a "Not Connected" warning (or, for disconnect(), silently)
@@ -448,10 +492,78 @@ class DM41LExplorerApp(ctk.CTk):
     def _show_about(self):
         messagebox.showinfo(
             "About DM41L Explorer",
-            f"Read and Write DM41L memory files\n\n"
+            f"Read, Write and Manipulate\n"
+            "DM41L memory files\n\n"
             f"Version:\n{APP_VERSION}\n\n"
             "Written by Michael Heinz.\n",
         )
+
+    def _export_current_tab(self):
+        self._dispatch_tab_action(_EXPORTABLE_TABS)
+
+    def _import_current_tab(self):
+        self._dispatch_tab_action(_IMPORTABLE_TABS)
+
+    def _dispatch_tab_action(self, method_names_by_tab: dict):
+        """Forwards to the named method on whichever tab is currently
+        active, if that tab is in `method_names_by_tab` at all -- see
+        the module-level _EXPORTABLE_TABS/_IMPORTABLE_TABS comment
+        above. Every target method already guards against "no memory
+        loaded" / "no selection" itself (the same guards that protect
+        double-click, which also bypasses button state), so this is
+        safe to call unconditionally."""
+        name = self.tabview.get()
+        method_name = method_names_by_tab.get(name)
+        if method_name is None:
+            return
+        getattr(self._tabs[name], method_name)()
+
+    # -- File > Open Recent ----------------------------------------------
+
+    def _rebuild_recent_files_menu(self):
+        """Repopulates File > Open Recent from
+        self.config_store.recent_files -- called once at startup
+        (_build_menus()) and again every time the list changes (a
+        dump opened/saved, a stale entry pruned in open_dump_file(),
+        or Clear Recent Files). Tk menu items are static once added,
+        so the submenu has to be torn down and rebuilt rather than
+        updated in place."""
+        self._recent_menu.delete(0, "end")
+        recent = self.config_store.recent_files
+        if not recent:
+            self._recent_menu.add_command(label="(No Recent Files)", state="disabled")
+            return
+        for path_str in recent:
+            self._recent_menu.add_command(
+                label=_format_recent_label(path_str),
+                command=lambda p=path_str: self.open_dump_file(p),
+            )
+        self._recent_menu.add_separator()
+        self._recent_menu.add_command(
+            label="Clear Recent Files", command=self._clear_recent_files
+        )
+
+    def _clear_recent_files(self):
+        self.config_store.clear_recent_files()
+        self._persist_config("recent files")
+        self._rebuild_recent_files_menu()
+
+    def _persist_config(self, context: str):
+        """Saves self.config_store to disk, surfacing a failure the
+        same way _connect_and_verify's own preference-save already
+        does -- these config writes are rare enough (once per dump
+        opened/saved) that a real failure (e.g. a read-only home
+        directory) is worth telling the user about rather than
+        silently dropping."""
+        try:
+            self.config_store.save()
+        except Exception as e:
+            logger.error(
+                "Could not save %s to %s: %s", context, ProjectConfig.PREFS_FILE, e
+            )
+            messagebox.showerror(
+                "Could Not Save Preferences", f"Could not save {context}: {e}"
+            )
 
     def _set_status(self, text: str):
         self._status_label.configure(text=text)
@@ -796,6 +908,9 @@ class DM41LExplorerApp(ctk.CTk):
             self.dirty = False
             self._modified_label.configure(text="")
             logger.info("Dump saved to %s", self.memory_source)
+            self.config_store.add_recent_file(self.memory_source)
+            self._persist_config("recent files")
+            self._rebuild_recent_files_menu()
             messagebox.showinfo("Saved", f"Memory dump written to {self.memory_source}")
         except Exception as e:
             logger.exception("Could not save dump to %s", self.memory_source)
@@ -815,6 +930,9 @@ class DM41LExplorerApp(ctk.CTk):
             self._modified_label.configure(text="")
             self._update_source_label()
             logger.info("Dump saved to %s", path)
+            self.config_store.add_recent_file(path)
+            self._persist_config("recent files")
+            self._rebuild_recent_files_menu()
             messagebox.showinfo("Saved", f"Memory dump written to {path}")
         except Exception as e:
             logger.exception("Could not save dump to %s", path)
@@ -850,6 +968,9 @@ class DM41LExplorerApp(ctk.CTk):
             name = Path(path).name
             self._set_status(f"Loaded dump from {name}")
             logger.info("Dump loaded from %s", path)
+            self.config_store.add_recent_file(path)
+            self._persist_config("recent files")
+            self._rebuild_recent_files_menu()
         except Exception as e:
             logger.exception("Could not load dump from %s", path)
             messagebox.showerror("Error", f"Could not load dump: {e}")
@@ -868,6 +989,9 @@ class DM41LExplorerApp(ctk.CTk):
         if not Path(path).exists():
             logger.warning("Could not find file: %s", path)
             messagebox.showerror("Error", f"Could not find file: {path}")
+            self.config_store.remove_recent_file(path)
+            self._persist_config("recent files")
+            self._rebuild_recent_files_menu()
             return
         if self.dirty and not messagebox.askyesno(
             "Unsaved Changes", "Discard unsaved changes and load a different dump?"

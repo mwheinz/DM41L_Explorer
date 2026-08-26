@@ -26,7 +26,12 @@ class ProjectConfig:
         "color_theme": "blue",  # CustomTkinter built-in theme name
         "font_family": "",  # "" = use CustomTkinter's built-in per-platform default
         "font_size": 0,  # 0 = use CustomTkinter's built-in default size
+        "recent_files": [],  # paths of recently opened/saved .dm41 files, most-recent first
     }
+
+    # File > Open Recent is capped at this many entries -- oldest
+    # dropped first, enforced by add_recent_file() below.
+    MAX_RECENT_FILES = 10
 
     def __init__(self):
         """Initializes the config with default values"""
@@ -135,6 +140,41 @@ class ProjectConfig:
     @font_size.setter
     def font_size(self, value):
         self._prefs["font_size"] = value
+
+    @property
+    def recent_files(self) -> list:
+        """Paths of recently opened/saved .dm41 files, most-recent
+        first. Returns a defensive copy -- there's no setter; use
+        add_recent_file()/remove_recent_file()/clear_recent_files()
+        instead, so the dedup/cap invariants always hold."""
+        return list(self._prefs["recent_files"])
+
+    def add_recent_file(self, path) -> None:
+        """Records `path` as the most-recently-used file: moves it
+        to the front if it's already listed (never duplicated), and
+        caps the list at MAX_RECENT_FILES, dropping the oldest.
+
+        Stored as plain strings (not Path objects) since this is
+        JSON-serialized as-is by save().
+        """
+        path_str = str(path)
+        files = [p for p in self._prefs["recent_files"] if p != path_str]
+        files.insert(0, path_str)
+        self._prefs["recent_files"] = files[: self.MAX_RECENT_FILES]
+
+    def remove_recent_file(self, path) -> None:
+        """Drops `path` from the recent-files list, if present --
+        used when a listed file turns out to be missing at open
+        time (see gui/app.py's open_dump_file())."""
+        path_str = str(path)
+        self._prefs["recent_files"] = [
+            p for p in self._prefs["recent_files"] if p != path_str
+        ]
+
+    def clear_recent_files(self) -> None:
+        """Empties the recent-files list entirely -- File > Open
+        Recent > Clear Recent Files."""
+        self._prefs["recent_files"] = []
 
     def get_all(self) -> dict:
         return self._prefs
