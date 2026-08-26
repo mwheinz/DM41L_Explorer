@@ -18,11 +18,7 @@ sequence that is itself a plain END marker.
 Deliberately independent of the "distance" field in the global label/END
 chain that Memory.list_programs() walks (see ProgramInfo's docstring and
 docs/program.md) -- that backward-chain distance is for GTO/XEQ-alpha's
-global search, not a program's own forward length, and reconciling it
-against real CAT 1 byte counts is still an open question in this project.
-This scanner sidesteps that question entirely by walking the same
-direction, and using the same length rules, a real HP-41 (or hp41uc)
-would when reading the program itself.
+global search, not a program's own forward length.
 
 A label embedded partway through another label's own code (two global
 entry points sharing one trailing END -- a legitimate, real HP-41

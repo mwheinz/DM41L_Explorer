@@ -12,12 +12,8 @@ _data[6] contains the LSB. Care must be taken to remember this difference when
 comparing HP41 documentation with the implementation of the Register and
 Memory classes.
 
-This used to be a single memory.py file; it was split into this package on
-2026-08-13 for readability (memory.py had grown to ~1900 lines / 78KB).
-Every name that was importable from `memory` before the split still is, via
-the re-exports below, so `from memory import Memory, Register, ...`
-elsewhere in the codebase (or in external code) is unaffected. See the
-individual submodules for what lives where:
+This used to be a single memory.py file; it was split into this package
+for readability. The current components are:
 
   registers.py     Register, AlphaRegister, DM41LMemoryError,
                     format_data_line/parse_data_line (DATA line format)

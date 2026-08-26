@@ -1,32 +1,9 @@
 '''
 The DM41L/HP-41CX instruction set, keyed by the byte encoding used inside a
 Key Assignment Register entry (docs/key_assignments.md sec 4.2/4.8) -- NOT
-by the program-byte ("Instruction Prefix") encoding, which differs for the
-nine low-code (<64) Assignable functions (see the module note below and
-docs/key_assignments.md sec 5). Generated from docs/function_table.md's
-merged table (Assignable=Yes single-byte functions) and its Extended
-Functions ROM / Time ROM catalogs, via the two-byte XROM encoding confirmed
-in docs/key_assignments.md sec 4.8:
-
-    byte1 = 0xA0 + floor(xrom / 4)
-    byte2 = ((xrom mod 4) << 6) | fn
-
-This is a static data structure (per docs/key_assignments.md sec 6 item 5)
-rather than something parsed from the markdown table at runtime -- re-run
-the generation script (see CONTRIBUTING.md, or ask in the project's chat
-history) if function_table.md ever changes.
-
-CAVEAT (docs/key_assignments.md sec 5): for the nine low-code Assignable
-functions (CAT, DEL, COPY, CLP, SIZE, BST, SST, PACK, ASN -- codes
-0x00-0x0F), SINGLE_BYTE_FUNCTIONS below assumes the Key Assignment
-Register byte equals the function's plain decimal/hex code from
-function_table.md -- e.g. CAT is assumed to be encoded as 0x00. This was
-originally checked only against one synthetic-looking test fixture
-(keyassigntest.dm41); the user has since manually verified on 2026-08-18
-that low-code functions assign correctly on real hardware, confirming the
-assumption. Everything from 0x40 ('+') through 0xE0 (XEQ) is fully
-confirmed (docs sec 4.8); the XROM/peripheral entries are fully confirmed
-too (docs sec 4.8, xrom-keyassignments.dm41).
+by the program-byte ("Instruction Prefix") encoding - there are some
+assignment instructions that can't actually be used in a program (SST, BST,
+ASN, etc..)
 '''
 
 import re
@@ -330,12 +307,7 @@ def normalize_function_name_input(text: str) -> str:
     1. Try an exact, case-insensitive match against every known function
        name as-is, before any symbol substitution. This has to come
        first: a few names are already spelled with plain ASCII --
-       'X<=NN?' and 'X>=NN?' (the Extended Functions ROM catalog's own
-       names) sit right next to 'X≤Y?' and 'X≤0?' (the built-in
-       single-byte functions, spelled with the real ≤ glyph). Applying
-       the "<=" -> "≤" substitution unconditionally would make 'X<=NN?'
-       impossible to type as itself. Trying the literal input first means
-       it still matches directly, with no substitution needed.
+       'X<=NN?' and 'X>=NN?' and so on.
     2. If nothing matched literally, apply the symbol substitutions in
        _SYMBOL_SUBSTITUTIONS and uppercase every remaining ASCII letter
        (every function name in the tables is already all-uppercase).

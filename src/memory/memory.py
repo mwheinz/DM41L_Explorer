@@ -1,9 +1,7 @@
 '''
-Memory: a complete DM41L memory dump -- parsing/serializing the dump
-format, raw register access, and the higher-level accessors built on top
-of it (R00/.END./SigmaReg, the 56 status flags, and the program-memory
-global chain walk). See the memory package's __init__.py docstring for
-the on-disk dump format overview.
+Memory: a representation of a DM41L memory dump and tools for manipulating
+it. See the memory package's __init__.py docstring for the on-disk dump format
+overview.
 '''
 
 import re
@@ -68,11 +66,8 @@ class Memory:
         self._special_registers["G"] = Register.from_hex("00")
 
         # Address one past the last Key Assignments register (see
-        # key_assignments_end()'s docstring below). A freshly-constructed
-        # Memory has no dump loaded, so there's nothing to have scanned yet
-        # -- this defaults to KEY_ASSIGNMENTS_RANGE[0] (0xC0) itself, the
-        # same "no key assignments found" value _scan_key_assignments_end()
-        # returns for a real dump with an empty Key Assignments region.
+        # key_assignments_end()'s docstring below). If no keys are assigned,
+        # it should be 0x0C0.
         self._key_assignments_end = KEY_ASSIGNMENTS_RANGE[0]
 
     def __eq__(self, other):
@@ -84,19 +79,13 @@ class Memory:
         if self._special_registers != other._special_registers:
             return False
 
-        # Compare *effective* register values via get_register() rather
-        # than the raw _core_memory dicts: get_register() already treats
-        # an address with no explicit entry as an implicit zero register,
-        # so two Memory objects that agree on every address's effective
-        # value are equal even if one of them happens to have an explicit
-        # zero-valued entry (e.g. written out as part of a 4-register-
-        # aligned page in to_string()/from_string(), see the page-grouping
-        # note there) where the other has none at all. Comparing the raw
-        # dicts directly used to make a dump fail to equal itself after a
-        # to_string()/from_string() round trip whenever a page mixed
-        # explicitly-set and implicitly-zero registers -- e.g. Memory()'s
-        # own defaults, which set registers 8, 12, 13, and 14 but leave
-        # 9, 10, 11, and 15 (in the same two pages) implicit.
+        # Compare *effective* register values via get_register() rather than
+        # the raw _core_memory dicts: memory dumps are sparse, but
+        # get_register() already treats an address with no matching entry as
+        # an implicit zero register, so two Memory objects that agree on every
+        # address's effective value are equal even if one of them happens to
+        # have an explicit zero-valued entry where the other has none at all.
+
         addrs = set(self._core_memory) | set(other._core_memory)
         return all(self.get_register(a) == other.get_register(a) for a in addrs)
 
@@ -442,19 +431,6 @@ class Memory:
             new_alarms_end = new_start + count
             for addr in range(new_alarms_end, old_alarms_end):
                 self.set_register(addr, Register(size=7))
-
-    # -- Regions (issue #25) --
-    #
-    # A single source for "what named region is this address in", replacing
-    # what used to be independently hand-rolled in gui/hex_view_tab.py's
-    # _classify() and gui/overview_tab.py's _render_summary()/
-    # _render_partition() -- both called the boundary accessors above
-    # (key_assignments_end()/alarms_end()/R00()/DotEnd()) correctly, but
-    # each also reimplemented its own copy of "so what are the actual
-    # region spans", which is exactly the kind of duplication that let
-    # issue #23 (Alarms/Key Assignments not counted in the memory summary)
-    # happen in the first place. regions() below is that missing shared
-    # answer.
 
     def regions(self) -> list:
         '''
@@ -2163,23 +2139,10 @@ class Memory:
         self._write_program_key_byte(program.header_addr, program.header_offset, 0x00)
 
     def to_string(self) -> str:
+        # Section I: "DM41"
         lines = [self._header]
 
         # Section II: Core Memory, grouped into complete 4-register pages.
-        #
-        # Every real captured dump (see tests/data/*.dm41) only ever
-        # starts a row on a 4-register-aligned address (0x00, 0x04, 0x08,
-        # ...) and always writes all 4 registers of that page -- whole
-        # *pages* can be skipped entirely (e.g. the unused Void region),
-        # but a page that has any register set is always written in
-        # full. The DM41L's own loader appears to require this: it
-        # rejected a dump with a row starting at a non-aligned address
-        # (e.g. 0xba instead of 0xb8). So rather than grouping by
-        # whatever runs of addresses happen to already be present in
-        # _core_memory, group by aligned page and fill in any missing
-        # register in a page that has at least one entry -- missing ones
-        # default to the zero register, same as get_register() already
-        # does for any address with no explicit entry.
         sorted_indices = sorted(self._core_memory.keys())
         if sorted_indices:
             pages = sorted({idx - (idx % 4) for idx in sorted_indices})
