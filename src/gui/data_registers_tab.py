@@ -19,8 +19,6 @@ import customtkinter as ctk
 from memory import (
     Memory,
     Register,
-    PRIMARY_DATA_END,
-    MIN_SANE_R00,
     format_data_line,
     parse_data_line,
 )
@@ -189,23 +187,22 @@ class DataRegistersTab(ctk.CTkFrame):
             self._header_label.configure(text="(no memory dump loaded)")
             return
 
-        try:
-            r00 = memory.R00()
-        except Exception as e:
-            logger.warning("Could not determine R00: %s", e)
-            self._header_label.configure(text=f"Could not determine R00: {e}")
-            return
-
-        if r00 < MIN_SANE_R00:
+        # The DataMemory region derives its own extent from R00 live, and
+        # reports itself empty when the dump has no sane R00/.END.
+        # partition at all -- so this doesn't need its own R00/MIN_SANE_R00
+        # arithmetic or its own defensive try/except around decoding
+        # register c.
+        data = memory.data_memory
+        if data.is_empty:
             self._header_label.configure(
                 text="No data registers yet -- start a new buffer or load/read a dump first."
             )
             return
 
-        count = (PRIMARY_DATA_END + 1) - r00
+        count = data.count
         self._header_label.configure(
             text=(
-                f"Data registers: 0x{r00:03x}-0x{PRIMARY_DATA_END:03x} "
+                f"Data registers: 0x{data.start:03x}-0x{data.end:03x} "
                 f"({count} registers, R00-R{count - 1:02d})"
             )
         )
@@ -220,7 +217,7 @@ class DataRegistersTab(ctk.CTkFrame):
         # shade regardless of whether `split` happens to be odd or even.
         row_pos = {id(self._tree_left): 0, id(self._tree_right): 0}
 
-        for i, addr in enumerate(range(r00, PRIMARY_DATA_END + 1)):
+        for i, addr in enumerate(data):
             tree = self._tree_left if i < split else self._tree_right
             pos = row_pos[id(tree)]
             row_pos[id(tree)] = pos + 1
@@ -240,18 +237,15 @@ class DataRegistersTab(ctk.CTkFrame):
 
     def _current_range(self):
         """Returns (r00, count) for the currently-displayed data
-        registers, or None if there's no memory loaded / no sane R00 --
-        the same check render() uses, shared here so Export/Import don't
-        each re-derive it."""
+        registers, or None if there's no memory loaded and no data
+        register partition -- the same DataMemory region render() uses,
+        shared here so Export/Import don't each re-derive it."""
         if self._memory is None:
             return None
-        try:
-            r00 = self._memory.R00()
-        except Exception:
+        data = self._memory.data_memory
+        if data.is_empty:
             return None
-        if r00 < MIN_SANE_R00:
-            return None
-        return r00, (PRIMARY_DATA_END + 1) - r00
+        return data.start, data.count
 
     def _export_registers(self):
         """Prompts for which sub-range of the currently-displayed data

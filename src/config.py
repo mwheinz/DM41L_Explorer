@@ -67,8 +67,6 @@ class ProjectConfig:
                 f"Error: Could not save preferences to {self.PREFS_FILE}"
                 ) from e
 
-    # --- Properties for clean access in other modules ---
-
     @property
     def baudrate(self) -> int:
         return self._prefs["baudrate"]

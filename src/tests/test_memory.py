@@ -9,6 +9,8 @@ from memory import (
     Register,
     Memory,
     StatusRegisters,
+    KeyAssignments,
+    Alarms,
     format_data_line,
     parse_data_line,
     encode_trigraphs,
@@ -1055,8 +1057,8 @@ def test_r00_and_dotend_match_known_sample_dumps():
     }
     for filename, (expected_r00, expected_dotend) in cases.items():
         memory = Memory.from_file(DATA_DIR / filename)
-        assert memory.R00() == expected_r00, filename
-        assert memory.DotEnd() == expected_dotend, filename
+        assert memory.status_registers.R00() == expected_r00, filename
+        assert memory.status_registers.DotEnd() == expected_dotend, filename
 
 
 def test_cold_start_signature_is_0x169_in_every_sample():
@@ -1067,8 +1069,8 @@ def test_cold_start_signature_is_0x169_in_every_sample():
     math R00()/DotEnd() use."""
     for path in DATA_DIR.glob("*.dm41"):
         memory = Memory.from_file(path)
-        nibbles = memory._reg_c_nibbles()
-        cold_start = memory._nibbles_to_int(nibbles[5:8])
+        nibbles = memory.status_registers._reg_c_nibbles()
+        cold_start = memory.status_registers._nibbles_to_int(nibbles[5:8])
         assert cold_start == 0x169, path.name
 
 
@@ -1078,7 +1080,7 @@ def test_key_assignments_end_detects_f0_marked_registers():
     "Synthetic Programming on the HP-41C" (Section 2E) documents. Register
     0xcb (203) is free/zeroed, so the scan should stop there."""
     memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
-    assert memory.key_assignments_end() == 0xCB
+    assert memory.key_assignments.end_exclusive == 0xCB
 
 
 def test_key_assignments_end_is_start_when_no_assignments():
@@ -1112,45 +1114,45 @@ def test_key_assignments_end_is_start_when_no_assignments():
         if path.name in excluded:
             continue
         memory = Memory.from_file(path)
-        assert memory.key_assignments_end() == 0xC0, path.name
+        assert memory.key_assignments.end_exclusive == 0xC0, path.name
 
 
 def test_key_assignments_end_on_fresh_memory():
-    assert Memory().key_assignments_end() == 0xC0
+    assert Memory().key_assignments.end_exclusive == 0xC0
 
 
 def test_set_r00_rewrites_only_the_r00_field():
     memory = Memory.from_file(DATA_DIR / "empty.dm41")
-    sigma_before = memory.SigmaReg()
-    dotend_before = memory.DotEnd()
+    sigma_before = memory.status_registers.SigmaReg()
+    dotend_before = memory.status_registers.DotEnd()
 
-    memory.set_R00(0x150)
+    memory.status_registers.set_R00(0x150)
 
-    assert memory.R00() == 0x150
-    assert memory.SigmaReg() == sigma_before
-    assert memory.DotEnd() == dotend_before
+    assert memory.status_registers.R00() == 0x150
+    assert memory.status_registers.SigmaReg() == sigma_before
+    assert memory.status_registers.DotEnd() == dotend_before
 
 
 def test_set_r00_rejects_out_of_range_values():
     memory = Memory()
     with pytest.raises(ValueError):
-        memory.set_R00(-1)
+        memory.status_registers.set_R00(-1)
     with pytest.raises(ValueError):
-        memory.set_R00(0x1000)
+        memory.status_registers.set_R00(0x1000)
 
 
 def test_flags_get_set_bit_mapping():
     """Flag N is bit N of the 56-bit register, MSB first: flag 0 is the
     top bit of byte 0, flag 55 is the bottom bit of byte 6."""
     memory = Memory()
-    memory.set_register(Memory.REG_D_ADDR, Register.from_hex("80000000000001"))
+    memory.set_register(StatusRegisters.REG_D_ADDR, Register.from_hex("80000000000001"))
 
-    assert memory.get_flag(0) is True
-    assert memory.get_flag(55) is True
+    assert memory.status_registers.get_flag(0) is True
+    assert memory.status_registers.get_flag(55) is True
     for n in range(1, 55):
-        assert memory.get_flag(n) is False, n
+        assert memory.status_registers.get_flag(n) is False, n
 
-    all_flags = memory.get_all_flags()
+    all_flags = memory.status_registers.get_all_flags()
     assert len(all_flags) == 56
     assert all_flags[0] is True
     assert all_flags[55] is True
@@ -1163,32 +1165,32 @@ def test_flags_set_flag_roundtrip():
     # flag register so this test is about set_flag()/get_flag() mechanics,
     # not whatever flags happen to be on by default.
     memory = Memory()
-    memory.set_register(Memory.REG_D_ADDR, Register(size=7))
+    memory.set_register(StatusRegisters.REG_D_ADDR, Register(size=7))
 
-    memory.set_flag(11, True)  # "auto execute" per docs/flags.md
-    memory.set_flag(48, True)  # "ALPHA"
-    assert memory.get_flag(11) is True
-    assert memory.get_flag(48) is True
-    assert memory.get_all_flags().count(True) == 2
+    memory.status_registers.set_flag(11, True)  # "auto execute" per docs/flags.md
+    memory.status_registers.set_flag(48, True)  # "ALPHA"
+    assert memory.status_registers.get_flag(11) is True
+    assert memory.status_registers.get_flag(48) is True
+    assert memory.status_registers.get_all_flags().count(True) == 2
 
-    memory.set_flag(11, False)
-    assert memory.get_flag(11) is False
-    assert memory.get_flag(48) is True
+    memory.status_registers.set_flag(11, False)
+    assert memory.status_registers.get_flag(11) is False
+    assert memory.status_registers.get_flag(48) is True
 
 
 def test_flags_reject_out_of_range_numbers():
     memory = Memory()
     with pytest.raises(ValueError):
-        memory.get_flag(56)
+        memory.status_registers.get_flag(56)
     with pytest.raises(ValueError):
-        memory.set_flag(-1, True)
+        memory.status_registers.set_flag(-1, True)
 
 
 def test_status_registers_flags_agrees_with_memory_get_flag(status_memory):
     """status_memory's fixture fills register d (0x0e) with 0xFF bytes --
     every flag should read True through both the low-level Memory API and
     the StatusRegisters.Flags() register accessor."""
-    assert status_memory.get_all_flags() == [True] * 56
+    assert status_memory.status_registers.get_all_flags() == [True] * 56
     sr = StatusRegisters(status_memory)
     assert sr.Flags() == status_memory.get_register(14)
 
@@ -1344,14 +1346,14 @@ def test_xm_remove_file_then_add_new_file_still_works():
 def test_list_global_chain_empty_memory_returns_nothing():
     for filename in ("empty.dm41", "empty-128.dm41", "helloworld.dm41"):
         memory = Memory.from_file(DATA_DIR / filename)
-        assert memory.list_global_chain() == [], filename
+        assert memory.programs.list_global_chain() == [], filename
 
 
 def test_list_global_chain_fresh_memory_returns_nothing():
     """A brand new, never-loaded Memory() has R00 decoded as 0 -- not a
     real partition -- so list_global_chain() should bail out to []
     rather than trying to walk a nonsensical chain."""
-    assert Memory().list_global_chain() == []
+    assert Memory().programs.list_global_chain() == []
 
 
 def test_list_global_chain_simple_finds_apptest_lbl_its_end_and_the_global_end():
@@ -1361,7 +1363,7 @@ def test_list_global_chain_simple_finds_apptest_lbl_its_end_and_the_global_end()
     third, distinct chain link. Oldest (nearest R00, i.e. created first)
     is listed first, matching CAT 1's display order."""
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
-    chain = memory.list_global_chain()
+    chain = memory.programs.list_global_chain()
 
     assert len(chain) == 3
 
@@ -1397,7 +1399,7 @@ def test_list_global_chain_6x_finds_xmbcd_xmalpha_purxm_their_ends_and_the_globa
     but the LBL/END pairing is NOT guaranteed in general (see module-level
     note above), just what this specific fixture happens to contain."""
     memory = Memory.from_file(DATA_DIR / "6x-xm.dm41")
-    chain = memory.list_global_chain()
+    chain = memory.programs.list_global_chain()
 
     names_in_order = [p.name for p in chain]
     assert names_in_order == ["XMBCD", None, "XMALPHA", None, "PURXM", None, None]
@@ -1427,7 +1429,7 @@ def test_list_global_chain_6x_finds_xmbcd_xmalpha_purxm_their_ends_and_the_globa
 
 def test_list_global_chain_address_label_format():
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
-    assert memory.list_global_chain()[0].address_label == "0x19b:0"
+    assert memory.programs.list_global_chain()[0].address_label == "0x19b:0"
 
 
 def test_list_global_chain_terminates_on_every_sample_dump():
@@ -1436,7 +1438,7 @@ def test_list_global_chain_terminates_on_every_sample_dump():
     programs."""
     for path in DATA_DIR.glob("*.dm41"):
         memory = Memory.from_file(path)
-        chain = memory.list_global_chain()
+        chain = memory.programs.list_global_chain()
         assert isinstance(chain, list)
         for p in chain:
             assert p.header_addr >= 0xC0
@@ -1460,11 +1462,11 @@ def test_list_global_chain_terminates_on_every_sample_dump():
 def test_list_programs_empty_memory_returns_nothing():
     for filename in ("empty.dm41", "empty-128.dm41", "helloworld.dm41"):
         memory = Memory.from_file(DATA_DIR / filename)
-        assert memory.list_programs() == [], filename
+        assert memory.programs.list_programs() == [], filename
 
 
 def test_list_programs_fresh_memory_returns_nothing():
-    assert Memory().list_programs() == []
+    assert Memory().programs.list_programs() == []
 
 
 def test_list_programs_simple_is_one_program_not_two():
@@ -1475,7 +1477,7 @@ def test_list_programs_simple_is_one_program_not_two():
     all-zero-gap check the unlabelled.dm41 fixture below exercises
     directly."""
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
-    programs = memory.list_programs()
+    programs = memory.programs.list_programs()
 
     assert len(programs) == 1
     assert programs[0].names_label == "APPTEST"
@@ -1493,7 +1495,7 @@ def test_list_programs_6x_finds_three_named_programs():
     permanent `.END.` is (like simple.dm41's) pure alignment padding, not
     a fourth program."""
     memory = Memory.from_file(DATA_DIR / "6x-xm.dm41")
-    programs = memory.list_programs()
+    programs = memory.programs.list_programs()
 
     assert [p.names_label for p in programs] == ["XMBCD", "XMALPHA", "PURXM"]
     assert [p.length for p in programs] == [61, 51, 20]
@@ -1510,7 +1512,7 @@ def test_list_programs_unlabelled_finds_two_unnamed_programs_matching_cat_1():
     the zero-padding in front of the permanent `.END.` marker) -- this is
     the fixture that caught that bug."""
     memory = Memory.from_file(DATA_DIR / "unlabelled.dm41")
-    programs = memory.list_programs()
+    programs = memory.programs.list_programs()
 
     assert len(programs) == 2
     assert [p.is_named for p in programs] == [False, False]
@@ -1527,7 +1529,7 @@ def test_list_programs_twolabels_is_one_program_with_two_labels():
     own real-hardware testing confirmed this is one program: it should be
     counted as such, with both labels listed against the one program."""
     memory = Memory.from_file(DATA_DIR / "twolabels.dm41")
-    programs = memory.list_programs()
+    programs = memory.programs.list_programs()
 
     assert len(programs) == 1
     program = programs[0]
@@ -1541,7 +1543,7 @@ def test_list_programs_twolabels_is_one_program_with_two_labels():
 
 def test_list_programs_address_label_format():
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
-    assert memory.list_programs()[0].address_label == "0x19b:0"
+    assert memory.programs.list_programs()[0].address_label == "0x19b:0"
 
 
 def test_list_programs_terminates_on_every_sample_dump():
@@ -1550,7 +1552,7 @@ def test_list_programs_terminates_on_every_sample_dump():
     and every program's length should be positive."""
     for path in DATA_DIR.glob("*.dm41"):
         memory = Memory.from_file(path)
-        programs = memory.list_programs()
+        programs = memory.programs.list_programs()
         assert isinstance(programs, list)
         for p in programs:
             assert p.start_addr >= 0xC0
@@ -1583,7 +1585,7 @@ def test_key_byte_for_matches_known_assignments():
         (64, True, 0x3E), (63, True, 0x2E),
     ]
     for key_number, shifted, expected_byte in cases:
-        assert Memory.key_byte_for(key_number, shifted) == expected_byte, (
+        assert KeyAssignments.key_byte_for(key_number, shifted) == expected_byte, (
             key_number, shifted
         )
 
@@ -1608,7 +1610,7 @@ def test_key_byte_for_row4_uses_physical_column_not_key_number():
         (44, False, 0x44), (44, True, 0x4C),
     ]
     for key_number, shifted, expected_byte in cases:
-        assert Memory.key_byte_for(key_number, shifted) == expected_byte, (
+        assert KeyAssignments.key_byte_for(key_number, shifted) == expected_byte, (
             key_number, shifted
         )
 
@@ -1632,7 +1634,7 @@ def test_key_42_row4_matches_real_device_capture():
     column_not_key_number is the test that still directly proves the
     formula rejects the old column-2 mapping."""
     memory = Memory.from_file(DATA_DIR / "xrom-keyassignments.dm41")
-    all_entries = memory.list_key_assignments()
+    all_entries = memory.key_assignments.list_assignments()
     assignments = {
         (a["key_number"], a["shifted"]): a
         for a in all_entries
@@ -1682,7 +1684,7 @@ def test_keyflags_bit_row4_matches_wickes_figure_4_2():
     key (the "imaginary 42nd key under ENTER", docs sec 4.5)."""
     cases = [(41, 32), (42, 16), (43, 8), (44, 0)]
     for key_number, expected_bit in cases:
-        assert Memory._keyflags_bit(key_number) == expected_bit, key_number
+        assert KeyAssignments._keyflags_bit(key_number) == expected_bit, key_number
 
 
 def test_keyflags_bit_matches_all_three_real_fixtures():
@@ -1722,33 +1724,33 @@ def test_keyflags_bit_matches_all_three_real_fixtures():
     }
     for filename, expected in cases.items():
         memory = Memory.from_file(DATA_DIR / filename)
-        f_reg = memory.get_register(Memory.KEYFLAGS_UNSHIFTED_ADDR)
-        e_reg = memory.get_register(Memory.KEYFLAGS_SHIFTED_ADDR)
+        f_reg = memory.get_register(StatusRegisters.KEYFLAGS_UNSHIFTED_ADDR)
+        e_reg = memory.get_register(StatusRegisters.KEYFLAGS_SHIFTED_ADDR)
 
-        expected_f_bits = {Memory._keyflags_bit(k) for k in expected["unshifted"]}
-        expected_e_bits = {Memory._keyflags_bit(k) for k in expected["shifted"]}
+        expected_f_bits = {KeyAssignments._keyflags_bit(k) for k in expected["unshifted"]}
+        expected_e_bits = {KeyAssignments._keyflags_bit(k) for k in expected["shifted"]}
 
         assert bits_set(f_reg.get_bytes()) == expected_f_bits, filename
         assert bits_set(e_reg.get_bytes()) == expected_e_bits, filename
 
         for k in expected["unshifted"]:
-            assert memory.get_key_flag(k, False) is True, (filename, k)
+            assert memory.key_assignments.get_key_flag(k, False) is True, (filename, k)
         for k in expected["shifted"]:
-            assert memory.get_key_flag(k, True) is True, (filename, k)
+            assert memory.key_assignments.get_key_flag(k, True) is True, (filename, k)
 
 
 def test_list_key_assignments_decodes_keyassigns_dm41():
     """keyassigns.dm41's 22 real assignments, filler-first single-byte
     entries only (docs sec 4.2/4.8) -- newest-first order (sec 4.4)."""
     memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
-    assignments = memory.list_key_assignments()
+    assignments = memory.key_assignments.list_assignments()
     assert len(assignments) == 22
     for a in assignments:
         assert a["fn_byte2"] is None
         assert a["name"] in {"%", "%CH", "+", "-", "*", "/", "1/X", "10↑X",
                              "ABS", "ACOS", "BEEP", "TONE" }
         # Every decoded assignment's KEYFLAGS bit must also be set.
-        assert memory.get_key_flag(a["key_number"], a["shifted"]) is True
+        assert memory.key_assignments.get_key_flag(a["key_number"], a["shifted"]) is True
 
 
 def test_list_key_assignments_decodes_xrom_two_byte_entries():
@@ -1756,7 +1758,7 @@ def test_list_key_assignments_decodes_xrom_two_byte_entries():
     XROM entries (docs sec 4.8) -- confirms fn_byte2 is populated (not
     None) and the function names resolve via memory/functions.py."""
     memory = Memory.from_file(DATA_DIR / "xrom-keyassignments.dm41")
-    assignments = memory.list_key_assignments()
+    assignments = memory.key_assignments.list_assignments()
     by_key = {a["key_number"]: a for a in assignments}
 
     assert by_key[41]["name"] == "ALENG"
@@ -1769,30 +1771,30 @@ def test_list_key_assignments_decodes_xrom_two_byte_entries():
 
 def test_set_key_assignment_single_byte_function():
     memory = Memory()
-    memory.set_key_assignment(11, False, 0x40)  # '+'
-    assert memory.get_key_flag(11, False) is True
-    assignments = memory.list_key_assignments()
+    memory.key_assignments.set_assignment(11, False, 0x40)  # '+'
+    assert memory.key_assignments.get_key_flag(11, False) is True
+    assignments = memory.key_assignments.list_assignments()
     assert len(assignments) == 1
     assert assignments[0] == {
         "key_number": 11, "shifted": False,
         "fn_byte1": 0x40, "fn_byte2": None, "name": "+",
-        "raw_key_byte": Memory.key_byte_for(11, False),
+        "raw_key_byte": KeyAssignments.key_byte_for(11, False),
     }
     # Filler-first storage in the actual register (sec 4.2).
     reg = memory.get_register(0xC0)
     assert reg.get_bytes()[1] == 0x04
     assert reg.get_bytes()[2] == 0x40
-    assert reg.get_bytes()[3] == Memory.key_byte_for(11, False)
+    assert reg.get_bytes()[3] == KeyAssignments.key_byte_for(11, False)
 
 
 def test_set_key_assignment_xrom_function():
     memory = Memory()
-    memory.set_key_assignment(13, False, (0xA6, 0x81))  # ADATE
-    assert memory.get_key_flag(13, False) is True
-    assignments = memory.list_key_assignments()
+    memory.key_assignments.set_assignment(13, False, (0xA6, 0x81))  # ADATE
+    assert memory.key_assignments.get_key_flag(13, False) is True
+    assignments = memory.key_assignments.list_assignments()
     assert assignments[0]["name"] == "ADATE"
     reg = memory.get_register(0xC0)
-    assert reg.get_bytes()[1:4] == bytes([0xA6, 0x81, Memory.key_byte_for(13, False)])
+    assert reg.get_bytes()[1:4] == bytes([0xA6, 0x81, KeyAssignments.key_byte_for(13, False)])
 
 
 def test_set_key_assignment_overwrites_existing_entry_for_same_key():
@@ -1801,11 +1803,11 @@ def test_set_key_assignment_overwrites_existing_entry_for_same_key():
     at the front (register 0xc0), same as a brand-new assignment would
     (sec 4.4's LIFO order)."""
     memory = Memory()
-    memory.set_key_assignment(11, False, 0x40)  # '+'
-    memory.set_key_assignment(12, True, 0x41)  # '-'
-    memory.set_key_assignment(11, False, 0x42)  # '*' replaces '+'
+    memory.key_assignments.set_assignment(11, False, 0x40)  # '+'
+    memory.key_assignments.set_assignment(12, True, 0x41)  # '-'
+    memory.key_assignments.set_assignment(11, False, 0x42)  # '*' replaces '+'
 
-    assignments = memory.list_key_assignments()
+    assignments = memory.key_assignments.list_assignments()
     assert len(assignments) == 2
     by_key = {(a["key_number"], a["shifted"]): a["name"] for a in assignments}
     assert by_key[(11, False)] == "*"
@@ -1817,42 +1819,42 @@ def test_set_key_assignment_overwrites_existing_entry_for_same_key():
 def test_set_key_assignment_rejects_out_of_range_bytes():
     memory = Memory()
     with pytest.raises(ValueError):
-        memory.set_key_assignment(11, False, 0x100)
+        memory.key_assignments.set_assignment(11, False, 0x100)
     with pytest.raises(ValueError):
-        memory.set_key_assignment(11, False, (0x100, 0x00))
+        memory.key_assignments.set_assignment(11, False, (0x100, 0x00))
 
 
 def test_delete_key_assignment_removes_entry_and_clears_flag():
     memory = Memory()
-    memory.set_key_assignment(11, False, 0x40)
-    memory.set_key_assignment(12, True, 0x41)
+    memory.key_assignments.set_assignment(11, False, 0x40)
+    memory.key_assignments.set_assignment(12, True, 0x41)
 
-    memory.delete_key_assignment(11, False)
+    memory.key_assignments.delete_assignment(11, False)
 
-    assert memory.get_key_flag(11, False) is False
-    assignments = memory.list_key_assignments()
+    assert memory.key_assignments.get_key_flag(11, False) is False
+    assignments = memory.key_assignments.list_assignments()
     assert len(assignments) == 1
     assert assignments[0]["key_number"] == 12
 
 
 def test_delete_key_assignment_shrinks_buffer_back_to_empty():
     memory = Memory()
-    memory.set_key_assignment(11, False, 0x40)
-    assert memory.key_assignments_end() == 0xC1
+    memory.key_assignments.set_assignment(11, False, 0x40)
+    assert memory.key_assignments.end_exclusive == 0xC1
 
-    memory.delete_key_assignment(11, False)
+    memory.key_assignments.delete_assignment(11, False)
 
-    assert memory.list_key_assignments() == []
-    assert memory.key_assignments_end() == 0xC0
+    assert memory.key_assignments.list_assignments() == []
+    assert memory.key_assignments.end_exclusive == 0xC0
     # The now-stale register must be cleared, not left with 0xf0 marker.
     assert memory.get_register(0xC0).get_hex() == "00000000000000"
 
 
 def test_delete_key_assignment_on_unassigned_key_is_a_noop():
     memory = Memory()
-    memory.delete_key_assignment(11, False)  # never assigned
-    assert memory.list_key_assignments() == []
-    assert memory.get_key_flag(11, False) is False
+    memory.key_assignments.delete_assignment(11, False)  # never assigned
+    assert memory.key_assignments.list_assignments() == []
+    assert memory.key_assignments.get_key_flag(11, False) is False
 
 
 # ---- Alarms region: bounds (alarms_end()) and relocation on Key
@@ -1865,11 +1867,11 @@ def test_alarms_end_reports_buffer_bounds_from_real_fixture():
     total registers (header + entries + delimiter), so the buffer runs
     through 0xce inclusive -- alarms_end() should report 0xcf."""
     memory = Memory.from_file(DATA_DIR / "4alarmtest.dm41")
-    assert memory.key_assignments_end() == 0xC2
+    assert memory.key_assignments.end_exclusive == 0xC2
     header = memory.get_register(0xC2).get_bytes()
-    assert header[0] == Memory.ALARMS_HEADER_MARKER
+    assert header[0] == Alarms.HEADER_MARKER
     assert header[1] == 0x0D
-    assert memory.alarms_end() == 0xCF
+    assert memory.alarms.end_exclusive == 0xCF
 
 
 def test_alarms_end_equals_key_assignments_end_when_no_alarms():
@@ -1878,11 +1880,11 @@ def test_alarms_end_equals_key_assignments_end_when_no_alarms():
     doesn't start with the 0xAA header marker, so alarms_end() should
     report an empty Alarms region (same value as key_assignments_end())."""
     memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
-    assert memory.alarms_end() == memory.key_assignments_end()
+    assert memory.alarms.end_exclusive == memory.key_assignments.end_exclusive
 
 
 def test_alarms_end_on_fresh_memory():
-    assert Memory().alarms_end() == Memory().key_assignments_end() == 0xC0
+    assert Memory().alarms.end_exclusive == Memory().key_assignments.end_exclusive == 0xC0
 
 
 def test_relocate_alarms_moves_buffer_on_key_assignment_growth_and_shrinkage():
@@ -1893,9 +1895,9 @@ def test_relocate_alarms_moves_buffer_on_key_assignment_growth_and_shrinkage():
     -- never getting overwritten and never leaving a gap between the two
     regions either way."""
     memory = Memory()
-    memory.set_key_assignment(11, False, 0x40)
-    memory.set_key_assignment(12, True, 0x41)
-    assert memory.key_assignments_end() == 0xC1  # 2 entries still fit in 1 register
+    memory.key_assignments.set_assignment(11, False, 0x40)
+    memory.key_assignments.set_assignment(12, True, 0x41)
+    assert memory.key_assignments.end_exclusive == 0xC1  # 2 entries still fit in 1 register
 
     # Hand-build a minimal 3-register Alarms buffer (header + 1 entry +
     # delimiter) immediately above it, at 0xc1-0xc3.
@@ -1903,17 +1905,17 @@ def test_relocate_alarms_moves_buffer_on_key_assignment_growth_and_shrinkage():
     entry_bytes = "11223344556677"
     memory.set_register(0xC2, Register.from_hex(entry_bytes))
     memory.set_register(0xC3, Register.from_hex("f0000000000000"))
-    assert memory.alarms_end() == 0xC4
+    assert memory.alarms.end_exclusive == 0xC4
 
     # A third assignment needs a second Key Assignment register --
     # Key Assignments grows from 0xc1 to 0xc2, so the Alarms buffer must
     # move up from 0xc1-0xc3 to 0xc2-0xc4.
-    memory.set_key_assignment(13, False, 0x42)
-    assert memory.key_assignments_end() == 0xC2
-    assert memory.alarms_end() == 0xC5
+    memory.key_assignments.set_assignment(13, False, 0x42)
+    assert memory.key_assignments.end_exclusive == 0xC2
+    assert memory.alarms.end_exclusive == 0xC5
     assert memory.get_register(0xC1).get_bytes()[0] == 0xF0  # real KA data now
     moved_header = memory.get_register(0xC2).get_bytes()
-    assert moved_header[0] == Memory.ALARMS_HEADER_MARKER
+    assert moved_header[0] == Alarms.HEADER_MARKER
     assert moved_header[1] == 3
     assert memory.get_register(0xC3).get_hex() == Register.from_hex(entry_bytes).get_hex()
     assert memory.get_register(0xC4).get_bytes()[0] == 0xF0
@@ -1921,11 +1923,11 @@ def test_relocate_alarms_moves_buffer_on_key_assignment_growth_and_shrinkage():
     # Deleting that third assignment shrinks Key Assignments back to 1
     # register -- the Alarms buffer must move back down to 0xc1-0xc3,
     # with 0xc4 (its old delimiter slot) cleared, not left stale.
-    memory.delete_key_assignment(13, False)
-    assert memory.key_assignments_end() == 0xC1
-    assert memory.alarms_end() == 0xC4
+    memory.key_assignments.delete_assignment(13, False)
+    assert memory.key_assignments.end_exclusive == 0xC1
+    assert memory.alarms.end_exclusive == 0xC4
     restored_header = memory.get_register(0xC1).get_bytes()
-    assert restored_header[0] == Memory.ALARMS_HEADER_MARKER
+    assert restored_header[0] == Alarms.HEADER_MARKER
     assert restored_header[1] == 3
     assert memory.get_register(0xC2).get_hex() == Register.from_hex(entry_bytes).get_hex()
     assert memory.get_register(0xC3).get_bytes()[0] == 0xF0
@@ -1940,17 +1942,17 @@ def test_relocate_alarms_preserves_content_against_real_fixture():
     .dm41's existing assignments use key 13, so this adds a genuinely
     new one rather than replacing an existing entry."""
     memory = Memory.from_file(DATA_DIR / "4alarmtest.dm41")
-    old_ka_end = memory.key_assignments_end()
-    old_alarms_end = memory.alarms_end()
+    old_ka_end = memory.key_assignments.end_exclusive
+    old_alarms_end = memory.alarms.end_exclusive
     before = {
         addr: memory.get_register(addr).get_hex()
         for addr in range(old_ka_end, old_alarms_end)
     }
 
-    memory.set_key_assignment(13, False, 0x40)
+    memory.key_assignments.set_assignment(13, False, 0x40)
 
-    new_ka_end = memory.key_assignments_end()
-    new_alarms_end = memory.alarms_end()
+    new_ka_end = memory.key_assignments.end_exclusive
+    new_alarms_end = memory.alarms.end_exclusive
     delta = new_ka_end - old_ka_end
     assert delta > 0  # this fixture's 4 existing entries already fill both
     #                   of its 2 KA registers, so a 5th forces growth
@@ -1967,23 +1969,23 @@ def test_key_assignment_round_trip_through_from_string_to_string():
     identically via to_string()/from_string(), same as every other region
     of memory."""
     memory = Memory()
-    memory.set_key_assignment(11, False, 0x40)
-    memory.set_key_assignment(11, True, (0xA6, 0x81))
-    memory.set_key_assignment(84, False, 0x0F)  # ASN, low-code (sec 5 caveat)
+    memory.key_assignments.set_assignment(11, False, 0x40)
+    memory.key_assignments.set_assignment(11, True, (0xA6, 0x81))
+    memory.key_assignments.set_assignment(84, False, 0x0F)  # ASN, low-code (sec 5 caveat)
 
     reloaded = Memory.from_string(memory.to_string())
-    assert reloaded.list_key_assignments() == memory.list_key_assignments()
+    assert reloaded.key_assignments.list_assignments() == memory.key_assignments.list_assignments()
     for key_number, shifted in [(11, False), (11, True), (84, False)]:
-        assert reloaded.get_key_flag(key_number, shifted) == memory.get_key_flag(
+        assert reloaded.key_assignments.get_key_flag(key_number, shifted) == memory.key_assignments.get_key_flag(
             key_number, shifted
         )
 
 
 def test_key_number_for_byte_inverts_key_byte_for():
-    for key_number in Memory._VALID_KEY_NUMBERS:
+    for key_number in KeyAssignments._VALID_KEY_NUMBERS:
         for shifted in (False, True):
-            byte = Memory.key_byte_for(key_number, shifted)
-            assert Memory._key_number_for_byte(byte) == (key_number, shifted)
+            byte = KeyAssignments.key_byte_for(key_number, shifted)
+            assert KeyAssignments.key_number_for_byte(byte) == (key_number, shifted)
 
 
 def test_key_row_col_rejects_non_assignable_positions():
@@ -1993,9 +1995,9 @@ def test_key_row_col_rejects_non_assignable_positions():
     computed from an out-of-range (M, N)."""
     for bad_key in (31, 85, 45, 90, 0, 100):
         with pytest.raises(ValueError):
-            Memory.key_byte_for(bad_key, False)
+            KeyAssignments.key_byte_for(bad_key, False)
         with pytest.raises(ValueError):
-            Memory._keyflags_bit(bad_key)
+            KeyAssignments._keyflags_bit(bad_key)
 
 
 def test_get_key_assignment_single_key_lookup():
@@ -2005,17 +2007,17 @@ def test_get_key_assignment_single_key_lookup():
     (see test_list_key_assignments_decodes_keyassigns_dm41's 22-entry
     fixture); key 42 has no assignment there at all."""
     memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
-    assert memory.get_key_assignment(11, False) == {
+    assert memory.key_assignments.get_assignment(11, False) == {
         "key_number": 11, "shifted": False,
         "fn_byte1": 0x4C, "fn_byte2": None, "name": "%",
-        "raw_key_byte": Memory.key_byte_for(11, False),
+        "raw_key_byte": KeyAssignments.key_byte_for(11, False),
     }
-    assert memory.get_key_assignment(11, True) == {
+    assert memory.key_assignments.get_assignment(11, True) == {
         "key_number": 11, "shifted": True,
         "fn_byte1": 0x4C, "fn_byte2": None, "name": "%",
-        "raw_key_byte": Memory.key_byte_for(11, True),
+        "raw_key_byte": KeyAssignments.key_byte_for(11, True),
     }
-    assert memory.get_key_assignment(42, False) is None
+    assert memory.key_assignments.get_assignment(42, False) is None
 
 
 def test_list_key_assignments_matches_all_real_fixtures_key_flags():
@@ -2027,12 +2029,12 @@ def test_list_key_assignments_matches_all_real_fixtures_key_flags():
     Registers -- excluded here, see sec 4.6.)"""
     for filename in ("keyassigns.dm41", "xrom-keyassignments.dm41"):
         memory = Memory.from_file(DATA_DIR / filename)
-        assignments = memory.list_key_assignments()
+        assignments = memory.key_assignments.list_assignments()
         flagged = {
             (k, s)
-            for k in Memory._VALID_KEY_NUMBERS
+            for k in KeyAssignments._VALID_KEY_NUMBERS
             for s in (False, True)
-            if memory.get_key_flag(k, s)
+            if memory.key_assignments.get_key_flag(k, s)
         }
         decoded = {(a["key_number"], a["shifted"]) for a in assignments}
         assert flagged == decoded, filename
@@ -2053,32 +2055,32 @@ def test_list_key_assignments_matches_all_real_fixtures_key_flags():
 
 def test_get_program_for_key_decodes_global_key_assignments_dm41():
     memory = Memory.from_file(DATA_DIR / "global-key-assignments.dm41")
-    assert memory.get_program_for_key(11, False).name == "AAA"
-    assert memory.get_program_for_key(12, False).name == "BBB"
-    assert memory.get_program_for_key(11, True) is None
-    assert memory.get_program_for_key(13, False) is None
+    assert memory.programs.get_program_for_key(11, False).name == "AAA"
+    assert memory.programs.get_program_for_key(12, False).name == "BBB"
+    assert memory.programs.get_program_for_key(11, True) is None
+    assert memory.programs.get_program_for_key(13, False) is None
 
 
 def test_get_program_for_key_decodes_manyfiles_dm41_mixed_dump():
     memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
-    assert memory.get_program_for_key(11, False).name == "XMBCD"
-    assert memory.get_program_for_key(12, False).name == "XMALPHA"
-    assert memory.get_program_for_key(13, False).name == "PURXM"
+    assert memory.programs.get_program_for_key(11, False).name == "XMBCD"
+    assert memory.programs.get_program_for_key(12, False).name == "XMALPHA"
+    assert memory.programs.get_program_for_key(13, False).name == "PURXM"
     # 14/15 are built-in/peripheral assignments (sec 4.2), not programs.
-    assert memory.get_program_for_key(14, False) is None
-    assert memory.get_program_for_key(15, False) is None
+    assert memory.programs.get_program_for_key(14, False) is None
+    assert memory.programs.get_program_for_key(15, False) is None
 
 
 def test_set_program_key_assignment_assigns_unassigned_program():
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
-    assert memory.list_global_chain()[0].key_assignment == 0x00  # APPTEST
+    assert memory.programs.list_global_chain()[0].key_assignment == 0x00  # APPTEST
 
-    memory.set_program_key_assignment("APPTEST", 21, False)
+    memory.programs.set_program_key_assignment("APPTEST", 21, False)
 
-    assert memory.get_program_for_key(21, False).name == "APPTEST"
-    assert memory.get_key_flag(21, False) is True
-    apptest = memory._find_program_by_name("APPTEST")
-    assert apptest.key_assignment == Memory.key_byte_for(21, False)
+    assert memory.programs.get_program_for_key(21, False).name == "APPTEST"
+    assert memory.key_assignments.get_key_flag(21, False) is True
+    apptest = memory.programs.find_program_by_name("APPTEST")
+    assert apptest.key_assignment == KeyAssignments.key_byte_for(21, False)
 
 
 def test_set_program_key_assignment_moves_existing_assignment():
@@ -2086,12 +2088,12 @@ def test_set_program_key_assignment_moves_existing_assignment():
     new key moves it, clearing the old key's KEYFLAGS bit."""
     memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
 
-    memory.set_program_key_assignment("XMBCD", 25, True)
+    memory.programs.set_program_key_assignment("XMBCD", 25, True)
 
-    assert memory.get_program_for_key(25, True).name == "XMBCD"
-    assert memory.get_key_flag(25, True) is True
-    assert memory.get_program_for_key(11, False) is None
-    assert memory.get_key_flag(11, False) is False
+    assert memory.programs.get_program_for_key(25, True).name == "XMBCD"
+    assert memory.key_assignments.get_key_flag(25, True) is True
+    assert memory.programs.get_program_for_key(11, False) is None
+    assert memory.key_assignments.get_key_flag(11, False) is False
 
 
 def test_set_program_key_assignment_clears_conflicting_ka_register_entry():
@@ -2099,13 +2101,13 @@ def test_set_program_key_assignment_clears_conflicting_ka_register_entry():
     peripheral assignment (sec 4.2) clears that entry -- the real lookup
     order (sec 4.7) would otherwise let it silently shadow the program."""
     memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
-    assert memory.get_key_assignment(14, False)["name"] == "EMROOM"
+    assert memory.key_assignments.get_assignment(14, False)["name"] == "EMROOM"
 
-    memory.set_program_key_assignment("PURXM", 14, False)
+    memory.programs.set_program_key_assignment("PURXM", 14, False)
 
-    assert memory.get_key_assignment(14, False) is None
-    assert memory.get_program_for_key(14, False).name == "PURXM"
-    assert memory.get_key_flag(14, False) is True
+    assert memory.key_assignments.get_assignment(14, False) is None
+    assert memory.programs.get_program_for_key(14, False).name == "PURXM"
+    assert memory.key_assignments.get_key_flag(14, False) is True
 
 
 def test_set_program_key_assignment_clears_other_programs_own_conflict():
@@ -2113,26 +2115,26 @@ def test_set_program_key_assignment_clears_other_programs_own_conflict():
     key already held by a different program clears the other one."""
     memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
 
-    memory.set_program_key_assignment("XMALPHA", 11, False)  # was XMBCD's key
+    memory.programs.set_program_key_assignment("XMALPHA", 11, False)  # was XMBCD's key
 
-    assert memory.get_program_for_key(11, False).name == "XMALPHA"
-    xmbcd = memory._find_program_by_name("XMBCD")
+    assert memory.programs.get_program_for_key(11, False).name == "XMALPHA"
+    xmbcd = memory.programs.find_program_by_name("XMBCD")
     assert xmbcd.key_assignment == 0x00
 
 
 def test_set_program_key_assignment_reassigning_to_same_key_is_a_noop_move():
     memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
 
-    memory.set_program_key_assignment("XMBCD", 11, False)
+    memory.programs.set_program_key_assignment("XMBCD", 11, False)
 
-    assert memory.get_program_for_key(11, False).name == "XMBCD"
-    assert memory.get_key_flag(11, False) is True
+    assert memory.programs.get_program_for_key(11, False).name == "XMBCD"
+    assert memory.key_assignments.get_key_flag(11, False) is True
 
 
 def test_set_program_key_assignment_unknown_name_raises():
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
     with pytest.raises(ValueError):
-        memory.set_program_key_assignment("NOPE", 21, False)
+        memory.programs.set_program_key_assignment("NOPE", 21, False)
 
 
 def test_set_key_assignment_clears_conflicting_program_assignment():
@@ -2140,56 +2142,56 @@ def test_set_key_assignment_clears_conflicting_program_assignment():
     built-in function onto a key that currently holds a global-label
     assignment clears that program's assignment."""
     memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
-    assert memory.get_program_for_key(11, False).name == "XMBCD"
+    assert memory.programs.get_program_for_key(11, False).name == "XMBCD"
 
-    memory.set_key_assignment(11, False, 0x40)  # '+'
+    memory.key_assignments.set_assignment(11, False, 0x40)  # '+'
 
-    assert memory.get_key_assignment(11, False)["name"] == "+"
-    assert memory.get_program_for_key(11, False) is None
-    xmbcd = memory._find_program_by_name("XMBCD")
+    assert memory.key_assignments.get_assignment(11, False)["name"] == "+"
+    assert memory.programs.get_program_for_key(11, False) is None
+    xmbcd = memory.programs.find_program_by_name("XMBCD")
     assert xmbcd.key_assignment == 0x00
     # The key's flag stays set -- now backed by the function assignment.
-    assert memory.get_key_flag(11, False) is True
+    assert memory.key_assignments.get_key_flag(11, False) is True
 
 
 def test_clear_program_key_assignment_removes_assignment_and_flag():
     memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
 
-    memory.clear_program_key_assignment("XMBCD")
+    memory.programs.clear_program_key_assignment("XMBCD")
 
-    assert memory.get_program_for_key(11, False) is None
-    assert memory.get_key_flag(11, False) is False
-    xmbcd = memory._find_program_by_name("XMBCD")
+    assert memory.programs.get_program_for_key(11, False) is None
+    assert memory.key_assignments.get_key_flag(11, False) is False
+    xmbcd = memory.programs.find_program_by_name("XMBCD")
     assert xmbcd.key_assignment == 0x00
     # Unrelated programs/assignments untouched.
-    assert memory.get_program_for_key(12, False).name == "XMALPHA"
-    assert memory.get_key_assignment(14, False)["name"] == "EMROOM"
+    assert memory.programs.get_program_for_key(12, False).name == "XMALPHA"
+    assert memory.key_assignments.get_assignment(14, False)["name"] == "EMROOM"
 
 
 def test_clear_program_key_assignment_on_unassigned_program_is_a_noop():
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
-    memory.clear_program_key_assignment("APPTEST")  # never assigned
-    assert memory._find_program_by_name("APPTEST").key_assignment == 0x00
+    memory.programs.clear_program_key_assignment("APPTEST")  # never assigned
+    assert memory.programs.find_program_by_name("APPTEST").key_assignment == 0x00
 
 
 def test_clear_program_key_assignment_unknown_name_raises():
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
     with pytest.raises(ValueError):
-        memory.clear_program_key_assignment("NOPE")
+        memory.programs.clear_program_key_assignment("NOPE")
 
 
 def test_program_key_assignment_round_trip_through_from_string_to_string():
     memory = Memory.from_file(DATA_DIR / "manyfiles.dm41")
-    memory.set_program_key_assignment("PURXM", 22, True)
+    memory.programs.set_program_key_assignment("PURXM", 22, True)
 
     reloaded = Memory.from_string(memory.to_string())
 
-    assert reloaded.get_program_for_key(22, True).name == "PURXM"
-    assert reloaded.get_key_flag(22, True) == memory.get_key_flag(22, True)
+    assert reloaded.programs.get_program_for_key(22, True).name == "PURXM"
+    assert reloaded.key_assignments.get_key_flag(22, True) == memory.key_assignments.get_key_flag(22, True)
     reloaded_names = {
-        (p.name, p.key_assignment) for p in reloaded.list_global_chain() if p.is_named
+        (p.name, p.key_assignment) for p in reloaded.programs.list_global_chain() if p.is_named
     }
     memory_names = {
-        (p.name, p.key_assignment) for p in memory.list_global_chain() if p.is_named
+        (p.name, p.key_assignment) for p in memory.programs.list_global_chain() if p.is_named
     }
     assert reloaded_names == memory_names

@@ -49,7 +49,7 @@ class FlagsTab(ctk.CTkFrame):
             return
 
         try:
-            current = memory.get_all_flags()
+            current = memory.status_registers.get_all_flags()
         except Exception as e:
             logger.warning("Could not decode flags: %s", e)
             self._header_label.configure(text=f"Could not decode flags: {e}")
@@ -86,6 +86,6 @@ class FlagsTab(ctk.CTkFrame):
         if self._suspend_flag_callbacks or self._memory is None:
             return
         value = self._flag_vars[n].get()
-        self._memory.set_flag(n, value)
+        self._memory.status_registers.set_flag(n, value)
         logger.info("Flag %02d set to %s", n, value)
         self._notify_change()

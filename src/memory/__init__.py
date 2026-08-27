@@ -20,9 +20,29 @@ for readability. The current components are:
   trigraphs.py     encode_trigraphs/decode_trigraphs (docs/trigraphs.md --
                     the HP41/DM41L FOCAL character set's non-ASCII symbols)
   constants.py     address-range and sentinel-register constants
-  regions.py       MemoryRegion/StatusRegisters (fixed-range regions with
-                    real behavior) and RegionSpan (plain descriptor for
-                    Memory.regions()'s dynamic, freshly-computed output)
+  regions.py       MemoryRegion (the base class -- a live view of one
+                    named span, whose boundaries are recomputed on every
+                    access so it can never go stale), RegionSpan (an
+                    immutable boundary snapshot, what Memory.regions()
+                    returns), and the two derived-only regions VoidRegion
+                    and FreeSpace
+  status_registers.py
+                   StatusRegisters -- the 16 named CPU/system registers,
+                    the 56 status flags in register d, and the
+                    SIGMA-REG/R00/.END. pointers packed into register c
+  key_assignments.py
+                   KeyAssignments -- the Key Assignment Registers, the
+                    keyboard geometry behind key bytes and KEYFLAGS bits,
+                    and the assignment set/delete/list API
+  alarms.py        Alarms -- the alarms buffer's outer bounds and the
+                    block relocation a key-assignment edit forces on it
+  program_memory.py
+                   ProgramMemory -- user program storage: the global
+                    chain, list_programs(), program import/export/removal,
+                    the forward-scan rebuild PACK needs, and global-label
+                    key assignments
+  data_memory.py   DataMemory -- the primary data registers (R00 upward),
+                    addressed by register number as well as by address
   xm_file.py       XMFile, ExtendedMemory (extended-memory file storage)
   program_info.py  ProgramInfo (raw program-memory "global chain" entries)
                     and ProgramLabel/Program (the grouped, END-delimited
@@ -46,11 +66,13 @@ for readability. The current components are:
                     what Memory.import_program() (memory.py) uses to
                     inspect/patch a standalone program's bytes before
                     splicing them into program memory
-  memory.py        Memory (the top-level dump: parsing, raw register
-                    access, and the R00/.END./flags/program-chain
-                    accessors built on top of it, including
-                    get_program_bytes()/import_program() for program-file
-                    export/import)
+  memory.py        Memory (the top-level dump: parsing, serialization,
+                    raw register access, whole-dump pack(), and the
+                    region lookup -- Memory.region(key) plus the named
+                    properties .status_registers/.key_assignments/
+                    .alarms/.free_space/.programs/.data_memory/
+                    .extended_memory -- through which all region-specific
+                    behavior is reached)
 '''
 
 from .registers import (
@@ -74,7 +96,12 @@ from .constants import (
     XM_REGIONS,
     MIN_SANE_R00,
 )
-from .regions import MemoryRegion, StatusRegisters, RegionSpan
+from .regions import MemoryRegion, RegionSpan, VoidRegion, FreeSpace
+from .status_registers import StatusRegisters
+from .key_assignments import KeyAssignments
+from .alarms import Alarms
+from .program_memory import ProgramMemory
+from .data_memory import DataMemory
 from .xm_file import XMFile, ExtendedMemory, NAME_MIN_CHAR, NAME_MAX_CHAR
 from .program_info import ProgramInfo, ProgramLabel, Program
 from .opcode_scan import find_program_end, scan_global_markers_forward
@@ -114,8 +141,14 @@ __all__ = [
     "XM_REGIONS",
     "MIN_SANE_R00",
     "MemoryRegion",
-    "StatusRegisters",
     "RegionSpan",
+    "VoidRegion",
+    "FreeSpace",
+    "StatusRegisters",
+    "KeyAssignments",
+    "Alarms",
+    "ProgramMemory",
+    "DataMemory",
     "XMFile",
     "ExtendedMemory",
     "NAME_MIN_CHAR",

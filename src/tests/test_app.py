@@ -143,7 +143,7 @@ def test_save_to_already_loaded_file_declined_does_not_write(app, tmp_path):
     original_bytes = path.read_bytes()
 
     app._load_dump_into_buffer(str(path))
-    app.memory.set_flag(0, True)  # make an in-memory change to try to save
+    app.memory.status_registers.set_flag(0, True)  # make an in-memory change to try to save
 
     with mock.patch.object(app, "save_dump_as") as save_as, mock.patch(
         "gui.app.messagebox.askyesno", return_value=False

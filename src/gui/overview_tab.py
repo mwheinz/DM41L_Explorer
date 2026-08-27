@@ -9,8 +9,6 @@ import customtkinter as ctk
 
 from memory import (
     Memory,
-    StatusRegisters,
-    ExtendedMemory,
     DM41LMemoryError,
     XM_REGIONS,
     PRIMARY_DATA_END,
@@ -161,7 +159,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             )
             return
 
-        sr = StatusRegisters(self._memory)
+        sr = self._memory.status_registers
 
         stack_rows = [
             ("T", f"{sr.T().get_bcd_number():.8g}"),
@@ -210,7 +208,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             )
             return
 
-        sr = StatusRegisters(self._memory)
+        sr = self._memory.status_registers
 
         rows = [
             ("Q (scratch)", sr.Q().get_hex()),
@@ -232,9 +230,9 @@ class OverviewTab(ctk.CTkScrollableFrame):
             return
 
         try:
-            r00 = self._memory.R00()
-            dot_end = self._memory.DotEnd()
-            sigma_reg = self._memory.SigmaReg()
+            r00 = self._memory.status_registers.R00()
+            dot_end = self._memory.status_registers.DotEnd()
+            sigma_reg = self._memory.status_registers.SigmaReg()
         except Exception as e:
             logger.warning("Could not decode register c: %s", e)
             ctk.CTkLabel(
@@ -347,7 +345,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
             return
 
         try:
-            self._memory.set_R00(value)
+            self._memory.status_registers.set_R00(value)
         except ValueError as e:
             logger.warning("Could not set R00 to 0x%03x: %s", value, e)
             messagebox.showerror("Invalid R00", str(e))
@@ -367,7 +365,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
         about eight locals, and _render_summary() also now has to track
         the Key Assignments/Alarms register counts (GitHub issue #23)."""
         try:
-            xm = ExtendedMemory(self._memory, address_range=[0x40, 0x2EF])
+            xm = self._memory.extended_memory
             xm_files = xm.list_files()
             xm_used = sum(
                 f.num_registers + XM_FILE_OVERHEAD_REGISTERS for f in xm_files
@@ -397,18 +395,18 @@ class OverviewTab(ctk.CTkScrollableFrame):
         if self._memory is None:
             return
 
-        # "program"/"data" spans only appear in Memory.regions()'s output
-        # when it considers the dump to have a sane R00/.END. partition
-        # (see that method's has_partition) -- their presence/absence here
-        # is now the single source of truth for whether a partition exists,
-        # replacing this method's old separate R00()/DotEnd()/MIN_SANE_R00
-        # check (GitHub issue #25). This is very slightly stricter than the
-        # old check (which only looked at R00, not R00 vs .END.), but that
-        # old combination -- a sane R00 with .END. above it -- was already
-        # not a state _render_partition() treats as a normal partition
-        # either, so no real dump should ever notice the difference.
+        # Memory.has_program_partition() is the single source of truth
+        # for whether this dump has a sane R00/.END. partition, replacing
+        # this method's old separate R00()/DotEnd()/MIN_SANE_R00 check
+        # (GitHub issue #25). It is also exactly what decides whether the
+        # "program"/"data" spans appear in regions()'s output below, so
+        # the two can't disagree. Very slightly stricter than the old
+        # check (which only looked at R00, not R00 vs .END.), but that old
+        # combination -- a sane R00 with .END. above it -- was already not
+        # a state _render_partition() treats as a normal partition either,
+        # so no real dump should ever notice the difference.
         spans = {span.key: span for span in self._memory.regions()}
-        has_partition = "program" in spans
+        has_partition = self._memory.has_program_partition()
 
         xm_text, xm_used_text, xm_free_text = self._xm_summary_texts()
 

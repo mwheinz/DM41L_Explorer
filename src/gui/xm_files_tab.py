@@ -155,7 +155,7 @@ class XMFilesTab(ctk.CTkFrame):
             self._on_change()
 
     def _xm(self) -> ExtendedMemory:
-        return ExtendedMemory(self._memory, address_range=[0x40, 0x2EF])
+        return self._memory.extended_memory
 
     def _on_tree_selected(self, event=None):  # pylint: disable=unused-argument
         """Gives the selected row a visible highlight, the same way (and

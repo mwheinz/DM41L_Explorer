@@ -1,52 +1,16 @@
 '''
-Encoders for the single-program HP-41 file formats hp41uc (Leo Duran's
-HP-41 User-Code File Converter, ~/Work/hp41uc) reads and writes -- so a
-program exported from DM41L_Explorer can round-trip through hp41uc and
-other tools built on the same formats (V41, LIFUTILS, EMU41, ...).
+Encoders for exporting a single HP41 program file.
 
-Ignores hp41uc's TXT format (the de-compiled/compiled FOCAL mnemonic
-listing) -- that needs a full HP-41 opcode table to render as text, a
-separate project from exporting/importing raw program bytes. RAW and DAT
-are both byte-for-byte reproductions of hp41uc's own output, verified
-against a locally-built copy of hp41uc itself (Source/convert.c's
-copy_file()/write_raw_checksum()/write_dat_size()/write_dat_checksum()):
-run a program's instruction bytes (Memory.get_program_bytes()) through
-`encode_program_raw()`/`encode_program_dat()` here, and hp41uc's own
-`/r=x.raw /d` conversion of the same bytes produces an identical file.
+Supports RAW, DAT, and "PPC", which is a DAT that's been broken into multiple
+lines (as seen in PPC Calculator Journal program listings).
 
-Both formats store exactly one program's instruction bytes (as returned
-by Memory.get_program_bytes()) -- they carry no program *name*; that's
-only ever recorded in the instruction bytes themselves, in the global
-label header (see docs/program.md sec 5.2).
+Does not support decompiling into text files (yet).
 
-`decode_program_raw()`/`decode_program_dat()` are the reverse direction --
-recovering the instruction bytes from an existing RAW/DAT file, verifying
-its checksum along the way. Round-trip-verified against
-tests/data/tower.{raw,dat}: two real files hp41uc itself compiled from a
-1088-byte program (tests/data/tower.txt) -- decoding either one recovers
-identical instruction bytes, `find_program_end()` confirms they form one
-well-formed program, and re-encoding reproduces both files byte for byte.
-These decoders are not wired into a GUI Import yet (that also needs
-program-memory chain-splicing logic -- see project notes); they exist so
-a RAW/DAT file's instruction bytes can be recovered and inspected/
-verified without hand-parsing the format.
+`encode_program_[raw, dat, ppc]()`/`encode_program_[raw, dat, ppc]()` convert
+a program into a file.
 
-`encode_program_ppc()`/`decode_program_ppc()` handle a third, unlabeled
-format found alongside real RAW/DAT/TXT files for the same programs
-(~/Work/DM41/TowerOfSkelos, given the ".ppc" suffix by whoever saved them
--- no hp41uc mode produces it, and it isn't HP's WND format either).
-Reverse-engineered by comparing those files directly: a PPC file turned
-out to be byte-for-byte identical to its own DAT sibling, except with a
-newline (0x0A) inserted every 50 characters and one trailing newline --
-i.e. it's just DAT's hex text word-wrapped for display or printing, not a
-distinct binary layout. (The programs in that sample set were originally
-a magazine listing in the PPC Calculator Journal, which may explain both
-the name and the wrapping -- printed hex dumps need line breaks -- but
-that's a guess, not confirmed.) `decode_program_ppc()` strips whitespace
-and defers to `decode_program_dat()`; `encode_program_ppc()` wraps
-`encode_program_dat()`'s own output. Verified against the two real PPC
-files this was reverse-engineered from: decoding either one and
-re-encoding the result reproduces the original file exactly.
+`decode_program_[raw, dat, ppc]()`/`decode_program_[raw, dat, ppc]()` are the
+reverse direction -- read a RAW/DAT file, and convert it to a program.
 '''
 
 from .opcode_scan import find_program_end
@@ -61,7 +25,7 @@ def _checksum(data: bytes) -> int:
 
 def encode_program_raw(data: bytes) -> bytes:
     '''
-    hp41uc RAW format (Source/hp41uc.c's `/r` help text):
+    RAW format: (Source/hp41uc.c's `/r` help text):
     `[compiled code] + [1-byte checksum] + [trailer]`, where the trailer
     is zero-padding so the total file length is a multiple of 256 bytes
     (hp41uc's write_raw_checksum(), bufsize=256) -- if `data` is already
@@ -76,7 +40,7 @@ def encode_program_raw(data: bytes) -> bytes:
 
 def encode_program_dat(data: bytes) -> bytes:
     '''
-    hp41uc DAT format (Source/hp41uc.c's `/d` help text):
+    DAT format: (Source/hp41uc.c's `/d` help text):
     `[4-byte header] + [compiled code] + [2-byte checksum]`, all as
     upper-case ASCII hex digits. The header is `data`'s length as a
     big-endian 16-bit value; the checksum is the sum of `data`'s bytes
@@ -104,7 +68,7 @@ def encode_program_dat(data: bytes) -> bytes:
 
 def decode_program_raw(data: bytes) -> bytes:
     '''
-    Recovers a program's instruction bytes from an hp41uc RAW file
+    Recovers a program's instruction bytes from an HP41 RAW file
     (`encode_program_raw()`'s own format). RAW carries no length header
     of its own, so this uses `find_program_end()` -- the same forward
     opcode scan `Memory.get_program_bytes()` uses -- to find where the
@@ -136,7 +100,7 @@ def decode_program_raw(data: bytes) -> bytes:
 
 def decode_program_dat(data: bytes) -> bytes:
     '''
-    Recovers a program's instruction bytes from an hp41uc DAT file
+    Recovers a program's instruction bytes from an HP41 DAT file
     (`encode_program_dat()`'s own format): reads the 4-hex-digit length
     header, decodes that many ASCII-hex-encoded bytes, and verifies the
     trailing 2-hex-digit checksum.
@@ -193,9 +157,8 @@ def encode_program_ppc(data: bytes) -> bytes:
     output, word-wrapped to `_PPC_LINE_WIDTH` (50) characters per line,
     with a trailing newline after the last line. Verified byte-for-byte
     against the two real PPC files this format was reverse-engineered
-    from (~/Work/DM41/TowerOfSkelos's pack.ppc/tower-orig.ppc) --
-    re-wrapping `encode_program_dat()`'s output for their own decoded
-    instruction bytes reproduces both files exactly.
+    from sample .ppc files that were created by copying the text out of a PPC
+    Calculator Journal program listing.
     '''
     dat_text = encode_program_dat(data)
     lines = [

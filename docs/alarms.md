@@ -1,7 +1,7 @@
 # DM41L Explorer: Alarm Storage Research Report
 
 **Status:** Research notes for GitHub issue #5 ("Add support for alarms").
-The buffer-level layout, the per-alarm entry format, the fire/reschedule/
+Unlike most of the HP41 architecture, there's no documentation (that I could find) on how alarms are managed. The buffer-level layout, the per-alarm entry format, the fire/reschedule/
 expire lifecycle, and the message-length range are all **confirmed against
 real DM41L dumps**: `src/tests/data/alarmtest.dm41` (created 2026-08-20 —
 1 key assignment plus 3 alarms: hourly, daily, one-time),
@@ -14,6 +14,8 @@ interval — §6). Everything marked "confirmed" was verified byte-for-byte
 using this project's own `Memory`/`Register` classes. A few structural
 questions remain open (see §9) — mainly around program-run alarms, which
 haven't been captured yet.
+
+It has been concerning that there doesn't seem to be any way to definitively know how the HP41CX/DM41L tell the difference between a repeating and a one-shot alarm, but it is where we are. Also, note that if an "old" DM41 dumpfile that contains alarms is loaded into the emulator all elapsed alarms will be triggered again when the emulator is turned on.
 
 ## 1. Sources
 
@@ -38,12 +40,6 @@ haven't been captured yet.
   (a different thing from the main-memory alarm buffer — see §8), and its
   1/100-second-since-1900 clock format turned out to be exactly the format
   used by the main-memory alarm entries too (see §4).
-- **Searched but no alarm byte-format content found:** HP-41 Synthetic
-  Programming (Wickes' full book) and HP-41 Extended Functions Made Easy.
-  Both discuss the alarm-setting *functions* (`SW`, `RCLSW`, `ALMCAT`, etc.)
-  from a keystroke perspective, not the underlying register format.
-  `ppcrom-um.pdf` and the two CX Owner's Manual volumes are large scanned
-  PDFs that were not exhaustively searched.
 
 ## 2. Where alarms live
 
@@ -58,7 +54,7 @@ haven't been captured yet.
 | R00 up to 0x1FF | Data Memory |
 
 Confirmed directly in `alarmtest.dm41`: the one key assignment occupies
-register 0xC0 only (`Memory.key_assignments_end()` returns 0xC1), the
+register 0xC0 only (`KeyAssignments.end_exclusive` returns 0xC1), the
 alarm buffer occupies 0xC1–0xCD immediately above it, and every register
 from 0xCE up to `.END.` (0x19B in this dump) is exactly zero — genuinely
 free, not an I/O-buffer region. (An earlier draft of this report carried
@@ -243,7 +239,7 @@ dumps:
 
 ```python
 def count_alarms(memory):
-    addr = memory.key_assignments_end()
+    addr = memory.key_assignments.end_exclusive
     header = memory.get_register(addr)
     if header.get_bytes()[0] != 0xAA:
         return 0                       # no alarm buffer at all
@@ -383,7 +379,7 @@ alarmtest.dm41                         alarmtest2.dm41
   place" overstates it.** The hourly alarm's time register (0xC2) changed
   from `11:30:00` to `16:30:00` — exactly five repeat intervals
   (5 × 3600s = 5 hours) later, consistent with it having fired at 11:30,
-  12:30, 13:30, 14:30, and 15:30 before the user stopped the run "till
+  12:30, 13:30, 14:30, and 15:30 before the user stopped the run "at
   almost 4 PM." The daily alarm's time register (0xC6) changed from
   `2026-08-20 12:00:00` to `2026-08-21 12:00:00` — one repeat interval
   later, after firing once. Both alarms' repeat-interval and message
@@ -393,25 +389,14 @@ alarmtest.dm41                         alarmtest2.dm41
   counter), and §5 later showed what byte 6 actually is (message
   register count).
 
-  **Correction (from the user):** an earlier draft of this section called
-  this "rescheduling in place," implying the calculator always rewrites
-  the same register regardless of the new time. §3/§5 already established
-  a stronger, more general rule that better explains this: **the buffer
-  is kept sorted by trigger time at all times**, confirmed separately by
-  how alarm C landed in `alarmtest3.dm41` — the user added it *last*
-  (after alarm D existed), gave it a trigger time between alarms B and D,
+- **Alarms are arranged in time-sorted order:** testing confirmed this: 
+  alarm C landed in `alarmtest3.dm41` between alarm B and alarm D even though
+  the user added it *last* 
+  (after alarm D existed), but gave it a trigger time between alarms B and D,
   and it was inserted between them rather than appended at the end. A
   reschedule is really the same operation as an insert: remove the fired
   alarm, then place it wherever its new trigger time belongs in sorted
-  order. In this dump, both alarms' new times still fell earlier than
-  every other alarm's time (16:30 and next-day-12:00 didn't cross each
-  other or anything else), so the sorted position happened not to change
-  — which is why the register contents updated without the alarm visibly
-  moving. That's a special case of the general sort-order rule, not
-  separate "in-place update" behavior. A dump where a reschedule actually
-  crosses a neighboring alarm's time (forcing a real position swap, with
-  registers shifting rather than just one register's bytes changing)
-  would confirm this conclusively — see §9.
+  order. 
 - **A one-time alarm is deleted outright once it fires**, not flagged or
   zeroed in place. The single alarm's three registers (0xCA–0xCC, time +
   2 message registers) are simply gone in `alarmtest2.dm41`. The header's
@@ -461,14 +446,10 @@ any code or docs that come out of this research.
   — if the sort-by-time rule is real, that alarm's whole entry should
   visibly move to a new address (with neighboring alarms' registers
   shifting to make room), not just have its own time bytes rewritten.
-- **The exact 24-character cap** hasn't been tested at the boundary — no
-  sample has tried a message of exactly 24 characters or attempted one
-  longer to see how (or whether) the calculator rejects it.
-- `ppcrom-um.pdf` and the two `hp41cx-om-vol*-en.pdf` Owner's Manual
+- The two `hp41cx-om-vol*-en.pdf` Owner's Manual
   volumes are large scanned PDFs that weren't exhaustively searched and
   may help with the above, particularly program-run alarms and any
   documented flag byte meanings.
 - Next most useful test dumps, in rough priority order: (1) a program-run
   alarm, (2) a disabled alarm, (3) an alarm with a trigger time earlier
-  than an existing alarm (settles insertion-order conclusively), (4) a
-  message of exactly 24 characters and one attempting 25+.
+  than an existing alarm (settles insertion-order conclusively).

@@ -443,14 +443,12 @@ class DM41LExplorerApp(ctk.CTk):
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         # Help Menu
-        help_menu = Menu(menubar, tearoff=0)
         if PLATFORM_SYSTEM != "Darwin":
+            help_menu = Menu(menubar, tearoff=0)
             help_menu.add_command(
                 label="About DM41L Explorer", command=self._show_about
             )
-        else:
-            help_menu.add_command(label="Read Me", state="disabled")
-        menubar.add_cascade(label="Help", menu=help_menu)
+            menubar.add_cascade(label="Help", menu=help_menu)
 
         self.config(menu=menubar)
         self._rebuild_recent_files_menu()
@@ -845,14 +843,14 @@ class DM41LExplorerApp(ctk.CTk):
                 "No Memory Loaded", "Load or start a memory buffer first."
             )
             return
-        before_count = len(self.memory.list_programs())
+        before_count = len(self.memory.programs.list_programs())
         try:
             freed = self.memory.pack()
         except Exception as e:
             logger.warning("Could not pack memory: %s", e)
             messagebox.showerror("Could Not Pack Memory", str(e))
             return
-        recovered = len(self.memory.list_programs()) - before_count
+        recovered = len(self.memory.programs.list_programs()) - before_count
         logger.info(
             "Packed memory: %d register(s) reclaimed, %d program(s) recovered",
             freed, recovered,

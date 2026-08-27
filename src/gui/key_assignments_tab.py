@@ -15,7 +15,7 @@ second (see gui/key_assignment_edit_dialog.py's "Program" tab).
 Per the real lookup order (docs sec 4.7), a Key Assignment Register entry
 always takes priority over a global-label one on the same key -- this
 tab's own writes never let both exist on one key at once (see
-Memory.set_key_assignment()/set_program_key_assignment()'s mutual-
+KeyAssignments.set_assignment()/ProgramMemory.set_program_key_assignment()'s mutual-
 exclusion docstrings), but _resolve_key() below still checks the register
 first when deciding what to display, matching that real priority in case
 a dump imported from elsewhere is in an inconsistent state.
@@ -125,7 +125,7 @@ def _program_names(memory: Memory) -> list:
     live on one label's own header (sec 4.6/5.2) regardless of how many
     labels its program has, so this works off the flat per-label chain,
     not the grouped list_programs()."""
-    return sorted({p.name for p in memory.list_global_chain() if p.is_named})
+    return sorted({p.name for p in memory.programs.list_global_chain() if p.is_named})
 
 
 def _count_all_assignments(memory: Memory) -> int:
@@ -134,9 +134,9 @@ def _count_all_assignments(memory: Memory) -> int:
     assignment -- the header count used to just be the first of these,
     silently omitting any global-label assignments."""
     program_count = sum(
-        1 for p in memory.list_global_chain() if p.is_named and p.key_assignment
+        1 for p in memory.programs.list_global_chain() if p.is_named and p.key_assignment
     )
-    return len(memory.list_key_assignments()) + program_count
+    return len(memory.key_assignments.list_assignments()) + program_count
 
 
 class KeyAssignmentsTab(ctk.CTkFrame):
@@ -300,10 +300,10 @@ class KeyAssignmentsTab(ctk.CTkFrame):
         exclusion on save), but the Key Assignment Register lookup is
         still checked first -- matching the real priority order (docs sec
         4.7) -- in case a dump from elsewhere has both."""
-        assignment = self._memory.get_key_assignment(key_number, shifted)
+        assignment = self._memory.key_assignments.get_assignment(key_number, shifted)
         if assignment:
             return assignment, None
-        return None, self._memory.get_program_for_key(key_number, shifted)
+        return None, self._memory.programs.get_program_for_key(key_number, shifted)
 
     def _refresh_buttons(self):
         for (key_number, shifted), btns in self._key_buttons.items():
@@ -340,7 +340,7 @@ class KeyAssignmentsTab(ctk.CTkFrame):
         def save(kind, value):
             try:
                 if kind == "function":
-                    self._memory.set_key_assignment(key_number, shifted, value)
+                    self._memory.key_assignments.set_assignment(key_number, shifted, value)
                     logger.info(
                         "Key %02d (%s) assigned function: %s",
                         key_number,
@@ -348,7 +348,7 @@ class KeyAssignmentsTab(ctk.CTkFrame):
                         value,
                     )
                 else:  # "program"
-                    self._memory.set_program_key_assignment(value, key_number, shifted)
+                    self._memory.programs.set_program_key_assignment(value, key_number, shifted)
                     logger.info(
                         "Key %02d (%s) assigned program: %s",
                         key_number,
@@ -369,9 +369,9 @@ class KeyAssignmentsTab(ctk.CTkFrame):
             # and avoids leaving a stale assignment behind on a dump
             # that's somehow in an inconsistent state.
             try:
-                self._memory.delete_key_assignment(key_number, shifted)
+                self._memory.key_assignments.delete_assignment(key_number, shifted)
                 if program is not None:
-                    self._memory.clear_program_key_assignment(program.name)
+                    self._memory.programs.clear_program_key_assignment(program.name)
                 logger.info(
                     "Key %02d (%s) assignment deleted",
                     key_number,

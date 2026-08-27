@@ -29,7 +29,7 @@ DATA_DIR = Path(__file__).parent / "data"
 
 
 def _programs_by_name(memory):
-    return {p.names_label: p for p in memory.list_programs()}
+    return {p.names_label: p for p in memory.programs.list_programs()}
 
 
 # -- Importing into completely empty program memory ------------------------
@@ -40,16 +40,16 @@ def test_import_apptest_into_empty_memory_matches_simple_dm41_exactly():
     # into empty.dm41 should reproduce that fixture's own DotEnd/chain
     # layout byte for byte (docs/program.md's own worked example).
     source = Memory.from_file(DATA_DIR / "simple.dm41")
-    apptest_bytes = source.get_program_bytes(source.list_programs()[0])
+    apptest_bytes = source.programs.get_program_bytes(source.programs.list_programs()[0])
 
     dest = Memory.from_file(DATA_DIR / "empty.dm41")
-    imported = dest.import_program(apptest_bytes)
+    imported = dest.programs.import_program(apptest_bytes)
 
     assert imported.names_label == "APPTEST"
     assert imported.length == 26
-    assert dest.get_program_bytes(imported) == apptest_bytes
-    assert dest.DotEnd() == source.DotEnd()
-    assert dest.R00() == source.R00()
+    assert dest.programs.get_program_bytes(imported) == apptest_bytes
+    assert dest.status_registers.DotEnd() == source.status_registers.DotEnd()
+    assert dest.status_registers.R00() == source.status_registers.R00()
 
 
 def test_import_unlabelled_program_into_empty_memory_round_trips_exactly():
@@ -58,11 +58,11 @@ def test_import_unlabelled_program_into_empty_memory_round_trips_exactly():
     # importing it as the first-ever program into an empty destination
     # should need no change to those bytes at all.
     source = Memory.from_file(DATA_DIR / "unlabelled.dm41")
-    prog_bytes = source.get_program_bytes(source.list_programs()[0])
+    prog_bytes = source.programs.get_program_bytes(source.programs.list_programs()[0])
 
     dest = Memory.from_file(DATA_DIR / "empty.dm41")
-    imported = dest.import_program(prog_bytes)
-    assert dest.get_program_bytes(imported) == prog_bytes
+    imported = dest.programs.import_program(prog_bytes)
+    assert dest.programs.get_program_bytes(imported) == prog_bytes
 
 
 def test_import_tower_into_empty_memory_round_trips_exactly():
@@ -71,10 +71,10 @@ def test_import_tower_into_empty_memory_round_trips_exactly():
     # fixture.
     instruction_bytes = decode_program_raw((DATA_DIR / "tower.raw").read_bytes())
     dest = Memory.from_file(DATA_DIR / "empty.dm41")
-    imported = dest.import_program(instruction_bytes)
+    imported = dest.programs.import_program(instruction_bytes)
     assert imported.length == 1088
-    assert dest.get_program_bytes(imported) == instruction_bytes
-    assert find_program_end(dest.get_program_bytes(imported)) == 1088
+    assert dest.programs.get_program_bytes(imported) == instruction_bytes
+    assert find_program_end(dest.programs.get_program_bytes(imported)) == 1088
 
 
 def test_import_dat_and_raw_of_tower_produce_identical_results():
@@ -84,10 +84,10 @@ def test_import_dat_and_raw_of_tower_produce_identical_results():
     dat_bytes = decode_program_dat((DATA_DIR / "tower.dat").read_bytes())
     assert raw_bytes == dat_bytes
 
-    imported_raw = dest_raw.import_program(raw_bytes)
-    imported_dat = dest_dat.import_program(dat_bytes)
-    assert dest_raw.get_program_bytes(imported_raw) == dest_dat.get_program_bytes(imported_dat)
-    assert dest_raw.DotEnd() == dest_dat.DotEnd()
+    imported_raw = dest_raw.programs.import_program(raw_bytes)
+    imported_dat = dest_dat.programs.import_program(dat_bytes)
+    assert dest_raw.programs.get_program_bytes(imported_raw) == dest_dat.programs.get_program_bytes(imported_dat)
+    assert dest_raw.status_registers.DotEnd() == dest_dat.status_registers.DotEnd()
 
 
 def test_import_ppc_of_tower_matches_dat_and_raw():
@@ -106,10 +106,10 @@ def test_import_ppc_of_tower_matches_dat_and_raw():
     dat_bytes = decode_program_dat(dat_text)
     assert ppc_bytes == dat_bytes
 
-    imported_ppc = dest_ppc.import_program(ppc_bytes)
-    imported_dat = dest_dat.import_program(dat_bytes)
-    assert dest_ppc.get_program_bytes(imported_ppc) == dest_dat.get_program_bytes(imported_dat)
-    assert dest_ppc.DotEnd() == dest_dat.DotEnd()
+    imported_ppc = dest_ppc.programs.import_program(ppc_bytes)
+    imported_dat = dest_dat.programs.import_program(dat_bytes)
+    assert dest_ppc.programs.get_program_bytes(imported_ppc) == dest_dat.programs.get_program_bytes(imported_dat)
+    assert dest_ppc.status_registers.DotEnd() == dest_dat.status_registers.DotEnd()
 
 
 # -- Case B: importing alongside a program that already has a real END ----
@@ -120,20 +120,20 @@ def test_import_into_simple_dm41_case_b_preserves_apptest_and_stacks_new_program
     # importing a second program shouldn't touch APPTEST at all, and the
     # new program should land as a second, newer entry.
     source = Memory.from_file(DATA_DIR / "unlabelled.dm41")
-    prog_bytes = source.get_program_bytes(source.list_programs()[0])  # 16 bytes, unlabelled
+    prog_bytes = source.programs.get_program_bytes(source.programs.list_programs()[0])  # 16 bytes, unlabelled
 
     dest = Memory.from_file(DATA_DIR / "simple.dm41")
     apptest_before = _programs_by_name(dest)["APPTEST"]
 
-    imported = dest.import_program(prog_bytes)
+    imported = dest.programs.import_program(prog_bytes)
 
-    programs = dest.list_programs()
+    programs = dest.programs.list_programs()
     assert len(programs) == 2
     apptest_after = _programs_by_name(dest)["APPTEST"]
     assert apptest_after.length == apptest_before.length == 26
     assert apptest_after.start_addr == apptest_before.start_addr
     assert apptest_after.start_offset == apptest_before.start_offset
-    assert dest.get_program_bytes(apptest_after) == dest.get_program_bytes(apptest_before)
+    assert dest.programs.get_program_bytes(apptest_after) == dest.programs.get_program_bytes(apptest_before)
 
     assert imported.length == 16
     newest = programs[-1]
@@ -142,26 +142,26 @@ def test_import_into_simple_dm41_case_b_preserves_apptest_and_stacks_new_program
     assert newest.length == imported.length
     # Only the trailing marker's own distance field should have changed
     # (it now links back to APPTEST's END instead of "no predecessor").
-    reimported_bytes = dest.get_program_bytes(imported)
+    reimported_bytes = dest.programs.get_program_bytes(imported)
     assert reimported_bytes[:-3] == prog_bytes[:-3]
     assert reimported_bytes[-3:] != prog_bytes[-3:]
 
 
 def test_import_stacks_multiple_programs_in_order():
     source = Memory.from_file(DATA_DIR / "unlabelled.dm41")
-    progs = source.list_programs()
-    prog1_bytes = source.get_program_bytes(progs[0])
-    prog2_bytes = source.get_program_bytes(progs[1])
+    progs = source.programs.list_programs()
+    prog1_bytes = source.programs.get_program_bytes(progs[0])
+    prog2_bytes = source.programs.get_program_bytes(progs[1])
 
     dest = Memory.from_file(DATA_DIR / "simple.dm41")
-    dest.import_program(prog1_bytes)
-    dest.import_program(prog2_bytes)
+    dest.programs.import_program(prog1_bytes)
+    dest.programs.import_program(prog2_bytes)
 
-    programs = dest.list_programs()
+    programs = dest.programs.list_programs()
     assert [p.names_label for p in programs] == ["APPTEST", "(unlabelled)", "(unlabelled)"]
     assert [p.length for p in programs] == [26, 16, 20]
     for program in programs:
-        instruction_bytes = dest.get_program_bytes(program)
+        instruction_bytes = dest.programs.get_program_bytes(program)
         assert len(instruction_bytes) == program.length
         assert find_program_end(instruction_bytes) == len(instruction_bytes)
 
@@ -176,16 +176,16 @@ def test_import_into_twolabels_case_a_converts_dot_end_to_real_end():
     # length/labels/bytes for the original program) before linking the
     # new one to it.
     source = Memory.from_file(DATA_DIR / "unlabelled.dm41")
-    prog_bytes = source.get_program_bytes(source.list_programs()[0])
+    prog_bytes = source.programs.get_program_bytes(source.programs.list_programs()[0])
 
     dest = Memory.from_file(DATA_DIR / "twolabels.dm41")
-    original = dest.list_programs()[0]
+    original = dest.programs.list_programs()[0]
     assert original.terminator == ".END."
-    original_bytes = dest.get_program_bytes(original)
+    original_bytes = dest.programs.get_program_bytes(original)
 
-    imported = dest.import_program(prog_bytes)
+    imported = dest.programs.import_program(prog_bytes)
 
-    programs = dest.list_programs()
+    programs = dest.programs.list_programs()
     assert len(programs) == 2
     converted = programs[0]
     assert converted.terminator == "END"  # no longer ".END." -- converted
@@ -195,7 +195,7 @@ def test_import_into_twolabels_case_a_converts_dot_end_to_real_end():
     # (0x2_ -- permanent .END. -- to 0x0_ -- a normal closing END); its
     # low nibble (packed status) and everything else about the program's
     # own bytes stays exactly as it was.
-    converted_bytes = dest.get_program_bytes(converted)
+    converted_bytes = dest.programs.get_program_bytes(converted)
     assert converted_bytes[:-1] == original_bytes[:-1]
     assert converted_bytes[-1] == original_bytes[-1] & 0x0F
     assert original_bytes[-1] >> 4 == 2
@@ -212,15 +212,15 @@ def test_import_key_assignment_case_a():
     # (see test above) while also verifying the imported label's own key
     # byte gets cleared.
     source = Memory.from_file(DATA_DIR / "global-key-assignments.dm41")
-    programs = source.list_programs()
+    programs = source.programs.list_programs()
     aaa = [p for p in programs if p.names_label == "AAA"][0]
-    aaa_bytes = source.get_program_bytes(aaa)
+    aaa_bytes = source.programs.get_program_bytes(aaa)
     assert aaa.labels[0].key_assignment != 0
 
     dest = Memory.from_file(DATA_DIR / "twolabels.dm41")
-    imported = dest.import_program(aaa_bytes)
+    imported = dest.programs.import_program(aaa_bytes)
     assert imported.labels[0].key_assignment == 0
-    reimported_bytes = dest.get_program_bytes(imported)
+    reimported_bytes = dest.programs.get_program_bytes(imported)
     assert reimported_bytes[3] == 0x00  # the label header's own key byte
 
 
@@ -230,45 +230,45 @@ def test_import_key_assignment_case_a():
 def test_import_rejects_empty_bytes():
     dest = Memory.from_file(DATA_DIR / "empty.dm41")
     with pytest.raises(ValueError):
-        dest.import_program(b"")
+        dest.programs.import_program(b"")
 
 
 def test_import_rejects_malformed_bytes():
     dest = Memory.from_file(DATA_DIR / "empty.dm41")
     with pytest.raises(ValueError):
-        dest.import_program(b"\x00\x01\x02\x03")
+        dest.programs.import_program(b"\x00\x01\x02\x03")
 
 
 def test_import_blocks_duplicate_global_label_name():
     source = Memory.from_file(DATA_DIR / "global-key-assignments.dm41")
-    programs = source.list_programs()
-    aaa_bytes = source.get_program_bytes(
+    programs = source.programs.list_programs()
+    aaa_bytes = source.programs.get_program_bytes(
         [p for p in programs if p.names_label == "AAA"][0]
     )
 
     dest = Memory.from_file(DATA_DIR / "global-key-assignments.dm41")
     with pytest.raises(ValueError):
-        dest.import_program(aaa_bytes)  # AAA already exists in dest
+        dest.programs.import_program(aaa_bytes)  # AAA already exists in dest
     # Blocked -- the buffer must be completely unchanged.
-    assert dest.list_programs()[0].names_label == "AAA"
-    assert len(dest.list_programs()) == 2
+    assert dest.programs.list_programs()[0].names_label == "AAA"
+    assert len(dest.programs.list_programs()) == 2
 
 
 def test_import_raises_when_program_memory_is_full_and_leaves_memory_unchanged():
     dest = Memory.from_file(DATA_DIR / "empty.dm41")
-    alarms_end = dest.alarms_end()
-    dest.set_R00(alarms_end + 2)  # ~14 bytes of free program memory
-    dest.set_DotEnd(alarms_end + 1)
+    alarms_end = dest.alarms.end_exclusive
+    dest.status_registers.set_R00(alarms_end + 2)  # ~14 bytes of free program memory
+    dest.status_registers.set_DotEnd(alarms_end + 1)
 
-    before_dot_end = dest.DotEnd()
-    before_programs = dest.list_programs()
+    before_dot_end = dest.status_registers.DotEnd()
+    before_programs = dest.programs.list_programs()
 
     tower_bytes = decode_program_raw((DATA_DIR / "tower.raw").read_bytes())
     with pytest.raises(DM41LMemoryError):
-        dest.import_program(tower_bytes)
+        dest.programs.import_program(tower_bytes)
 
-    assert dest.DotEnd() == before_dot_end
-    assert dest.list_programs() == before_programs
+    assert dest.status_registers.DotEnd() == before_dot_end
+    assert dest.programs.list_programs() == before_programs
 
 
 def test_import_rejects_when_no_valid_partition_is_loaded():
@@ -276,9 +276,9 @@ def test_import_rejects_when_no_valid_partition_is_loaded():
     # R00/.END. defaults (matching empty.dm41) -- corrupt R00 directly to
     # simulate a dump with no real partition at all.
     dest = Memory()
-    dest.set_R00(0)
+    dest.status_registers.set_R00(0)
     with pytest.raises(DM41LMemoryError):
-        dest.import_program(bytes.fromhex("c00009"))
+        dest.programs.import_program(bytes.fromhex("c00009"))
 
 
 def test_import_rejects_stale_program_reference_style_bogus_bytes():
@@ -289,7 +289,7 @@ def test_import_rejects_stale_program_reference_style_bogus_bytes():
     dest = Memory.from_file(DATA_DIR / "simple.dm41")
     bogus = Program(start_addr=0x000, start_offset=0, length=0, labels=[], terminator="END")
     with pytest.raises(ValueError):
-        dest.get_program_bytes(bogus)
+        dest.programs.get_program_bytes(bogus)
 
 
 # -- Regression sweep --------------------------------------------------------
@@ -310,12 +310,12 @@ def test_import_every_program_in_every_sample_dump_into_a_fresh_empty_memory():
         if not filename.endswith(".dm41"):
             continue
         source = Memory.from_file(DATA_DIR / filename)
-        for program in source.list_programs():
-            instruction_bytes = source.get_program_bytes(program)
+        for program in source.programs.list_programs():
+            instruction_bytes = source.programs.get_program_bytes(program)
             dest = Memory.from_file(DATA_DIR / "empty.dm41")
-            imported = dest.import_program(instruction_bytes)
+            imported = dest.programs.import_program(instruction_bytes)
             assert imported.length == program.length, filename
             assert imported.names_label == program.names_label, filename
-            reimported = dest.get_program_bytes(imported)
+            reimported = dest.programs.get_program_bytes(imported)
             assert len(reimported) == len(instruction_bytes), filename
             assert find_program_end(reimported) == len(reimported), filename

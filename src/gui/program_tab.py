@@ -175,7 +175,7 @@ class ProgramTab(ctk.CTkFrame):
             return
 
         try:
-            programs = memory.list_programs()
+            programs = memory.programs.list_programs()
         except Exception as e:
             logger.warning("Could not list programs: %s", e)
             self._header_label.configure(text=f"Could not list programs: {e}")
@@ -259,7 +259,7 @@ class ProgramTab(ctk.CTkFrame):
             return
 
         try:
-            instruction_bytes = self._memory.get_program_bytes(program)
+            instruction_bytes = self._memory.programs.get_program_bytes(program)
         except (ValueError, DM41LMemoryError) as e:
             logger.warning(
                 "Could not read program bytes for %r: %s", program.names_label, e
@@ -375,7 +375,8 @@ class ProgramTab(ctk.CTkFrame):
             return
 
         try:
-            imported = self._memory.import_program(instruction_bytes)
+            imported = self._memory.programs.import_program(instruction_bytes)
+            self._memory.programs.repack()
         except (ValueError, DM41LMemoryError) as e:
             logger.warning("Could not import program from %s: %s", path, e)
             messagebox.showerror("Could Not Import", str(e))
@@ -434,7 +435,7 @@ class ProgramTab(ctk.CTkFrame):
             return
 
         try:
-            self._memory.remove_program(program)
+            self._memory.programs.remove_program(program)
         except (ValueError, DM41LMemoryError) as e:
             logger.warning(
                 "Could not remove program %r: %s", program.names_label, e

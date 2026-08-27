@@ -91,11 +91,11 @@ def test_get_program_bytes_apptest_matches_docs_program_md():
     # in test_memory.py for why an earlier reading of this dump wrongly
     # believed there was a second, "nameless" one.
     memory = Memory.from_file(DATA_DIR / "simple.dm41")
-    programs = memory.list_programs()
+    programs = memory.programs.list_programs()
     assert len(programs) == 1
     apptest = programs[0]
     assert apptest.names_label == "APPTEST"
-    assert memory.get_program_bytes(apptest) == APPTEST_BYTES
+    assert memory.programs.get_program_bytes(apptest) == APPTEST_BYTES
 
 
 def test_get_program_bytes_rejects_stale_entry():
@@ -111,7 +111,7 @@ def test_get_program_bytes_rejects_stale_entry():
         terminator="END",
     )
     with pytest.raises(ValueError):
-        memory.get_program_bytes(bogus)
+        memory.programs.get_program_bytes(bogus)
 
 
 def test_get_program_bytes_unlabelled_matches_real_cat_1_byte_counts():
@@ -121,11 +121,11 @@ def test_get_program_bytes_unlabelled_matches_real_cat_1_byte_counts():
     # program grouping mistook the zero-padding bytes in front of the
     # permanent .END. marker for a small, nonexistent third program.
     memory = Memory.from_file(DATA_DIR / "unlabelled.dm41")
-    programs = memory.list_programs()
+    programs = memory.programs.list_programs()
     assert len(programs) == 2
     assert [p.length for p in programs] == [16, 20]
     for program in programs:
-        instruction_bytes = memory.get_program_bytes(program)
+        instruction_bytes = memory.programs.get_program_bytes(program)
         assert len(instruction_bytes) == program.length
         assert find_program_end(instruction_bytes) == len(instruction_bytes)
 
@@ -137,10 +137,10 @@ def test_get_program_bytes_twolabels_exports_the_whole_shared_program():
     # Exporting it returns the full 28-byte block starting at FIRST's own
     # header (the oldest/topmost label), not a per-label slice.
     memory = Memory.from_file(DATA_DIR / "twolabels.dm41")
-    programs = memory.list_programs()
+    programs = memory.programs.list_programs()
     assert len(programs) == 1
     program = programs[0]
-    instruction_bytes = memory.get_program_bytes(program)
+    instruction_bytes = memory.programs.get_program_bytes(program)
     assert len(instruction_bytes) == 28
     assert find_program_end(instruction_bytes) == len(instruction_bytes)
 
@@ -151,10 +151,10 @@ def test_get_program_bytes_finds_a_real_unnamed_program_mid_chain():
     # simple.dm41's case) -- a stronger check that list_programs()'s
     # grouping generalizes past the single-program case.
     memory = Memory.from_file(DATA_DIR / "3x-xm.dm41")
-    programs = memory.list_programs()
+    programs = memory.programs.list_programs()
     unnamed = [p for p in programs if not p.is_named]
     assert len(unnamed) == 1
-    data = memory.get_program_bytes(unnamed[0])
+    data = memory.programs.get_program_bytes(unnamed[0])
     assert len(data) == unnamed[0].length > 0
     assert find_program_end(data) == len(data)
 
@@ -170,8 +170,8 @@ def test_get_program_bytes_terminates_on_every_sample_dump():
         if not filename.endswith(".dm41"):
             continue
         memory = Memory.from_file(DATA_DIR / filename)
-        for program in memory.list_programs():
-            instruction_bytes = memory.get_program_bytes(program)
+        for program in memory.programs.list_programs():
+            instruction_bytes = memory.programs.get_program_bytes(program)
             assert len(instruction_bytes) == program.length > 0, filename
             assert find_program_end(instruction_bytes) == len(
                 instruction_bytes

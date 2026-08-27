@@ -286,8 +286,26 @@ class ExtendedMemory(MemoryRegion):
 
     """
 
-    key = "extended_memory"
-    label = "Extended Memory"
+    # "xm" matches the key Memory.regions() reports for both of the two
+    # disjoint XM display spans, and `label` is what the hex view's Region
+    # column shows for a register in either of them.
+    key = "xm"
+    label = "XM"
+
+    # The full addressable extent XM can occupy: the low region's own
+    # start through the high region's own end. The gap in the middle
+    # (0xC0-0x200, where key assignments/alarms/programs/data live) is
+    # inside this outer range but is never part of any XM region --
+    # _find_region() is what decides which real region an address belongs
+    # to. Callers wanting only one region's storage can still pass an
+    # explicit `address_range`.
+    DEFAULT_ADDRESS_RANGE = (XM_REGIONS[0][0], XM_REGIONS[-1][1])
+
+    def __init__(self, memory: "Memory", address_range=None):
+        super().__init__(
+            memory,
+            self.DEFAULT_ADDRESS_RANGE if address_range is None else address_range,
+        )
 
     TYPE_PROGRAM = XMFile.TYPE_PROGRAM
     TYPE_DATA = XMFile.TYPE_DATA

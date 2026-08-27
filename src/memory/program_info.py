@@ -24,37 +24,24 @@ class ProgramInfo:
     want, see Program/Memory.list_programs() below and docs/program.md sec
     5.3.
 
-    `name` is set for a global alpha label -- what CAT 1 shows as a
-    program's name -- and is None for a plain END marker. Do NOT assume
-    these pair up one-to-one with "programs": per the user's own testing
-    against a modified copy of 6x-xm.dm41, a single END can have zero,
-    one, or several global labels chained to it. Each ProgramInfo is just
-    one independent chain link (a label header or an END marker), not "a
-    program's boundary" -- `kind` says which it is.
+    `name` is set for a global alpha label -- what CAT 1 shows as a program's
+    name -- and is None for a plain END marker. Do NOT assume these pair up
+    one-to-one with "programs": programs don't have to have any global labels,
+    programs can have more than one global label in them, global labels aren't
+    necessarily at the beginning of a program. Each ProgramInfo is just one
+    independent chain link (a label header or an END marker), not "a program's
+    boundary" -- `kind` says which it is.
 
     `distance_bytes` (built from the raw `bbb`/`distance_registers` marker
     fields, plus `end_type` for END entries -- see docs/program.md sec 5.1)
     is the byte distance *this* entry's own marker reports onward to the
     next chain link the backward walk visits from here. It is NOT a
     program's size -- it's the only per-entry number the chain format
-    actually encodes, exposed as-is (rather than interpreted) so it can be
-    weighed against CAT 1's reported program byte lengths while that
-    reconciliation is still being researched (see docs/program.md's open
-    TODOs). Showing an interpreted "size" here, before that's resolved,
-    was the mistake an earlier attempt at a Program tab made (see project
-    notes) -- this deliberately shows the raw marker data instead.
+    actually encodes.
 
-    One entry can be the permanent `.END.` itself (`end_type == 2`) -- the
-    newest thing in program memory, sitting right where the most-recently-
-    created chain link's own "next END" would otherwise be. An earlier
-    version of `list_global_chain()` (then still named `list_programs()`)
-    always discarded this one, on the theory it was bookkeeping rather than
-    a real chain link; the user's own byte-count comparison against a real
-    CAT 1 listing showed that was wrong to assume -- the newest program's
-    reported byte count can extend into exactly the bytes this entry's
-    distance covers. It's now included like any other entry, distinguished
-    via `kind` (`".END."` rather than `"END"`) so it reads clearly as the
-    top-of-memory marker, not a duplicate of a normal END.
+    The last entry can be the permanent `.END.` itself (`end_type == 2`) --
+    the newest thing in program memory, sitting right where the most-recently-
+    created chain link's own "next END" would otherwise be.
     '''
 
     def __init__(
@@ -112,12 +99,10 @@ class ProgramInfo:
 class ProgramLabel:
     '''
     One global alpha label attached to a `Program` (below) -- what CAT 1
-    shows as one catalog entry's name, and whose header
+    shows as a catalog entry, and whose header
     `Memory.set_program_key_assignment()`/`get_program_for_key()` write a
     key-assignment byte into. A `Program` can have zero, one, or several of
-    these (docs/program.md sec 5.3) -- e.g. `tests/data/twolabels.dm41`'s
-    one program has two, "FIRST" and "SECOND", sharing all of the same
-    underlying code with no END between them.
+    these (docs/program.md sec 5.3).
     '''
 
     def __init__(
@@ -148,37 +133,18 @@ class Program:
     `Memory.list_programs()` and docs/program.md sec 5.3.
 
     Programs are told apart by explicit plain END markers, NOT by global
-    labels: an HP-41 program is not required to have one at all, and may
-    have several (see `ProgramLabel`) -- confirmed against a real DM41L's
-    `CAT 1` listing by the user: `tests/data/unlabelled.dm41` holds two
-    programs, neither one named, 16 and 20 bytes. The one exception is the
-    newest (last-created) program in memory -- it is not required to end
-    with an explicit END of its own; the permanent `.END.` sentinel that
-    marks the top of free program memory can serve as its terminator
-    instead (`terminator == ".END."` here, `is_last` True). Every OLDER
-    program, by construction, must have its own explicit END
-    (`terminator == "END"`), since nothing else could have closed it out
-    while a newer program was added after it.
+    labels: an HP-41 program is not required to have one at all, and may have
+    several (see `ProgramLabel`). In addition, the newest (last-created)
+    program in memory is not required to end with an explicit END of its own;
+    the permanent `.END.` sentinel that marks the top of free program memory
+    can serve as its terminator instead (`terminator == ".END."` here,
+    `is_last` True). Every OLDER program, by construction, must have its own
+    explicit END (`terminator == "END"`), since nothing else could have closed
+    it out while a newer program was added after it.
 
-    `labels` lists every global label found within this program's own
-    bytes, in on-calculator/forward reading order -- empty if the program
-    has none at all. `length` is this program's real byte count, from its
-    own first instruction byte through its own terminator inclusive -- the
-    same number CAT 1 reports. This is NOT the same thing as the raw
-    backward-chain marker distance `ProgramInfo.distance_bytes` exposes --
-    that number answers a different question (see that class's docstring),
-    and per the user's own real-hardware comparison is not safe to treat
-    as a program's size on its own. In particular, the permanent `.END.`
-    marker is always written at a register boundary (docs/program.md sec
-    5.1's "(In all samples, .END. is always found in the last 3 bytes of a
-    register...)"), so there can be a few zero-padding bytes between a
-    program's own real last byte and where `.END.` actually sits; those
-    padding bytes belong to no program at all and are never included in
-    any `length` here -- an earlier version of this grouping mistook that
-    padding (plus `.END.`'s own marker bytes) for a small extra unnamed
-    program, which is exactly the bug the user's own CAT 1 comparison
-    against `tests/data/unlabelled.dm41` caught (see docs/program.md sec
-    5.3).
+    `labels` lists every global label found within this program's own bytes,
+    in on-calculator/forward reading order. `length` is this program's real
+    byte count -- the same number CAT 1 reports.
     '''
 
     def __init__(

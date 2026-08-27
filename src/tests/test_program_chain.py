@@ -115,8 +115,8 @@ def test_walk_chain_twolabels_finds_both_internal_labels():
     # one closer to the trailing marker) first, oldest (FIRST, the
     # outermost one) last.
     memory = Memory.from_file(DATA_DIR / "twolabels.dm41")
-    program = memory.list_programs()[0]
-    data = memory.get_program_bytes(program)
+    program = memory.programs.list_programs()[0]
+    data = memory.programs.get_program_bytes(program)
     entries = walk_chain(data)
     names = [e.get("name") for e in entries if e["is_label"]]
     assert names == ["SECOND", "FIRST"]

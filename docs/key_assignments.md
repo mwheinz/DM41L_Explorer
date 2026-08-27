@@ -142,7 +142,7 @@ didn't work, and that real-calculator row-4 assignments came back
 missing or misplaced when read back by the app -- both are exactly what
 using the wrong (unmapped) column would cause, since it wrote/read byte
 `16*(2-1)+M` (the phantom position under `ENTER^`) instead of the real
-key 42's `16*(3-1)+M`. `Memory._physical_column()` implements this
+key 42's `16*(3-1)+M`. `KeyAssignments._physical_column()` implements this
 mapping, used by both `key_byte_for()` (this section) and
 `_keyflags_bit()` (§4.5) -- the same wrong-column bug affected both the
 Key Assignment Registers *and* the KEYFLAGS existence bit for keys 42-44,
@@ -181,7 +181,7 @@ it's set identically regardless of whether the underlying assignment is a
 built-in function (§4.2) or a global label (§4.6).
 
 Bit position for key row `M`, physical column `N` (0-indexed, MSB-first —
-the same convention `Memory.get_flag()`/`set_flag()` use for register d's
+the same convention `StatusRegisters.get_flag()`/`set_flag()` use for register d's
 56 flags):
 
     bit = 36 - M - 8*(N-1)
@@ -226,7 +226,7 @@ that byte.
 Confirmed against `global-key-assignments.dm41`: two global labels ("AAA"
 assigned to key 11, "BBB" to key 12) produced an entirely empty Key
 Assignment Registers region (no `0xF0` marker anywhere from `0x0C0`
-onward) while both keys' KEYFLAGS bits were set, and `Memory.list_programs()`
+onward) while both keys' KEYFLAGS bits were set, and `ProgramMemory.list_programs()`
 correctly reported each label's `key_assignment` byte.
 
 ### 4.7 The Lookup Algorithm
@@ -328,7 +328,7 @@ tables give the `xrom,fn` numbers for every function in these two modules.
   real assignment, §4.5), and one of the four assignments targets `GTO..`
   (001), which the merged table marks **not** Assignable, and another
   targets key `31` — the physical SHIFT key position, also never
-  assignable (`gui/key_assignments_tab.py`'s `HP41_LAYOUT`). `Memory.set_key_assignment()`/
+  assignable (`gui/key_assignments_tab.py`'s `HP41_LAYOUT`). `KeyAssignments.set_assignment()`/
   `get_key_assignment()` (see `src/memory/memory.py`) currently implement
   the literal-byte-value hypothesis for these nine functions
   (`src/memory/functions.py`'s module docstring carries the same caveat);
@@ -346,7 +346,7 @@ synchronized "HP41"/"DM41L" keypad grids from the tab's original design)
 and `gui/key_assignment_edit_dialog.py` (pick a named function or type a
 raw hex byte / byte pair, or delete) cover viewing, creating, editing, and
 deleting built-in/peripheral key assignments (§4.2) — backed by
-`Memory.set_key_assignment()`/`get_key_assignment()`/
+`KeyAssignments.set_assignment()`/`get_key_assignment()`/
 `delete_key_assignment()`/`list_key_assignments()` (§4.2/4.5,
 `src/memory/memory.py`), which keep the Key Assignment Registers and
 KEYFLAGS bits in sync on every edit.
@@ -388,7 +388,7 @@ Import and export are still not implemented — see items 1-2 below.
 2. **Export both kinds of assignment; warn and skip missing programs on
    import.** Export must include both built-in/peripheral assignments
    (from the Key Assignment Registers, §4.2) and global-label assignments
-   (from `Memory.get_program_for_key()`/`list_programs()`'s
+   (from `ProgramMemory.get_program_for_key()`/`list_programs()`'s
    `key_assignment` field, §4.6) — tagged distinctly, since a program
    assignment needs to travel as a *name* (program addresses aren't
    portable across dumps) while a built-in assignment travels as a

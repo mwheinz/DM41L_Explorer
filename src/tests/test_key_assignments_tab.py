@@ -104,10 +104,10 @@ def test_edit_key_assign_program_to_unassigned_key(tab):
     dlg._program_var.set("XMALPHA")
     dlg._on_save_clicked()
 
-    assert memory.get_program_for_key(21, False).name == "XMALPHA"
+    assert memory.programs.get_program_for_key(21, False).name == "XMALPHA"
     assert _button_text(tab, 21, False) == "▸XMALPHA"
     # XMALPHA moved off key 12 -- its old slot is unassigned now.
-    assert memory.get_program_for_key(12, False) is None
+    assert memory.programs.get_program_for_key(12, False) is None
     assert _button_text(tab, 12, False) == "--"
 
 
@@ -124,8 +124,8 @@ def test_edit_key_assign_function_clears_conflicting_program(tab):
     dlg._hex_var.set("40")  # '+'
     dlg._on_save_clicked()
 
-    assert memory.get_key_assignment(11, False)["name"] == "+"
-    assert memory.get_program_for_key(11, False) is None
+    assert memory.key_assignments.get_assignment(11, False)["name"] == "+"
+    assert memory.programs.get_program_for_key(11, False) is None
     assert _button_text(tab, 11, False) == "+"
 
 
@@ -137,8 +137,8 @@ def test_edit_key_delete_clears_program_assignment(tab):
     dlg = root_children_dialog(tab)
     dlg._on_delete_clicked()
 
-    assert memory.get_program_for_key(12, False) is None
-    assert memory.get_key_flag(12, False) is False
+    assert memory.programs.get_program_for_key(12, False) is None
+    assert memory.key_assignments.get_key_flag(12, False) is False
     assert _button_text(tab, 12, False) == "--"
 
 

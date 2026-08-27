@@ -299,7 +299,7 @@ bytes**, with two labels attached to it; `CAT 1` would show two catalog
 entries (one per label) for what is physically one program.
 
 **The grouping rule**, walking the chain oldest to newest (implemented by
-`Memory.list_programs()`, returning `Program`/`ProgramLabel` objects --
+`ProgramMemory.list_programs()`, returning `Program`/`ProgramLabel` objects --
 `src/memory/program_info.py`):
 
 1. Every global label encountered is added to the label list of whatever
@@ -334,10 +334,10 @@ mistaken for a real program.
 ### 5.4 Removing a Program, and Pack (GitHub issues #6/#31)
 
 Both operations are implemented in terms of a single shared primitive,
-`Memory._rebuild_program_memory()`, rather than any new low-level marker
+`ProgramMemory._rebuild()`, rather than any new low-level marker
 arithmetic of their own:
 
-1. Capture every program to be kept (`Memory.get_program_bytes()`, oldest
+1. Capture every program to be kept (`ProgramMemory.get_program_bytes()`, oldest
    first) plus, for each of its labels, whatever key assignment (§4.6) it
    currently holds -- `import_program()` always zeroes a freshly-spliced
    label's own key-assignment byte (see its own docstring, step 4), so
@@ -363,7 +363,7 @@ arithmetic of their own:
    the result is still correct, just not maximally compact, the same
    tradeoff every single `import_program()` call already accepts.
 
-**`Memory.remove_program(program)`** (issue #6 -- "add the ability to
+**`ProgramMemory.remove_program(program)`** (issue #6 -- "add the ability to
 remove programs"; Export/Import already covered "add"/"edit", see §5.3's
 own tab and `program_files.py`) calls this with every *other* current
 program. This matters for more than just the newest program: the oldest
@@ -409,7 +409,7 @@ programs are entirely invisible to `list_programs()` until packed;
 `lander-packed.dm41`/`targ-packed.dm41` are the same content after a
 real PACK on real hardware, used as this project's own ground truth.
 
-`Memory._forward_scan_programs()` is what actually does this: it reads
+`ProgramMemory._forward_scan_programs()` is what actually does this: it reads
 program memory as one flat span, from `_program_memory_top_addr()` (the
 oldest program's fixed, unmovable start) down to `.END.`'s own floor
 (`_addr_for(DotEnd(), 6)`) -- trusting `R00()`/`DotEnd()` themselves as

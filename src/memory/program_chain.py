@@ -8,11 +8,7 @@ same decoding, but only against live registers via `Memory._addr_for()`/
 `_pos_for()`. `Memory.import_program()` needs the same decoding applied to a
 standalone RAW/DAT-decoded instruction-byte blob (program_files.py) *before*
 it's spliced into program memory at all -- there's no register addressing
-to lean on yet at that point, just the bytes themselves. This module is
-that byte-only counterpart, plus the encode side neither memory.py nor
-program_files.py needed before now (Export only ever read markers; Import
-has to write one -- see Memory.import_program()'s docstring in memory.py
-for the full splicing algorithm this feeds into).
+to lean on yet at that point, just the bytes themselves.
 
 Marker format (docs/program.md sec 5.1/5.2), 3 bytes, in on-calculator
 forward reading order (data[index] is the highest-address/first-read byte):
@@ -37,12 +33,7 @@ def decode_chain_marker(data: bytes, index: int) -> Optional[dict]:
     '''
     Decodes the 3-byte marker at `data[index:index+3]`. Returns None if
     `index` is out of bounds or the byte there doesn't start with the
-    0xC0-0xCD marker nibble -- the byte-buffer counterpart to
-    `Memory._decode_chain_marker()`, which does the same decode against a
-    live register instead (see that method's docstring for the field
-    layout). Unlike the register version, there's no register-boundary
-    wraparound to worry about here -- `data` is already one flat forward
-    byte array.
+    0xC0-0xCD marker nibble .
     '''
     if index < 0 or index + 3 > len(data):
         return None
@@ -74,7 +65,7 @@ def decode_label_name(data: bytes, index: int, length: int) -> tuple:
 
 def encode_chain_marker(bbb: int, distance_registers: int, third_byte: int) -> bytes:
     '''
-    The write-side counterpart to `decode_chain_marker()`: packs
+    The counterpart to `decode_chain_marker()`: packs
     `bbb`/`distance_registers` (docs/program.md sec 5.1's `bbb`/`rrrrrrrrr`
     fields) plus a caller-supplied `third_byte` (passed through completely
     unchanged -- callers own whatever it should mean, label-length-plus-key

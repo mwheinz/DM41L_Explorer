@@ -51,7 +51,8 @@ class Register:
         # the user should not manually alter the value (but the value can
         # still be altered by other operations, such as adjusting the size of
         # main memory, adding a program to program memory, and similar
-        # operations.
+        # operations. TODO: turns out these fields weren't needed - delete
+        # them.
         self.ascii_only = ascii_only
         self.read_only = read_only
 
