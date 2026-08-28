@@ -1,4 +1,8 @@
-# HP-41C/V. MASTERMIND
+# HP-41C MASTERMIND
+
+- HP-41C MasterMind by Julian Perry
+- Datafile V2 N1 Pg 27 Jan-Feb 1983
+- Uses: Extended Functions and Time
 
 This short program allows you to play 9 digit master- mind on a basic 41c. The
 program is very fast and is only 223 bytes long.
