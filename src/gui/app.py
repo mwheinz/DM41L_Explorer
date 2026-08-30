@@ -205,7 +205,6 @@ class DM41LExplorerApp(ctk.CTk):
         self.engine = CommandEngine(self.serial)
         self.memory = Memory()
         self.memory_source = None
-        self.dirty = False
         self._command_pending = False
 
         self._build_layout()
@@ -567,7 +566,7 @@ class DM41LExplorerApp(ctk.CTk):
         self._status_label.configure(text=text)
 
     def _on_memory_changed(self):
-        self.dirty = True
+        self.memory.is_modified()
         self._modified_label.configure(text="* Modified")
         # The tab that made this edit already re-rendered itself (each
         # tab's own edit handler calls its render() directly, for
@@ -740,39 +739,25 @@ class DM41LExplorerApp(ctk.CTk):
         self.after(10, self._fetch_memory_dump)
 
     def _fetch_memory_dump(self):
-        if self.memory_source is not None:
-            # A dump file was already opened (e.g. via double-clicking a
-            # .dm41 file, or a startup file argument) before this
-            # auto-connect sequence got here -- don't clobber it with the
-            # calculator's own memory. This races with double-click-to-open
-            # on every platform: the auto-connect timer is scheduled in
-            # __init__ before a startup file argument is processed in
-            # main(), and the macOS "Open Document" AppleEvent can arrive
-            # at any point relative to this multi-step (battery -> timeout
-            # -> time -> dump) sequence. The user can still pull the live
-            # dump explicitly via Connect > Get Dump from DM41L.
-            self._set_status(f"Connected to {self.serial.serial_inst.port}")
-            return
-        self._set_status("Reading memory dump...")
-        self.after(
-            10,
-            lambda: self.engine.execute(
-                MemoryStringCommand(),
-                self._on_auto_dump_received,
-                self._on_command_error,
-            ),
-        )
+        if self.memory_source is None and not self.memory.modified:
+            self._set_status("Reading memory dump...")
+            self.after(
+                10,
+                lambda: self.engine.execute(
+                    MemoryStringCommand(),
+                    self._on_auto_dump_received,
+                    self._on_command_error,
+                ),
+            )
+
+        # We've already got a modified memory dump loaded. Just return.
+        self._set_status(f"Connected to {self.serial.serial_inst.port}")
+        return
 
     def _on_auto_dump_received(self, dump):
         # Re-check right at the moment the fetched dump is about to be
-        # applied, not just before the fetch started in _fetch_memory_dump:
-        # a double-click can still land while the MemoryStringCommand
-        # round-trip is in flight. This callback is only used for the
-        # auto-connect sequence -- the explicit "Get Dump from DM41L" menu
-        # action (get_dump_from_calculator) always overwrites, since that's
-        # an explicit user request and it already confirms over unsaved
-        # changes before firing.
-        if self.memory_source is not None:
+        # applied. It's a small race condition, but it does exist.
+        if self.memory_source is not None or self.memory.modified:
             logger.info(
                 "Discarding auto-connect's fetched dump: a file was opened "
                 "in the meantime."
@@ -786,7 +771,6 @@ class DM41LExplorerApp(ctk.CTk):
         try:
             self.memory = Memory.from_string(dump)
             self.memory_source = None
-            self.dirty = False
             self._modified_label.configure(text="")
             self._update_source_label()
             self._render_tabs()
@@ -813,13 +797,12 @@ class DM41LExplorerApp(ctk.CTk):
     # -- File menu actions --------------------------------------------------
 
     def new_memory_buffer(self):
-        if self.dirty and not messagebox.askyesno(
+        if self.memory.modified and not messagebox.askyesno(
             "Unsaved Changes", "Discard unsaved changes and start a new buffer?"
         ):
             return
         self.memory = Memory()
         self.memory_source = None
-        self.dirty = False
         self._modified_label.configure(text="")
         self._update_source_label()
         self._render_tabs()
@@ -903,7 +886,6 @@ class DM41LExplorerApp(ctk.CTk):
             return
         try:
             self.memory.to_file(self.memory_source)
-            self.dirty = False
             self._modified_label.configure(text="")
             logger.info("Dump saved to %s", self.memory_source)
             self.config_store.add_recent_file(self.memory_source)
@@ -924,7 +906,6 @@ class DM41LExplorerApp(ctk.CTk):
         try:
             self.memory.to_file(path)
             self.memory_source = Path(path)
-            self.dirty = False
             self._modified_label.configure(text="")
             self._update_source_label()
             logger.info("Dump saved to %s", path)
@@ -937,7 +918,7 @@ class DM41LExplorerApp(ctk.CTk):
             messagebox.showerror("Error", f"Could not save dump: {e}")
 
     def load_dump_from_file(self):
-        if self.dirty and not messagebox.askyesno(
+        if self.memory.modified and not messagebox.askyesno(
             "Unsaved Changes", "Discard unsaved changes and load a different dump?"
         ):
             return
@@ -952,14 +933,13 @@ class DM41LExplorerApp(ctk.CTk):
         '''Reads `path` into self.memory and refreshes the UI to match.
         This is the actual load step shared by every way of opening a dump
         (File > Open..., a startup file argument, and double-clicking a
-        .dm41 file) -- callers are responsible for checking `self.dirty`
+        .dm41 file) -- callers are responsible for checking `self.memory.modified`
         and confirming with the user first, since the right prompt (or
         whether to prompt at all) differs by caller. This always
         overwrites the current buffer unconditionally.'''
         try:
             self.memory = Memory.from_file(path)
             self.memory_source = Path(path)
-            self.dirty = False
             self._modified_label.configure(text="")
             self._update_source_label()
             self._render_tabs()
@@ -991,7 +971,7 @@ class DM41LExplorerApp(ctk.CTk):
             self._persist_config("recent files")
             self._rebuild_recent_files_menu()
             return
-        if self.dirty and not messagebox.askyesno(
+        if self.memory.modified and not messagebox.askyesno(
             "Unsaved Changes", "Discard unsaved changes and load a different dump?"
         ):
             return
@@ -1055,7 +1035,7 @@ class DM41LExplorerApp(ctk.CTk):
         if not self.serial.is_connected:
             messagebox.showwarning("Not Connected", "Connect to the DM41L first.")
             return
-        if self.dirty and not messagebox.askyesno(
+        if self.memory.modified and not messagebox.askyesno(
             "Unsaved Changes",
             "Discard unsaved changes and read the calculator's memory?",
         ):
@@ -1097,7 +1077,7 @@ class DM41LExplorerApp(ctk.CTk):
     # -- Shutdown -----------------------------------------------------------
 
     def on_close(self):
-        if self.dirty and not messagebox.askyesno(
+        if self.memory.modified and not messagebox.askyesno(
             "Unsaved Changes", "Discard unsaved changes and quit?"
         ):
             return

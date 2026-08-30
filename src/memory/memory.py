@@ -75,6 +75,8 @@ class Memory:
         ):
             self._regions[region.key] = region
 
+        self._modified = False
+
     def __eq__(self, other):
         if not isinstance(other, Memory):
             return False
@@ -102,15 +104,17 @@ class Memory:
         Creates a new Memory object from a string that contains a DM41
         memory dump.
         '''
+
+        memory = cls()
+
         lines = buffer.strip().splitlines()
         if not lines:
-            return cls()
+            return memory
 
         header = lines[0]
         if header != "DM41":
             raise ValueError(f"Invalid header: {header}")
 
-        memory = cls(header)
         phase = 1
         next_base = 0
         for line in lines[1:]:
@@ -205,6 +209,7 @@ class Memory:
     def to_file(self, path: Union[str, Path]):
         with open(path, "w", encoding="utf-8") as f:
             f.write(self.to_string())
+        self._modified=False
 
     # -- Raw register access ---------------------------------------------
 
@@ -225,14 +230,24 @@ class Memory:
         else:
             self._special_registers[key] = register
 
-    # -- Regions ---------------------------------------------------------
-
     def region(self, key: str):
         '''The `MemoryRegion` registered under `key` -- "status",
         "nonexistent", "key", "alarms", "unused", "program", "data" or
         "xm". Raises KeyError for anything else.
         '''
         return self._regions[key]
+
+    @property
+    def modified(self) -> bool:
+        return self._modified
+
+    def is_modified(self):
+        '''
+        Memory modifications can happen many different ways, so we can't just
+        detect such changes automatically - instead we need to have whatever
+        process changed the memory to set the modified flag.
+        '''
+        self._modified = True
 
     @property
     def status_registers(self) -> StatusRegisters:

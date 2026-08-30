@@ -107,7 +107,7 @@ def test_save_as_prompt_writes_new_file_and_updates_source(app, tmp_path):
 
     assert new_path.exists()
     assert app.memory_source == new_path
-    assert app.dirty is False
+    assert app.memory.modified is False
 
 
 def test_save_to_already_loaded_file_confirms_then_saves(app, tmp_path):
@@ -169,3 +169,35 @@ def test_new_memory_buffer_also_clears_source(app, tmp_path):
     with mock.patch.object(app, "save_dump_as") as save_as:
         app.save_dump_to_file()
     save_as.assert_called_once()
+
+
+def test_on_memory_changed_sets_modified_flag(app):
+    """Regression test for a bug where `_on_memory_changed()` -- the
+    callback wired to every editable tab's `on_change=` (see __init__)
+    and called explicitly by `pack_memory()` -- read
+    `self.memory.is_modified` as a bare attribute access instead of
+    calling it (`self.memory.is_modified()`). Memory.is_modified() is the
+    ONLY thing that ever sets Memory._modified True, so the missing
+    parens silently meant no edit, anywhere in the app, ever marked the
+    dump as modified -- every "Discard unsaved changes?" guard below was
+    permanently dead and a loaded dump could be overwritten with no
+    warning at all."""
+    assert app.memory.modified is False
+    app._on_memory_changed()
+    assert app.memory.modified is True
+
+
+def test_new_memory_buffer_prompts_after_tab_edit(app):
+    """An edit made through a tab's on_change callback (simulated here by
+    calling _on_memory_changed() directly, the same hook every editable
+    tab invokes) must be enough to trigger the "Discard unsaved changes?"
+    confirmation -- not just an edit made by directly poking
+    memory.status_registers like the save-path tests above do."""
+    app._on_memory_changed()
+
+    with mock.patch(
+        "gui.app.messagebox.askyesno", return_value=False
+    ) as confirm:
+        app.new_memory_buffer()
+
+    confirm.assert_called_once()
