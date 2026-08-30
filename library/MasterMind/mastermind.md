@@ -23,7 +23,7 @@ these can easily be removed(see below).
    the guess will be padded with zeros on the left hand side.
 5. The program will then return your guess followed by a dash and two other
    digits(eg. #12345-2.1") The first digit inicates the number of correctly
-   placed digits in your guess and the second indi- cates the number of digits
+   placed digits in your guess and the second indicates the number of digits
    in your guess that are in the code, but are in the wrong place
    (corresponding to black and white key pegs.
 6. Enter your next guess and press R/S. Don't take too long because if you've
