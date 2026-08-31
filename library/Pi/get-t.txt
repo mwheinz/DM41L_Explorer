@@ -1,15 +1,7 @@
 LBL "GET-T"
 "TIMES"
-1
-SEEKPTA
-GETX ; start time
-GETX ; end time
-X<>Y
-HMS-
-HR
-3600
-*
-INT
+CF 28
+CF 29
 0
 SEEKPTA
 RDN
@@ -17,9 +9,52 @@ GETX
 FIX 0
 CLA
 ARCL X
->": "
+>"D="
+GETX ; start time
+GETX ; end time
+X>Y?
+GTO 01
+24
++
+LBL 01
+X<>Y
+HMS-
+ENTER
+INT
+10
+X>Y?
+XEQ 00
 RDN
 ARCL X
->" SECS"
+>":"
+RDN
+FRC
+100
+*
+ENTER
+INT ; minutes
+10
+X>Y?
+XEQ 00
+RDN
+ARCL X
+>":"
+X<>Y
+FRC
+100
+*
+INT ; seconds
+10
+X>Y?
+XEQ 00
+RDN
+ARCL X
 AVIEW
+SF 28
+SF 29
+RTN
+LBL 00
+0
+ARCL X
+RDN
 END
