@@ -32,6 +32,14 @@ pyinstaller dm41l.spec
 # real Apple Developer ID; see docs/release_checklist.md. No-op elsewhere.
 if [ "$(uname)" = "Darwin" ]; then
     codesign --force --deep --sign - "dist/DM41L Explorer.app"
+
+    # GitHub issue #30: library/ ships as a plain sibling folder next to
+    # the .app rather than inside it, since users browse a .app as one
+    # opaque icon and would never find it buried in Contents/MacOS. It's
+    # just data files, not code, so it doesn't need (and doesn't get) a
+    # signature of its own.
+    cp -r ../library "dist/library"
+    cp -r ../README.md "dist/README.md"
 else
     # Drop a short README into that output directory so anyone
     # who unzips a release and sees an unfamiliar _internal folder next
@@ -42,4 +50,10 @@ else
     if [ "$(uname)" = "Linux" ]; then
         cp "../resources/MyIcon.png" "dist/dm41lexplorer/MyIcon.png"
     fi
+
+    # GitHub issue #30: library/ ships as a sibling of the executable
+    # (alongside _internal/), not inside _internal/, since that's where
+    # users actually look when browsing the unzipped folder.
+    cp -r ../library "dist/dm41lexplorer/library"
+    cp -r ../README.md "dist/dm41lexplorer/README.md"
 fi

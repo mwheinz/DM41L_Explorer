@@ -109,7 +109,9 @@ jobs:
         shell: bash
         run: |
           cd src/dist
-          ditto -c -k --sequesterRsrc --keepParent "DM41L Explorer.app" "../../DM41L-Explorer-${{ github.ref_name }}-macos.zip"
+          # GitHub issue #30: library/ (sample .dm41 dumps)
+          # Include the library and the README.md in the final package.
+          ditto -c -k --sequesterRsrc --keepParent "DM41L Explorer.app" library README.md "../../DM41L-Explorer-${{ github.ref_name }}-macos.zip"
           cd ../..
           shasum -a 256 "DM41L-Explorer-${{ github.ref_name }}-macos.zip" > "DM41L-Explorer-${{ github.ref_name }}-macos.zip.sha256"
 
