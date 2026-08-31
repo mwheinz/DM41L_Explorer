@@ -1,0 +1,25 @@
+LBL "GET-T"
+"TIMES"
+1
+SEEKPTA
+GETX ; start time
+GETX ; end time
+X<>Y
+HMS-
+HR
+3600
+*
+INT
+0
+SEEKPTA
+RDN
+GETX
+FIX 0
+CLA
+ARCL X
+>": "
+RDN
+ARCL X
+>" SECS"
+AVIEW
+END
