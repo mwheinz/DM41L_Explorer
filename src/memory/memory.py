@@ -175,25 +175,31 @@ class Memory:
             return cls.from_string(f.read())
 
     def to_string(self) -> str:
+        ''' Create a string representation of the memory dump. '''
+
         # Section I: "DM41"
         lines = [self._header]
 
-        # Section II: Core Memory, grouped into complete 4-register pages.
-        # A page whose 4 registers are all zero is omitted entirely, even if
-        # some of those addresses have explicit (zero-valued) entries in
-        # _core_memory -- e.g. after ExtendedMemory.remove_file() wipes and
-        # rebuilds an XM region, most of the freed space is explicit zeros
-        # rather than genuinely untouched. This is purely a save-format
-        # compaction: get_register() already treats a missing address as an
-        # implicit zero register, so a page skipped here reads back
-        # identically to one that was never touched at all.
+        # Section II: Core Memory. For compactness, a row that consists of all
+        # zeroes is omitted from the final string. This is purely a
+        # save-format compaction: get_register() already treats a missing
+        # address as an implicit zero register, so a page skipped here reads
+        # back identically to one that was never touched at all.
+
+        # Remember, _core_memory is a sparse structure. Addresses that are omitted are
+        # assumed to be zero. sorted_indices is strictly a list of addresses
+        # that were either present in the original representation this dump
+        # was created from or else were set during operation.
         sorted_indices = sorted(self._core_memory.keys())
         if sorted_indices:
-            pages = sorted({idx - (idx % 4) for idx in sorted_indices})
-            for base_idx in pages:
+            # Dump files group core memory in rows of 4 registers.
+            # Generate a list of rows for the final output.
+            rows = sorted({idx - (idx % 4) for idx in sorted_indices})
+            for base_idx in rows:
                 registers = [
                     self.get_register(base_idx + offset) for offset in range(4)
                 ]
+                # If all 4 registers are zero, skip this row.
                 if all(register == ZERO_REGISTER for register in registers):
                     continue
                 row = [f"{base_idx:02x}"]
@@ -201,6 +207,10 @@ class Memory:
                 lines.append("  ".join(row))
 
         # Section III: Special Registers
+        # These appear to be representations of the HP41's CPU registers. Note
+        # that right now the DM41L_Explorer never alters their values.
+        # TODO: Consider just making these constants based on their values in
+        # a dump taken in memory lost state.
         if self._special_registers:
             # These need to be emitted in the same order they first appeared.
             A = self._special_registers["A"].get_hex()
@@ -243,10 +253,8 @@ class Memory:
             self._special_registers[key] = register
 
     def region(self, key: str):
-        '''The `MemoryRegion` registered under `key` -- "status",
-        "nonexistent", "key", "alarms", "unused", "program", "data" or
-        "xm". Raises KeyError for anything else.
-        '''
+        '''Return the MemoryRegion registered under `key` Raises KeyError for
+        anything else if the region name does not exist.. '''
         return self._regions[key]
 
     @property
@@ -254,11 +262,11 @@ class Memory:
         return self._modified
 
     def is_modified(self):
-        '''
-        Memory modifications can happen many different ways, so we can't just
-        detect such changes automatically - instead we need to have whatever
-        process changed the memory to set the modified flag.
-        '''
+        ''' Memory modifications can happen many different ways, so we can't
+        just detect such changes automatically - checking every register
+        change would be a bit expensive - instead we have whatever code
+        changed the memory to set the modified flag; this permits the code to
+        set the flag just once when the change is complete. '''
         self._modified = True
 
     @property
@@ -305,24 +313,16 @@ class Memory:
         FreeSpace runs the whole way up to PRIMARY_DATA_END, rather than
         any of them guessing at a split.
 
-        Note a bare `Memory()` DOES have a partition: its register-c
-        default is copied from a real "Memory Lost" dump, so it starts out
-        with R00 = 0x19c and `.END.` = 0x19b, exactly as a just-reset
-        calculator would.
-
-        Deliberately more forgiving than ProgramMemory.list_global_chain()'s
-        own guard, which additionally requires `.END.` to sit at or above
-        the Key Assignments region: this is about whether the *boundary*
-        is meaningful, not whether the chain inside it is walkable.
+        Note that even a default, empty Memory object
+        starts with these set; but it is always possible that we read a
+        corrupt dump file that omitted the status registers. About the only
+        other way to create this situation is for the user to set the value
+        of R00 to an illegal value.
         '''
         try:
             r00 = self.status_registers.R00()
             dot_end = self.status_registers.DotEnd()
         except Exception:  # pylint: disable=broad-except
-            # A real dump always decodes SOME r00/dot_end (even a fresh
-            # Memory()'s built-in defaults do); this guards against
-            # whatever unusual state the GUI call sites this replaced were
-            # already guarding against.
             return False
         return r00 >= MIN_SANE_R00 and dot_end <= r00
 
@@ -330,21 +330,10 @@ class Memory:
         '''
         Every named region of the full addressable display range
         (0x000-0x2EF), as a flat, address-ordered list of RegionSpan(key,
-        label, start, end) -- both inclusive. Snapshotted fresh from the
-        live regions on every call, so it can never be stale at the moment
-        it's taken (but, unlike the regions themselves, it does not follow
-        later edits -- see regions.py).
+        label, start, end) -- both inclusive.
 
         The "xm" key appears twice (Extended Memory #0 and #1), since the
-        two spans aren't contiguous with each other. Note XM #1's reported
-        start (XM_REGIONS[1][0] - 1) is one register below XM_REGIONS[1]'s
-        own start -- XM_REGIONS describes each region's *usable storage*
-        span (excluding its reserved link/pointer register), while this
-        display range includes that reserved register as part of the
-        region visually, matching what hex_view_tab.py already showed
-        before this method existed. XM #0 needs no such adjustment since
-        XM_REGIONS[0][0] (0x40) already is the first displayed address
-        there.
+        two spans aren't contiguous with each other.
         '''
         xm = self.extended_memory
         xm0_lo, xm0_hi = XM_REGIONS[0]
@@ -385,25 +374,23 @@ class Memory:
         on any one of them.
 
         Key Assignments (sec 4) and Alarms (sec 3/4, docs/alarms.md)
-        already stay perfectly packed as a side effect of every
-        KeyAssignments edit -- `KeyAssignments.repack()` re-runs that same
-        canonical repack explicitly, which is a no-op for a dump this app
-        has only ever edited itself, but self-heals one loaded from disk
-        with a pre-existing gap (e.g. a real calculator's own dump, or one
-        hand-edited outside this app).
+        already usually perfectly packed as a side effect of every
+        KeyAssignments edit -- but in the actual calculator packing is a
+        manual operation. This means deleting key assignments can create gaps
+        in a dump file on disk if the user did not manually pack memory before
+        saving the dump file.
 
         Program memory (docs/program.md sec 5) gets more than a repack --
         see `ProgramMemory.repack()`, which rebuilds the global chain
         from a forward opcode scan rather than trusting the existing
         backlinks.
 
-        Meant to be run explicitly before an Import (the issue's own
-        suggested use) to guarantee the maximum possible free space is
-        available for it, and to make sure every label actually present
-        is visible for assignment -- this project deliberately doesn't
-        run it automatically on every edit, so what's in memory always
-        matches exactly what the user last loaded or changed until they
-        ask for this.
+        Meant to be run explicitly after loading a dump file or before an
+        Import to guarantee the maximum possible free space is available for
+        the program to be imported, and to make sure every label actually
+        present is visible for assignment -- this project deliberately doesn't
+        run it automatically on every edit, so what's in memory always matches
+        exactly what the user last loaded or changed until they ask for this.
 
         Returns the number of additional registers now free as a result
         (the change in the free-space region's size) -- 0 if nothing
