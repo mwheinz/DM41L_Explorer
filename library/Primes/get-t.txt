@@ -1,0 +1,56 @@
+LBL "GET-T"
+"TIMES"
+CF 28
+CF 29
+1
+SEEKPTA
+FIX 0
+CLA
+GETX ; start time
+GETX ; end time
+X>Y?
+GTO 01
+24
++
+LBL 01
+X<>Y
+HMS-
+ENTER
+INT
+10
+X>Y?
+XEQ 00
+RDN
+ARCL X
+>":"
+RDN
+FRC
+100
+*
+ENTER
+INT ; minutes
+10
+X>Y?
+XEQ 00
+RDN
+ARCL X
+>":"
+X<>Y
+FRC
+100
+*
+INT ; seconds
+10
+X>Y?
+XEQ 00
+RDN
+ARCL X
+AVIEW
+SF 28
+SF 29
+RTN
+LBL 00
+0
+ARCL X
+RDN
+END
