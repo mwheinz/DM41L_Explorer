@@ -29,66 +29,6 @@ serial console.
 - A DM41L connected over USB, if you want to talk to real hardware —
   otherwise you only need a `.dm41` dump file to explore.
 
-## Running from source
-
-```sh
-git clone https://github.com/mwheinz/DM41L_Explorer.git
-cd DM41L_Explorer
-python3 -m venv venv
-source venv/bin/activate   # on Windows: venv\Scripts\activate
-pip install -r requirements.txt
-cd src
-python3 -m gui.app
-```
-
-On Linux, `tkinter` isn't always bundled with Python — if the app fails to
-import `tkinter`, install it separately first (e.g. `sudo apt install
-python3-tk` on Debian/Ubuntu).
-
-To also run the test suite or build a standalone binary, install the
-development requirements instead of just the runtime ones:
-
-```sh
-pip install -r requirements-dev.txt
-```
-
-## Building a standalone application
-
-A PyInstaller spec (`src/dm41l.spec`) and build script (`src/build.sh`)
-are included, producing a self-contained app — a macOS `.app` bundle
-(with `.dm41` file association) on macOS, and a onedir bundle on Linux and
-Windows.
-
-```sh
-cd src
-./build.sh
-```
-
-Output lands in `src/dist/`. `build.sh` is a shell script — on Windows,
-run it from Git Bash (installed alongside [Git for
-Windows](https://git-scm.com/download/win)) or WSL, or invoke PyInstaller
-directly with `pyinstaller dm41l.spec` after generating `dm41lversion.py`
-yourself (see the comment at the top of `build.sh`).
-
-On Linux and Windows, the executable needs the `_internal/` folder that's
-built alongside it — don't separate them, or move the exe without also
-moving `_internal/`. A `README.txt` explaining this ships in that same
-output folder (and in every release download) for anyone unzipping it
-without this context. The Linux build also includes `MyIcon.png`, ready
-to use as a `.desktop` file's `Icon=` entry if you set one up yourself.
-
-The built binaries aren't code-signed (this is an independently-developed
-hobby project without an Apple or Microsoft developer account), so:
-
-- **macOS** will refuse to open it as coming from an "unidentified
-  developer" — right-click (or Control-click) the app and choose Open,
-  then confirm once, instead of double-clicking it.
-- **Windows** will show a SmartScreen warning — click "More info", then
-  "Run anyway".
-
-Building and running from source, as above, doesn't trigger either of
-these.
-
 ## Using DM41L_Explorer
 
 ### Launching the app for the first time
@@ -198,9 +138,35 @@ Program files cannot be altered at this time.
 The Hex view shows the raw contents of calculator memory, color-coded by the
 region. It is useful for studying how HP41 memory is organized.
 
+## Keyboard Shortcuts
+
+DM41L Explorer is menu-driven, and every shortcut below mirrors a menu item
+(or, for Export/Import, a tab's header button). `Ctrl` is used on Windows and
+Linux; macOS uses `Cmd` for the same shortcuts.
+
+| Action | Windows / Linux | macOS |
+| --- | --- | --- |
+| New Memory Buffer | Ctrl+N | Cmd+N |
+| Open Dump... | Ctrl+O | Cmd+O |
+| Save Dump | Ctrl+S | Cmd+S |
+| Preferences | Ctrl+, | Cmd+, |
+| Quit | Ctrl+Q | Cmd+Q |
+| Connect / Reconnect... | Ctrl+K | Cmd+K |
+| Disconnect | Ctrl+D | Cmd+D |
+| Set Calculator Time | Ctrl+T | Cmd+T |
+| Get Dump from DM41L | Ctrl+G | Cmd+G |
+| Send Dump to DM41L | Ctrl+U | Cmd+U |
+| Refresh Tabs | F5 | F5 |
+| Export... | Ctrl+E | Cmd+E |
+| Import... | Ctrl+I | Cmd+I |
+
+Export and Import act on whichever tab is currently active, and only take
+effect on the Data Registers, XM Files, and Programs tabs — elsewhere they're
+a no-op.
+
 ## Documentation
 
-There are many markdown files in the [`docs`] directory. These represent my
+There are many markdown files in the [`docs`](https://github.com/mwheinz/DM41L_Explorer/tree/main/docs) directory. These represent my
 research notes from developing this project. Hopefully they will be useful to
 you if you are curious about the internals of the HP41 and the DM41L emulator.
 
@@ -211,6 +177,66 @@ Handbook* by Poul Kaarup, *HP-41 Advanced Programming Tips* by Alan McCornack &
 Keith Jarett, and *Synthetic Programming Made Easy* by Keith Jarett. Other
 information came from conducting experiments and studying the resulting memory
 dumps
+
+## Running from source
+
+```sh
+git clone https://github.com/mwheinz/DM41L_Explorer.git
+cd DM41L_Explorer
+python3 -m venv venv
+source venv/bin/activate   # on Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cd src
+python3 -m gui.app
+```
+
+On Linux, `tkinter` isn't always bundled with Python — if the app fails to
+import `tkinter`, install it separately first (e.g. `sudo apt install
+python3-tk` on Debian/Ubuntu).
+
+To also run the test suite or build a standalone binary, install the
+development requirements instead of just the runtime ones:
+
+```sh
+pip install -r requirements-dev.txt
+```
+
+## Building the standalone application
+
+A PyInstaller spec (`src/dm41l.spec`) and build script (`src/build.sh`)
+are included, producing a self-contained app — a macOS `.app` bundle
+(with `.dm41` file association) on macOS, and a onedir bundle on Linux and
+Windows.
+
+```sh
+cd src
+./build.sh
+```
+
+Output lands in `src/dist/`. `build.sh` is a shell script — on Windows,
+run it from Git Bash (installed alongside [Git for
+Windows](https://git-scm.com/download/win)) or WSL, or invoke PyInstaller
+directly with `pyinstaller dm41l.spec` after generating `dm41lversion.py`
+yourself (see the comment at the top of `build.sh`).
+
+On Linux and Windows, the executable needs the `_internal/` folder that's
+built alongside it — don't separate them, or move the exe without also
+moving `_internal/`. A `README.txt` explaining this ships in that same
+output folder (and in every release download) for anyone unzipping it
+without this context. The Linux build also includes `MyIcon.png`, ready
+to use as a `.desktop` file's `Icon=` entry if you set one up yourself.
+
+The built binaries aren't code-signed (this is an independently-developed
+hobby project without an Apple or Microsoft developer account), so:
+
+- **macOS** will refuse to open it as coming from an "unidentified
+  developer" — right-click (or Control-click) the app and choose Open,
+  then confirm once, instead of double-clicking it.
+- **Windows** will show a SmartScreen warning — click "More info", then
+  "Run anyway".
+
+Building and running from source, as above, doesn't trigger either of
+these.
 
 ## Contributing
 
