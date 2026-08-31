@@ -16,7 +16,7 @@ from typing import Dict, Optional, Union
 from pathlib import Path
 
 from .registers import Register
-from .constants import XM_REGIONS, MIN_SANE_R00
+from .constants import XM_REGIONS, MIN_SANE_R00, ZERO_REGISTER
 from .regions import RegionSpan, VoidRegion, FreeSpace
 from .status_registers import StatusRegisters
 from .key_assignments import KeyAssignments
@@ -179,13 +179,25 @@ class Memory:
         lines = [self._header]
 
         # Section II: Core Memory, grouped into complete 4-register pages.
+        # A page whose 4 registers are all zero is omitted entirely, even if
+        # some of those addresses have explicit (zero-valued) entries in
+        # _core_memory -- e.g. after ExtendedMemory.remove_file() wipes and
+        # rebuilds an XM region, most of the freed space is explicit zeros
+        # rather than genuinely untouched. This is purely a save-format
+        # compaction: get_register() already treats a missing address as an
+        # implicit zero register, so a page skipped here reads back
+        # identically to one that was never touched at all.
         sorted_indices = sorted(self._core_memory.keys())
         if sorted_indices:
             pages = sorted({idx - (idx % 4) for idx in sorted_indices})
             for base_idx in pages:
+                registers = [
+                    self.get_register(base_idx + offset) for offset in range(4)
+                ]
+                if all(register == ZERO_REGISTER for register in registers):
+                    continue
                 row = [f"{base_idx:02x}"]
-                for offset in range(4):
-                    row.append(self.get_register(base_idx + offset).get_hex())
+                row.extend(register.get_hex() for register in registers)
                 lines.append("  ".join(row))
 
         # Section III: Special Registers
