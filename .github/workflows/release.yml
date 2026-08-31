@@ -109,9 +109,19 @@ jobs:
         shell: bash
         run: |
           cd src/dist
-          # GitHub issue #30: library/ (sample .dm41 dumps)
-          # Include the library and the README.md in the final package.
-          ditto -c -k --sequesterRsrc --keepParent "DM41L Explorer.app" library README.md "../../DM41L-Explorer-${{ github.ref_name }}-macos.zip"
+          # ditto -c -k only ever accepts a single source when creating an
+          # archive ("ditto: Can't archive multiple sources") -- it's used
+          # here (rather than plain zip) specifically because it's the one
+          # tool that zips a signed .app bundle without mangling its
+          # resource forks / code-signing metadata, so the .app has to be
+          # its own ditto call.
+          ditto -c -k --sequesterRsrc --keepParent "DM41L Explorer.app" "../../DM41L-Explorer-${{ github.ref_name }}-macos.zip"
+          # library/ (GitHub issue #30) and README.md are plain data/text
+          # siblings of the .app (see build.sh) with no signing concerns,
+          # so a regular `zip` -- which happily appends to an
+          # already-existing archive -- adds them into the same zip
+          # ditto just created.
+          zip -r "../../DM41L-Explorer-${{ github.ref_name }}-macos.zip" library README.md
           cd ../..
           shasum -a 256 "DM41L-Explorer-${{ github.ref_name }}-macos.zip" > "DM41L-Explorer-${{ github.ref_name }}-macos.zip.sha256"
 
