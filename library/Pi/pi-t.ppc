@@ -23,3 +23,7 @@ BA000C837495714B716871111B159471420D837495714B7176
 104011710691807597009703BF0086A69CA669850221144030
 98808996009C05CF0F9080111B154398739600D0000F8685B2
 00C8552D46
+
+# HP-41C Extended Precision PI Program This version uses extended memory and
+# the time module to save the start and finish times of each run, making it
+# easier to benchmark its operation.
