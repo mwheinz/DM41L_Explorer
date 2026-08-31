@@ -72,7 +72,6 @@ from memory import (
     encode_program_ppc,
     decode_program_raw,
     decode_program_dat,
-    decode_program_ppc,
 )
 from gui.tab_common import (
     build_tab_header,
@@ -327,7 +326,7 @@ class ProgramTab(ctk.CTkFrame):
     _IMPORT_FORMATS = {
         ".raw": ("RAW", decode_program_raw),
         ".dat": ("DAT", decode_program_dat),
-        ".ppc": ("PPC", decode_program_ppc),
+        ".ppc": ("PPC", decode_program_dat),
     }
 
     def _import_program(self):

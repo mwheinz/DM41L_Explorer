@@ -98,29 +98,38 @@ def decode_program_raw(data: bytes) -> bytes:
     return instruction_bytes
 
 
+# ASCII whitespace decode_program_dat() strips before
+# decoding the hex data. This allows dat files to be formatted for
+# readability (i.e., as in a "PPC" formatted file).
+
+_DAT_WHITESPACE = b" \t\r\n\v\f"
+
+
 def decode_program_dat(data: bytes) -> bytes:
     '''
-    Recovers a program's instruction bytes from an HP41 DAT file
-    (`encode_program_dat()`'s own format): reads the 4-hex-digit length
-    header, decodes that many ASCII-hex-encoded bytes, and verifies the
-    trailing 2-hex-digit checksum.
+    Recovers a program's instruction bytes from an HP41 DAT (or a "PPC" file
+    (DAT that has newlines in it...) Reads the header, decodes that many
+    ASCII-hex-encoded bytes, and verifies the trailing 2-hex-digit checksum.
 
     Raises DM41LMemoryError if `data` is too short for its own declared
     length, contains non-hex-digit data, or the checksum doesn't match.
     '''
-    if len(data) < 6:
+    stripped = bytes(b for b in data if b not in _DAT_WHITESPACE)
+
+    if len(stripped) < 6:
         raise DM41LMemoryError(
             "DAT file is too short for a 4-byte header and 2-byte checksum."
         )
+
     try:
-        length = int(data[:4], 16)
+        length = int(stripped[:4], 16)
     except ValueError as e:
         raise DM41LMemoryError(
-            f"DAT file's 4-byte header isn't hex digits: {data[:4]!r}."
+            f"DAT file's 4-byte header isn't hex digits: {stripped[:4]!r}."
         ) from e
 
-    body_hex = data[4 : 4 + 2 * length]
-    checksum_hex = data[4 + 2 * length : 4 + 2 * length + 2]
+    body_hex = stripped[4 : 4 + 2 * length]
+    checksum_hex = stripped[4 + 2 * length : 4 + 2 * length + 2]
     if len(body_hex) != 2 * length or len(checksum_hex) != 2:
         raise DM41LMemoryError(
             f"DAT file is shorter than its own declared length ({length} bytes)."
@@ -144,21 +153,14 @@ def decode_program_dat(data: bytes) -> bytes:
 
 _PPC_LINE_WIDTH = 50
 
-# ASCII whitespace decode_program_ppc() strips before handing off to
-# decode_program_dat() -- covers the plain "\n" the two real PPC sample
-# files use, plus "\r" in case a file has picked up CRLF line endings
-# (e.g. from being opened/resaved on Windows) along the way.
-_PPC_WHITESPACE = b" \t\r\n\v\f"
-
-
 def encode_program_ppc(data: bytes) -> bytes:
     '''
-    PPC format (see this module's docstring): `encode_program_dat()`'s own
-    output, word-wrapped to `_PPC_LINE_WIDTH` (50) characters per line,
-    with a trailing newline after the last line. Verified byte-for-byte
-    against the two real PPC files this format was reverse-engineered
-    from sample .ppc files that were created by copying the text out of a PPC
-    Calculator Journal program listing.
+    PPC format: DAT format that's word-wrapped to `_PPC_LINE_WIDTH` (50)
+    characters per line, with a trailing newline after the last line. Based on
+    the formatting of HP41 programs in the PPC Calculator Journal program
+    listings.
+
+    This is entirely to make the output file easier for a human to read.
     '''
     dat_text = encode_program_dat(data)
     lines = [
@@ -166,17 +168,3 @@ def encode_program_ppc(data: bytes) -> bytes:
         for i in range(0, len(dat_text), _PPC_LINE_WIDTH)
     ]
     return b"\n".join(lines) + b"\n"
-
-
-def decode_program_ppc(data: bytes) -> bytes:
-    '''
-    Recovers a program's instruction bytes from a PPC file (see this
-    module's docstring): strips the line-wrap whitespace back out and
-    decodes what's left as a DAT file (`decode_program_dat()`), including
-    that format's own checksum check.
-
-    Raises DM41LMemoryError under the same conditions `decode_program_dat()`
-    does, once whitespace has been removed.
-    '''
-    stripped = bytes(b for b in data if b not in _PPC_WHITESPACE)
-    return decode_program_dat(stripped)

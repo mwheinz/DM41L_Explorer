@@ -43,7 +43,6 @@ from memory import (
     encode_program_ppc,
     decode_program_raw,
     decode_program_dat,
-    decode_program_ppc,
 )
 from memory.opcode_scan import find_program_end
 
@@ -282,7 +281,7 @@ def test_decode_program_dat_rejects_truncated_file():
 # file's own hex text (_wrap_like_ppc(), independent of
 # encode_program_ppc()) rather than adding new binary fixtures -- the
 # format is fully defined in terms of DAT, and this also keeps
-# decode_program_ppc() from only ever being checked against its own
+# decode_program_dat() from only ever being checked against its own
 # encoder's exact inverse.
 
 
@@ -296,7 +295,7 @@ def _wrap_like_ppc(dat_text: bytes, width: int = 50) -> bytes:
 def test_decode_program_ppc_round_trips_apptest():
     ppc_bytes = encode_program_ppc(APPTEST_BYTES)
     assert b"\n" in ppc_bytes  # APPTEST's 58-char DAT text wraps at least once
-    assert decode_program_ppc(ppc_bytes) == APPTEST_BYTES
+    assert decode_program_dat(ppc_bytes) == APPTEST_BYTES
 
 
 def test_encode_program_ppc_wraps_dat_text_at_50_chars():
@@ -312,13 +311,13 @@ def test_encode_program_ppc_wraps_dat_text_at_50_chars():
 def test_decode_program_ppc_and_dat_agree_on_tower():
     dat_bytes = decode_program_dat((DATA_DIR / "tower.dat").read_bytes())
     wrapped = _wrap_like_ppc((DATA_DIR / "tower.dat").read_bytes())
-    assert decode_program_ppc(wrapped) == dat_bytes
+    assert decode_program_dat(wrapped) == dat_bytes
 
 
 def test_encode_program_ppc_round_trips_tower():
     instruction_bytes = decode_program_dat((DATA_DIR / "tower.dat").read_bytes())
     ppc_bytes = encode_program_ppc(instruction_bytes)
-    assert decode_program_ppc(ppc_bytes) == instruction_bytes
+    assert decode_program_dat(ppc_bytes) == instruction_bytes
     assert ppc_bytes.replace(b"\n", b"") == (DATA_DIR / "tower.dat").read_bytes()
 
 
@@ -329,11 +328,11 @@ def test_decode_program_ppc_tolerates_crlf_line_endings():
     # picks up CRLF line endings somewhere along the way (e.g. opened and
     # resaved on Windows).
     ppc_bytes = encode_program_ppc(APPTEST_BYTES).replace(b"\n", b"\r\n")
-    assert decode_program_ppc(ppc_bytes) == APPTEST_BYTES
+    assert decode_program_dat(ppc_bytes) == APPTEST_BYTES
 
 
 def test_decode_program_ppc_rejects_corrupt_checksum():
     data = bytearray(encode_program_ppc(APPTEST_BYTES))
     data[-2] ^= 0x0F  # perturb the checksum's last hex digit (data[-1] is "\n")
     with pytest.raises(DM41LMemoryError):
-        decode_program_ppc(bytes(data))
+        decode_program_dat(bytes(data))

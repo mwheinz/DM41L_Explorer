@@ -23,7 +23,7 @@ import pytest
 
 from memory import Memory, DM41LMemoryError, Program
 from memory.opcode_scan import find_program_end
-from memory.program_files import decode_program_raw, decode_program_dat, decode_program_ppc
+from memory.program_files import decode_program_raw, decode_program_dat
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -94,7 +94,7 @@ def test_import_ppc_of_tower_matches_dat_and_raw():
     # PPC (memory/program_files.py's module docstring) is DAT's own hex
     # text word-wrapped every 50 characters -- built here from tower.dat
     # directly (not through encode_program_ppc()) so this exercises
-    # decode_program_ppc() against a file it didn't produce itself, same
+    # decode_program_dat() against a file it didn't produce itself, same
     # as test_decode_program_ppc_and_dat_agree_on_tower() in
     # test_program_export.py.
     dat_text = (DATA_DIR / "tower.dat").read_bytes()
@@ -102,7 +102,7 @@ def test_import_ppc_of_tower_matches_dat_and_raw():
 
     dest_ppc = Memory.from_file(DATA_DIR / "empty.dm41")
     dest_dat = Memory.from_file(DATA_DIR / "empty.dm41")
-    ppc_bytes = decode_program_ppc(wrapped)
+    ppc_bytes = decode_program_dat(wrapped)
     dat_bytes = decode_program_dat(dat_text)
     assert ppc_bytes == dat_bytes
 

@@ -56,8 +56,7 @@ for readability. The current components are:
                     decode_program_raw/decode_program_dat -- hp41uc-
                     compatible single-program file formats (RAW/DAT;
                     see ~/Work/hp41uc/Source/convert.c) -- plus
-                    encode_program_ppc/decode_program_ppc for the
-                    reverse-engineered, non-hp41uc "PPC" format (DAT's
+                    encode_program_ppc for the "PPC" format (DAT's
                     own hex text, word-wrapped)
   program_chain.py byte-level global-chain marker parsing/encoding
                     (walk_chain/decode_chain_marker/decode_label_name/
@@ -111,7 +110,6 @@ from .program_files import (
     encode_program_ppc,
     decode_program_raw,
     decode_program_dat,
-    decode_program_ppc,
 )
 from .program_chain import (
     walk_chain,
@@ -163,7 +161,6 @@ __all__ = [
     "encode_program_ppc",
     "decode_program_raw",
     "decode_program_dat",
-    "decode_program_ppc",
     "walk_chain",
     "decode_chain_marker",
     "decode_label_name",
