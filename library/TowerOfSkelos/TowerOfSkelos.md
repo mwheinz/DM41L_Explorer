@@ -1,8 +1,9 @@
-*HP-41C Tower of Skelos Game by Michael Heinz*
-*Originally published in the 
-PPC Calculator Journal V11 N4 Pg 14 May 1984.*
+#HP-41C Tower of Skelos Game by Michael Heinz*
+*Originally published in the PPC Calculator Journal V11 N4 Pg 14 May 1984.*
 
-*Originally used synthetic programming to pack the data into an HP41C's memory. This version requires the Extended Function Memory or HP-41CX.*
+Originally written to fit in an HP41C. Uses synthetic programming to pack the
+data into an HP41C's memory. However, this version uses Extended Memory to move
+some string constants out of main memory to free up a little space.
 
 # The Tower of Skelos
 
