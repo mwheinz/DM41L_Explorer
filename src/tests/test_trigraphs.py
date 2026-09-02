@@ -132,3 +132,53 @@ def test_decode_rejects_unrecognized_escape():
 def test_decode_rejects_multibyte_source_character():
     with pytest.raises(ValueError):
         decode_trigraphs("€")  # Euro sign -- code point > 0xFF
+
+
+# --- restrict_literals (2026-09-02: real alarm text with plain lowercase
+# beyond 'e' displayed as garbage on real DM41L hardware -- FOCAL has no
+# genuine lowercase letters above 'e', see memory/alarms.py's
+# _build_entry_registers and docs/alarms.md sec 11) ---
+
+
+def test_restrict_literals_default_is_permissive():
+    """The flag is opt-in -- every existing caller (XM file content, Data
+    register alpha text) keeps today's behavior unless it asks for the
+    stricter check."""
+    assert decode_trigraphs("Test Message") == b"Test Message"
+
+
+def test_restrict_literals_rejects_lowercase_above_e():
+    with pytest.raises(ValueError, match="lowercase"):
+        decode_trigraphs("Test Message", restrict_literals=True)
+
+
+@pytest.mark.parametrize("ch", list("fghijklmnopqrstuvwxyz"))
+def test_restrict_literals_rejects_every_lowercase_letter_above_e(ch):
+    with pytest.raises(ValueError):
+        decode_trigraphs(ch, restrict_literals=True)
+
+
+@pytest.mark.parametrize("ch", list("abcde"))
+def test_restrict_literals_allows_lowercase_a_through_e(ch):
+    """Matches xm_file.py's NAME_MAX_CHAR (0x65 / 'e') -- the same
+    boundary independently confirmed for XM file names (issue #11) and now
+    for alarm text."""
+    assert decode_trigraphs(ch, restrict_literals=True) == ch.encode("ascii")
+
+
+def test_restrict_literals_allows_uppercase_and_digits_and_space():
+    assert decode_trigraphs(
+        "ALL UPPER 123", restrict_literals=True
+    ) == b"ALL UPPER 123"
+
+
+def test_restrict_literals_still_allows_an_explicit_trigraph_for_the_same_byte():
+    """A caller can still deliberately reach any byte value via \\nnn --
+    restrict_literals only blocks a *bare* character typed without
+    realizing it isn't a real FOCAL letter."""
+    assert decode_trigraphs("\\115", restrict_literals=True) == bytes([115])  # 's'
+
+
+def test_restrict_literals_error_names_the_offending_character_and_position():
+    with pytest.raises(ValueError, match="'g' at position 4"):
+        decode_trigraphs("REPOg", restrict_literals=True)

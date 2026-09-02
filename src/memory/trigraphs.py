@@ -21,6 +21,17 @@ leading zero, but fixed width is what keeps "\\nnn" unambiguous when it's
 immediately followed by more digits (a variable-width "\\65" followed by a
 literal "12" would be indistinguishable from "\\6" + "512" or "\\651" +
 "2").
+
+`decode_trigraphs()`'s optional `restrict_literals` flag adds a further,
+separate check: real FOCAL has no true lowercase letters above 'e'
+(0x66-0x7A are reassigned to unrelated symbols, not lowercase f-z) --
+confirmed 2026-09-02 after a user-typed alarm message containing plain
+lowercase ("Test Message") displayed as garbage on real DM41L hardware.
+xm_file.py's NAME_MIN_CHAR/NAME_MAX_CHAR already enforced the same
+0x20-0x65 boundary for XM file names (issue #11); `restrict_literals`
+brings that same boundary to any other *content* a user types expecting
+it to render as itself, without losing the ability to deliberately reach
+any other byte value via an explicit trigraph escape.
 """
 
 # byte value -> the text that follows the leading backslash in its
@@ -51,7 +62,23 @@ _SHORTHAND_SUFFIXES_BY_LENGTH = sorted(_BYTE_BY_SHORTHAND, key=len, reverse=True
 # space through 0x7E) minus the specific codes FOCAL has reassigned to a
 # shorthand trigraph above. Everything else (control codes, DEL, byte
 # values above 0x7F, and the reassigned codes) always needs an escape.
+# NOTE: this is about *round-tripping raw bytes through a text file*
+# unambiguously -- it's deliberately broader than "characters FOCAL
+# actually renders sensibly," which is what `restrict_literals` below
+# checks instead. A byte in this set but above _SAFE_LITERAL_MAX still
+# encodes/decodes as itself here; restrict_literals is what stops a
+# *caller* from typing one as a bare literal when they almost certainly
+# didn't mean to.
 _LITERAL_BYTES = frozenset(range(0x20, 0x7F)) - frozenset(_SHORTHAND_BY_BYTE)
+
+# The highest byte value FOCAL treats as a "real" printable literal for
+# ordinary typed content -- 0x65 ('e'). FOCAL has no genuine lowercase
+# letters above this; 0x66-0x7A are reassigned to unrelated symbols, not
+# lowercase f-z (confirmed 2026-09-02 -- see module docstring). Matches
+# xm_file.py's NAME_MAX_CHAR, which independently hit the same boundary
+# for XM file names (issue #11, 2026-08-16).
+_SAFE_LITERAL_MIN = 0x20
+_SAFE_LITERAL_MAX = 0x65
 
 
 def encode_trigraphs(data: bytes) -> str:
@@ -69,12 +96,20 @@ def encode_trigraphs(data: bytes) -> str:
     return "".join(out)
 
 
-def decode_trigraphs(text: str) -> bytes:
+def decode_trigraphs(text: str, *, restrict_literals: bool = False) -> bytes:
     """Parses plain-ASCII text (which may contain trigraph escapes -- see
     the module docstring) back into raw HP41/DM41L character bytes. Raises
     ValueError for a backslash that isn't followed by a recognized
     shorthand or exactly three decimal digits, or for a source character
-    that isn't a single byte."""
+    that isn't a single byte.
+
+    If `restrict_literals` is True, a *literal* (non-escaped) character
+    outside FOCAL's real printable range (0x20-0x65, space through
+    lowercase 'e' -- see `_SAFE_LITERAL_MAX`) also raises ValueError,
+    instead of being silently accepted and written out as a byte that
+    won't actually display as that character on real hardware. An
+    explicit trigraph escape is exempt either way -- the caller asked for
+    that exact byte value on purpose."""
     out = bytearray()
     i = 0
     n = len(text)
@@ -86,6 +121,16 @@ def decode_trigraphs(text: str) -> bytes:
                 raise ValueError(
                     f"Character {ch!r} at position {i} isn't representable "
                     "as a single byte -- use a \\nnn trigraph instead."
+                )
+            if restrict_literals and not (
+                _SAFE_LITERAL_MIN <= code <= _SAFE_LITERAL_MAX
+            ):
+                raise ValueError(
+                    f"Character {ch!r} at position {i} (code {code}) isn't "
+                    "a valid literal FOCAL character -- FOCAL has no real "
+                    "lowercase letters above 'e' (0x66-0x7A are reassigned "
+                    "to unrelated symbols). Use uppercase, or a \\nnn "
+                    "trigraph if you specifically want that byte value."
                 )
             out.append(code)
             i += 1

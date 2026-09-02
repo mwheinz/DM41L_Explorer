@@ -34,8 +34,11 @@ for readability. The current components are:
                    KeyAssignments -- the Key Assignment Registers, the
                     keyboard geometry behind key bytes and KEYFLAGS bits,
                     and the assignment set/delete/list API
-  alarms.py        Alarms -- the alarms buffer's outer bounds and the
-                    block relocation a key-assignment edit forces on it
+  alarms.py        Alarm, Alarms -- the alarms buffer's outer bounds, the
+                    block relocation a key-assignment edit forces on it,
+                    and per-entry decode/list/add/delete (time/repeat/
+                    message parsing, the up-arrow control/conditional
+                    type marker, sorted insertion)
   program_memory.py
                    ProgramMemory -- user program storage: the global
                     chain, list_programs(), program import/export/removal,
@@ -98,7 +101,7 @@ from .constants import (
 from .regions import MemoryRegion, RegionSpan, VoidRegion, FreeSpace
 from .status_registers import StatusRegisters
 from .key_assignments import KeyAssignments
-from .alarms import Alarms
+from .alarms import Alarm, Alarms
 from .program_memory import ProgramMemory
 from .data_memory import DataMemory
 from .xm_file import XMFile, ExtendedMemory, NAME_MIN_CHAR, NAME_MAX_CHAR
@@ -144,6 +147,7 @@ __all__ = [
     "FreeSpace",
     "StatusRegisters",
     "KeyAssignments",
+    "Alarm",
     "Alarms",
     "ProgramMemory",
     "DataMemory",

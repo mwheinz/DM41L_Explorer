@@ -35,6 +35,7 @@ from gui.xm_files_tab import XMFilesTab
 from gui.hex_view_tab import HexViewTab
 from gui.program_tab import ProgramTab
 from gui.key_assignments_tab import KeyAssignmentsTab
+from gui.alarms_tab import AlarmsTab
 
 try:
     from dm41lversion import APP_VERSION
@@ -280,6 +281,7 @@ class DM41LExplorerApp(ctk.CTk):
         self.tabview.add("Flags")
         self.tabview.add("Programs")
         self.tabview.add("Key Assignments")
+        self.tabview.add("Alarms")
         self.tabview.add("Data Registers")
         self.tabview.add("XM Files")
         self.tabview.add("Hex View")
@@ -317,6 +319,11 @@ class DM41LExplorerApp(ctk.CTk):
         )
         self.xm_files_tab.pack(fill="both", expand=True)
 
+        self.alarms_tab = AlarmsTab(
+            self.tabview.tab("Alarms"), on_change=self._on_memory_changed
+        )
+        self.alarms_tab.pack(fill="both", expand=True)
+
         # Which tabs are showing stale content -- see _render_active_tab().
         self._tabs = {
             "Overview": self.overview_tab,
@@ -326,6 +333,7 @@ class DM41LExplorerApp(ctk.CTk):
             "Programs": self.program_tab,
             "Key Assignments": self.key_assignments_tab,
             "XM Files": self.xm_files_tab,
+            "Alarms": self.alarms_tab,
         }
         self._tabs_dirty = {name: True for name in self._tabs}
 
@@ -1072,6 +1080,7 @@ class DM41LExplorerApp(ctk.CTk):
         self.data_registers_tab.refresh_theme()
         self.xm_files_tab.refresh_theme()
         self.program_tab.refresh_theme()
+        self.alarms_tab.refresh_theme()
         self._render_tabs()
 
     # -- Shutdown -----------------------------------------------------------
