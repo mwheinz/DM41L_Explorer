@@ -1,19 +1,24 @@
 '''
 Encoders for exporting a single HP41 program file.
 
-Supports RAW, DAT, and "PPC", which is a DAT that's been broken into multiple
-lines (as seen in PPC Calculator Journal program listings).
+Supports RAW, DAT, "PPC" (a DAT that's been broken into multiple lines, as
+seen in PPC Calculator Journal program listings), and TXT (a plain-text
+HP-41 keystroke listing -- see memory/program_text.py and
+docs/program_text_io_plan.md).
 
-Does not support decompiling into text files (yet).
+`encode_program_[raw, dat, ppc, txt]()` convert a program's instruction
+bytes into a file's own bytes.
 
-`encode_program_[raw, dat, ppc]()`/`encode_program_[raw, dat, ppc]()` convert
-a program into a file.
-
-`decode_program_[raw, dat, ppc]()`/`decode_program_[raw, dat, ppc]()` are the
-reverse direction -- read a RAW/DAT file, and convert it to a program.
+`decode_program_[raw, dat, txt]()` are the reverse direction -- read a
+RAW/DAT/TXT file's own bytes, and recover a program's instruction bytes.
+(There's no `decode_program_ppc()` of its own: PPC is just word-wrapped
+DAT, and `decode_program_dat()` already strips whitespace before decoding,
+so it reads a PPC file directly -- see that function's own docstring.)
 '''
 
 from .opcode_scan import find_program_end
+from .program_text import encode_program_txt as _encode_program_txt
+from .program_text import decode_program_txt as _decode_program_txt
 from .registers import DM41LMemoryError
 
 
@@ -168,3 +173,42 @@ def encode_program_ppc(data: bytes) -> bytes:
         for i in range(0, len(dat_text), _PPC_LINE_WIDTH)
     ]
     return b"\n".join(lines) + b"\n"
+
+
+def encode_program_txt(data: bytes) -> bytes:
+    '''
+    TXT format: a plain-text HP-41 keystroke listing, UTF-8 encoded --
+    the actual decompiling is memory/program_text.py's own
+    `encode_program_txt()` (bytes -> str); this is only the "-> UTF-8
+    bytes" file-format step on top of it, matching this module's own
+    bytes-in/bytes-out convention for RAW/DAT/PPC above (and what
+    gui/program_tab.py's `_EXPORT_FORMATS` dispatch, `Path.write_bytes()`,
+    expects -- see that module's docstring). Not an hp41uc file format of
+    its own the way RAW/DAT are, but hp41uc-style text either way -- see
+    docs/program_text_io_plan.md.
+    '''
+    return _encode_program_txt(data).encode("utf-8")
+
+
+def decode_program_txt(data: bytes) -> bytes:
+    '''
+    Recovers a program's instruction bytes from a TXT file's own raw
+    bytes -- the reverse of `encode_program_txt()` above. Decodes `data`
+    as UTF-8 text, then compiles it via memory/program_text.py's own
+    `decode_program_txt()` (str -> bytes; see that function's own
+    docstring for the full compile-time rules and error conditions).
+
+    Raises DM41LMemoryError -- not the plain ValueError
+    program_text.decode_program_txt() itself raises -- if `data` isn't
+    valid UTF-8, or if it doesn't compile, so this matches
+    decode_program_raw()/decode_program_dat()'s own error type (and what
+    gui/program_tab.py's `_IMPORT_FORMATS` dispatch already catches).
+    '''
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise DM41LMemoryError(f"TXT file isn't valid UTF-8: {e}") from e
+    try:
+        return _decode_program_txt(text)
+    except ValueError as e:
+        raise DM41LMemoryError(str(e)) from e

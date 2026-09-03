@@ -25,9 +25,9 @@ the same performance/consistency fix as gui/data_registers_tab.py and
 gui/xm_files_tab.py (see either module's docstring for the full story;
 GitHub issues #21/#22). This tab does not let you edit program memory, so
 unlike those two there's no double-click-to-edit -- but a selected row can
-be exported to a standalone HP-41 program file (RAW, DAT, or PPC format --
-see memory/program_files.py), so there is one selection-driven action
-button, "Export...".
+be exported to a standalone HP-41 program file (RAW, DAT, PPC, or TXT
+format -- see memory/program_files.py), so there is one selection-driven
+action button, "Export...".
 
 Export uses Memory.get_program_bytes() (memory/memory.py) -- the exact
 bytes CAT 1 would report for that program, from its own first instruction
@@ -37,16 +37,21 @@ the single newest program). A program with more than one global label
 row represents, starting at its oldest label's own header -- not as
 separate per-label slices.
 
-Import is the write side, not selection-driven -- a standalone RAW/DAT/PPC
-file is always spliced in as the newest program (Memory.import_program(),
-memory/memory.py), the only place it can safely go without a much riskier
-"insert in the middle of the chain" algorithm (see that method's own
-docstring for the full splicing rules -- converting a `.END.`-terminated
-newest program into a real closing END, register-aligning a fresh
-`.END.`, etc.). Any key assignment baked into an imported label's own
-header is always cleared on the way in, and a duplicate global label name
-blocks the import outright -- both deliberate project decisions, not
-defaults `import_program()` picked on its own.
+Import is the write side, not selection-driven -- a standalone RAW/DAT/
+PPC/TXT file is always spliced in as the newest program
+(Memory.import_program(), memory/memory.py), the only place it can safely
+go without a much riskier "insert in the middle of the chain" algorithm
+(see that method's own docstring for the full splicing rules -- converting
+a `.END.`-terminated newest program into a real closing END,
+register-aligning a fresh `.END.`, etc.). Any key assignment baked into an
+imported label's own header is always cleared on the way in, and a
+duplicate global label name blocks the import outright -- both deliberate
+project decisions, not defaults `import_program()` picked on its own. A
+TXT import goes through one extra step first, memory/program_files.py's
+own `decode_program_txt()` (in turn memory/program_text.py's compiler,
+docs/program_text_io_plan.md) -- everything past that point (splicing,
+duplicate-name/key-assignment handling) is identical to RAW/DAT/PPC,
+since all four formats converge on the same instruction bytes.
 
 Remove (GitHub issue #6 -- "add the ability to remove programs", the last
 of "add"/"edit"/"remove" to land, after Export/Import already covered
@@ -70,8 +75,10 @@ from memory import (
     encode_program_raw,
     encode_program_dat,
     encode_program_ppc,
+    encode_program_txt,
     decode_program_raw,
     decode_program_dat,
+    decode_program_txt,
 )
 from gui.tab_common import (
     build_tab_header,
@@ -141,7 +148,7 @@ class ProgramTab(ctk.CTkFrame):
             "has none. Select a row and click Export... to save that "
             "program as a standalone HP-41 program file, Remove to delete "
             "it from program memory, or click Import... to add a "
-            "RAW/DAT/PPC program file as a new program.",
+            "RAW/DAT/PPC/TXT program file as a new program.",
         )
 
         _, self._tree = build_tab_treeview(self, _TREE_COLUMNS, style=_TREE_STYLE)
@@ -236,13 +243,16 @@ class ProgramTab(ctk.CTkFrame):
         ".raw": ("RAW", encode_program_raw),
         ".dat": ("DAT", encode_program_dat),
         ".ppc": ("PPC", encode_program_ppc),
+        ".txt": ("TXT", encode_program_txt),
     }
 
     def _export_selected(self):
         """Exports the selected row's own program bytes
         (Memory.get_program_bytes() -- this module's docstring) as a
         standalone HP-41 program file, in whichever of RAW/DAT (hp41uc's
-        own formats) or PPC (not an hp41uc format -- see
+        own formats), PPC (not an hp41uc format), or TXT (a plain-text
+        keystroke listing, memory/program_text.py -- also not an hp41uc
+        *file* format of its own, but hp41uc-style text either way; see
         memory/program_files.py) the chosen filename's extension picks.
         Works the same for a labelled program or an unlabelled one (only
         local labels, or none at all)."""
@@ -285,6 +295,7 @@ class ProgramTab(ctk.CTkFrame):
                 ("RAW files", "*.raw"),
                 ("DAT files", "*.dat"),
                 ("PPC files", "*.ppc"),
+                ("TXT files", "*.txt"),
                 ("All files", "*.*"),
             ],
         )
@@ -327,10 +338,11 @@ class ProgramTab(ctk.CTkFrame):
         ".raw": ("RAW", decode_program_raw),
         ".dat": ("DAT", decode_program_dat),
         ".ppc": ("PPC", decode_program_dat),
+        ".txt": ("TXT", decode_program_txt),
     }
 
     def _import_program(self):
-        """Reads a standalone HP-41 program file (RAW, DAT, or PPC,
+        """Reads a standalone HP-41 program file (RAW, DAT, PPC, or TXT,
         whichever the chosen filename's extension picks --
         memory/program_files.py)
         and splices it into program memory as the newest program
@@ -348,6 +360,7 @@ class ProgramTab(ctk.CTkFrame):
                 ("RAW files", "*.raw"),
                 ("DAT files", "*.dat"),
                 ("PPC files", "*.ppc"),
+                ("TXT files", "*.txt"),
                 ("All files", "*.*"),
             ],
         )
@@ -360,7 +373,7 @@ class ProgramTab(ctk.CTkFrame):
             messagebox.showerror(
                 "Could Not Import",
                 f"{Path(path).name}: unrecognized file extension "
-                f"{extension or '(none)'!r} -- expected .raw, .dat, or .ppc.",
+                f"{extension or '(none)'!r} -- expected .raw, .dat, .ppc, or .txt.",
             )
             return
         format_label, decoder = decoder_entry
@@ -380,6 +393,25 @@ class ProgramTab(ctk.CTkFrame):
             logger.warning("Could not import program from %s: %s", path, e)
             messagebox.showerror("Could Not Import", str(e))
             return
+
+        # repack()'s own docstring: it rebuilds program memory from a
+        # forward opcode scan specifically so "a global label that's
+        # physically present but not currently chain-linked ... becomes
+        # visible again" -- exactly the case for a TXT import, since this
+        # project's own compiler (matching hp41uc's own, see
+        # memory/program_text.py's decode_program_txt() docstring) always
+        # emits zero/unlinked chain markers, and RAW/DAT read from an
+        # hp41uc-compiled file (e.g. tests/data/tower.raw) can carry the
+        # same thing over from that file. `imported`, captured right
+        # after import_program() but before that repair runs, can
+        # therefore be stale -- reporting "(unlabelled)" for a program
+        # repack() then correctly re-recognizes by name. Re-fetch the
+        # newest program from the freshly-rebuilt list instead of
+        # trusting the pre-repack object for the log/success message
+        # below (import_program()'s own contract: always spliced in as
+        # the newest program, so it's always list_programs()'s last
+        # entry once repack() finishes).
+        imported = self._memory.programs.list_programs()[-1]
 
         logger.info(
             "Imported program %r (%d bytes) as %s from %s",

@@ -59,8 +59,11 @@ for readability. The current components are:
                     decode_program_raw/decode_program_dat -- hp41uc-
                     compatible single-program file formats (RAW/DAT;
                     see ~/Work/hp41uc/Source/convert.c) -- plus
-                    encode_program_ppc for the "PPC" format (DAT's
-                    own hex text, word-wrapped)
+                    encode_program_ppc for the "PPC" format (DAT's own
+                    hex text, word-wrapped) and encode_program_txt/
+                    decode_program_txt, thin UTF-8-bytes wrappers around
+                    program_text.py's own str-based converters, for the
+                    plain-text keystroke-listing format
   program_chain.py byte-level global-chain marker parsing/encoding
                     (walk_chain/decode_chain_marker/decode_label_name/
                     encode_chain_marker) operating on a plain bytes
@@ -68,6 +71,12 @@ for readability. The current components are:
                     what Memory.import_program() (memory.py) uses to
                     inspect/patch a standalone program's bytes before
                     splicing them into program memory
+  program_text.py  encode_program_txt()/decode_program_txt() -- converts
+                    between a program's raw instruction bytes and
+                    hp41uc-style plain text (str, not bytes -- see
+                    docs/program_text_io_plan.md); program_files.py
+                    wraps these as the package's own TXT format entry,
+                    matching RAW/DAT/PPC's bytes-in/bytes-out shape
   memory.py        Memory (the top-level dump: parsing, serialization,
                     raw register access, whole-dump pack(), and the
                     region lookup -- Memory.region(key) plus the named
@@ -111,8 +120,10 @@ from .program_files import (
     encode_program_raw,
     encode_program_dat,
     encode_program_ppc,
+    encode_program_txt,
     decode_program_raw,
     decode_program_dat,
+    decode_program_txt,
 )
 from .program_chain import (
     walk_chain,
@@ -165,6 +176,8 @@ __all__ = [
     "encode_program_ppc",
     "decode_program_raw",
     "decode_program_dat",
+    "encode_program_txt",
+    "decode_program_txt",
     "walk_chain",
     "decode_chain_marker",
     "decode_label_name",

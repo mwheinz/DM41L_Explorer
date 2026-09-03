@@ -41,8 +41,10 @@ from memory import (
     encode_program_raw,
     encode_program_dat,
     encode_program_ppc,
+    encode_program_txt,
     decode_program_raw,
     decode_program_dat,
+    decode_program_txt,
 )
 from memory.opcode_scan import find_program_end
 
@@ -336,3 +338,68 @@ def test_decode_program_ppc_rejects_corrupt_checksum():
     data[-2] ^= 0x0F  # perturb the checksum's last hex digit (data[-1] is "\n")
     with pytest.raises(DM41LMemoryError):
         decode_program_dat(bytes(data))
+
+
+# -- TXT: the plain-text keystroke-listing format (memory/program_text.py,
+# docs/program_text_io_plan.md). encode_program_txt()/decode_program_txt()
+# here are thin UTF-8-bytes wrappers around program_text.py's own str-based
+# converters (see program_files.py's own docstring) -- the actual opcode
+# table and tokenizer are already exhaustively tested directly against
+# tower.txt/tower.raw in test_program_text.py; these tests only check the
+# file-format wrapping (bytes in, bytes out, DM41LMemoryError instead of a
+# bare ValueError) that gui/program_tab.py's Export/Import dispatch relies
+# on, matching RAW/DAT/PPC's own coverage above.
+
+
+def test_encode_program_txt_apptest_round_trips():
+    # APPTEST_BYTES is a real-hardware capture, not hp41uc-compiled text
+    # -- its own END genuinely links back to its own label header (bbb=2/
+    # distance=3, see memory/program_text.py's decode_program_txt()
+    # docstring), which a compiler working from text alone can never
+    # reconstruct (nor should it try to -- see that same docstring). So
+    # this checks a *stable* round trip (recompiling reproduces the same
+    # text, and the same instruction content/length), not byte-identical
+    # equality against APPTEST_BYTES itself -- test_decode_program_txt_
+    # round_trips_tower_raw() below is the byte-identical check, against
+    # a fixture that's actually hp41uc's own compiled output.
+    file_bytes = encode_program_txt(APPTEST_BYTES)
+    assert isinstance(file_bytes, bytes)
+    text = file_bytes.decode("utf-8")
+    assert text.splitlines()[0] == 'LBL "APPTEST"'
+    recompiled = decode_program_txt(file_bytes)
+    assert len(recompiled) == len(APPTEST_BYTES)
+    assert encode_program_txt(recompiled) == file_bytes
+
+
+def test_decode_program_txt_round_trips_tower_raw():
+    instruction_bytes = decode_program_raw((DATA_DIR / "tower.raw").read_bytes())
+    file_bytes = encode_program_txt(instruction_bytes)
+    assert decode_program_txt(file_bytes) == instruction_bytes
+
+
+def test_decode_program_txt_reads_towers_own_txt_file():
+    # tower.txt itself, read as a file (not run through this project's
+    # own encoder first) -- the same real, third-party-generated fixture
+    # test_program_text.py's test_decode_program_txt_matches_tower_raw_bytes()
+    # already checks at the program_text.py level; this confirms the
+    # program_files.py wrapper reproduces it too, reading actual on-disk
+    # bytes exactly as gui/program_tab.py's Import handler would.
+    file_bytes = (DATA_DIR / "tower.txt").read_bytes()
+    raw_bytes = decode_program_raw((DATA_DIR / "tower.raw").read_bytes())
+    assert decode_program_txt(file_bytes) == raw_bytes
+
+
+def test_decode_program_txt_rejects_invalid_utf8():
+    with pytest.raises(DM41LMemoryError, match="UTF-8"):
+        decode_program_txt(b'LBL "T1"\n\xff\xfe\nEND\n')
+
+
+def test_decode_program_txt_rejects_uncompilable_text():
+    # program_text.decode_program_txt() itself raises a bare ValueError
+    # for this (see test_program_text.py); the program_files.py wrapper
+    # must translate that into DM41LMemoryError, matching
+    # decode_program_raw()/decode_program_dat()'s own error type, so
+    # gui/program_tab.py's shared `except (OSError, DM41LMemoryError)`
+    # handler actually catches it.
+    with pytest.raises(DM41LMemoryError):
+        decode_program_txt(b'LBL "T1"\nNOTAREALINSTRUCTION\nEND\n')
