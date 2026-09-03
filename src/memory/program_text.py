@@ -61,6 +61,7 @@ from .functions import (
     SINGLE_BYTE_FUNCTIONS,
     SINGLE_BYTE_NAMES,
     XROM_FUNCTIONS,
+    XROM_NAMES,
     normalize_function_name_input,
 )
 from .program_chain import decode_chain_marker, encode_chain_marker
@@ -915,6 +916,34 @@ def _encode_small_digit_operand_instruction(mnemonic: str, tokens: List[str]) ->
     return bytes([prefix, descriptor])
 
 
+def _resolve_xrom_mnemonic(mnemonic: str) -> Optional[Tuple[int, int]]:
+    '''Reverses functions.py's XROM_NAMES for a plain (zero-operand)
+    mnemonic token spelled as the function's own name instead of the
+    numeric "XROM mm,ff" form -- e.g. "SEEKPT" or "X<>F" in place of
+    "XROM 25,42"/"XROM 25,46". This is the named-mnemonic counterpart of
+    _resolve_single_byte_mnemonic() below, and exists so program text
+    imported from other sources (which typically spell these functions
+    by name, not by hp41uc's own "mm,ff" catalog numbering) doesn't need
+    manual find-and-replace before it compiles here.
+
+    Tries, in order: (1) an exact match against a real XROM function
+    name already in XROM_NAMES (covers every mnemonic that's already
+    plain ASCII, e.g. "ALENG", "X<=NN?"); (2) functions.py's own
+    normalize_function_name_input(), covering the small set of symbol
+    substitutions it already knows about ("->","<=","^","sigma") so
+    e.g. "sigmareg?" also resolves to "ΣREG?". Returns None (never
+    raises) if nothing matches -- encode_program_txt() never emits a
+    bare XROM mnemonic itself (see _decode_xrom()'s own docstring), so
+    there's no ASCII_DISPLAY_NAMES-style substitution table to reverse
+    here the way _resolve_single_byte_mnemonic() has one for single-byte
+    functions.'''
+    for name in (mnemonic, normalize_function_name_input(mnemonic)):
+        byte_pair = XROM_NAMES.get(name)
+        if byte_pair is not None:
+            return byte_pair
+    return None
+
+
 def _encode_xrom(tokens: List[str]) -> bytes:
     '''"XROM mm,ff" -- reverses _decode_xrom()'s mm/ff-recovery formula
     (byte1 = 0xA0 | ((mm>>2)&7), byte2 = ((mm&3)<<6) | (ff&0x3F)) and then
@@ -924,7 +953,12 @@ def _encode_xrom(tokens: List[str]) -> bytes:
     modules, Extended Functions and Time, the DM41L emulates). Any other
     module number, or an unrecognized function number within those two
     modules, is a compile error -- never a silent fallback to the literal
-    bytes the way hp41uc itself handles an unknown module.'''
+    bytes the way hp41uc itself handles an unknown module.
+
+    This is only reached for the numeric "XROM mm,ff" spelling --
+    _encode_instruction() tries _resolve_xrom_mnemonic() first, so a
+    function spelled by its own name (e.g. "SEEKPT") never gets here at
+    all.'''
     if len(tokens) != 2:
         raise ValueError(
             f"XROM needs exactly one 'mm,ff' operand: {' '.join(tokens)!r}"
@@ -1068,6 +1102,14 @@ def _encode_instruction(tokens: List[str]) -> Tuple[bytes, bool]:
     if mnemonic == "XROM":
         return _encode_xrom(tokens), False
 
+    xrom_bytes = _resolve_xrom_mnemonic(mnemonic)
+    if xrom_bytes is not None:
+        if len(tokens) != 1:
+            raise ValueError(
+                f"unexpected operand(s) for {mnemonic}: {' '.join(tokens)!r}"
+            )
+        return bytes(xrom_bytes), False
+
     if mnemonic in _REGISTER_OPERAND_PREFIX_NAMES:
         return _encode_register_operand_instruction(mnemonic, tokens), False
 
@@ -1097,7 +1139,14 @@ def decode_program_txt(text: str) -> bytes:
 
     One line is (usually) one instruction; see _tokenize_line() for the
     quote/escape-aware tokenizer and comment handling (`;`/`#`, matching
-    encode_program_txt()'s own comment conventions). Two exceptions:
+    encode_program_txt()'s own comment conventions). An Extended
+    Functions/Time function may be written either the way
+    encode_program_txt() itself decompiles it, numerically ("XROM
+    25,42"), or by its own bare mnemonic name ("SEEKPT") -- see
+    _resolve_xrom_mnemonic() -- so program text imported from other
+    sources (which typically use the name, not hp41uc's own "mm,ff"
+    catalog numbering) doesn't need manual find-and-replace before it
+    compiles here. Two more exceptions:
 
     - A numeric literal that encode_program_txt() rendered with a
       cosmetic space before a non-initial "E" (`_render_number_run()`,

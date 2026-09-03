@@ -561,6 +561,49 @@ def test_decode_program_txt_xrom_rejects_unrecognized_function():
         decode_program_txt('LBL "T7"\nXROM 25,00\nEND\n')
 
 
+def test_decode_program_txt_xrom_accepts_extended_function_mnemonic():
+    # "SEEKPT" (Extended Functions, module 25) written by name should
+    # compile to the exact same bytes as its numeric "XROM 25,42" form.
+    by_name = decode_program_txt('LBL "T9"\nSEEKPT\nEND\n')
+    by_number = decode_program_txt('LBL "T9"\nXROM 25,42\nEND\n')
+    assert by_name == by_number
+    assert encode_program_txt(by_name).splitlines()[1] == "XROM 25,42 ;SEEKPT"
+
+
+def test_decode_program_txt_xrom_accepts_time_function_mnemonic():
+    # "TIME" (Time module, module 26) written by name should compile to
+    # the exact same bytes as its numeric "XROM 26,28" form.
+    by_name = decode_program_txt('LBL "TA"\nTIME\nEND\n')
+    by_number = decode_program_txt('LBL "TA"\nXROM 26,28\nEND\n')
+    assert by_name == by_number
+    assert encode_program_txt(by_name).splitlines()[1] == "XROM 26,28 ;TIME"
+
+
+def test_decode_program_txt_xrom_mnemonic_is_case_insensitive():
+    lower = decode_program_txt('LBL "TB"\nseekpt\nEND\n')
+    upper = decode_program_txt('LBL "TB"\nSEEKPT\nEND\n')
+    assert lower == upper
+
+
+def test_decode_program_txt_xrom_mnemonic_ascii_symbol_substitution():
+    # normalize_function_name_input()'s "sigma" substitution should let
+    # an ASCII-typed "sigmareg?" resolve to the real "ΣREG?" XROM name
+    # (0xA6,0x78), the same way it already does for single-byte functions.
+    by_typed = decode_program_txt('LBL "TC"\nsigmareg?\nEND\n')
+    by_number = decode_program_txt('LBL "TC"\nXROM 25,56\nEND\n')
+    assert by_typed == by_number
+
+
+def test_decode_program_txt_xrom_mnemonic_rejects_operand():
+    with pytest.raises(ValueError, match="unexpected operand"):
+        decode_program_txt('LBL "TD"\nSEEKPT 1\nEND\n')
+
+
+def test_decode_program_txt_xrom_unknown_mnemonic_still_rejected():
+    with pytest.raises(ValueError, match="unrecognized instruction"):
+        decode_program_txt('LBL "TE"\nNOTAREALFUNCTION\nEND\n')
+
+
 def test_decode_program_txt_end_category():
     compiled = decode_program_txt('LBL "T8"\nEND\n')
     assert compiled[-3:].hex() == "c0000d"
