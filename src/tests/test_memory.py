@@ -1111,13 +1111,22 @@ def test_key_assignments_end_is_start_when_no_assignments():
     the same add/delete/edit repro -- same 4 alarms as badalarms.dm41,
     just with the first three retimed so none are past due -- confirming
     the sec 12 repeats-flag fix on real hardware) carries the identical
-    inherited pair for the same reason."""
+    inherited pair for the same reason. past-due.dm41 (2026-09-04,
+    alarmtest3.dm41's content with 4 of its 5 alarms forced past due to
+    confirm the past-due high-nibble marker on a repeating alarm for the
+    first time) is excluded for the same reason too -- it's built from
+    alarmtest3.dm41's own buffer, ALMCAT/XYZALM pair included.
+    tenthsofasecond.dm41 (2026-09-04, a single alarm deliberately set to
+    tenth-of-a-second trigger-time precision, used to correct the sec 12
+    repeats-flag digit to the last BCD nibble only rather than the last
+    two) carries the same inherited ALMCAT/XYZALM pair and is excluded
+    for the same reason."""
     excluded = {
         "keyassigns.dm41", "xrom-keyassignments.dm41",
         "manyfiles.dm41",
         "alarmtest.dm41", "alarmtest2.dm41", "alarmtest3.dm41",
         "4alarmtest.dm41", "repeater.dm41", "badalarms.dm41",
-        "goodalarms.dm41",
+        "goodalarms.dm41", "past-due.dm41", "tenthsofasecond.dm41",
     }
     for path in DATA_DIR.glob("*.dm41"):
         if path.name in excluded:

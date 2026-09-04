@@ -284,41 +284,47 @@ class Alarms(MemoryRegion):
     def _decode_time(cls, reg_bytes: bytes) -> Tuple[datetime.datetime, bool]:
         '''Decodes a time register into `(trigger_time, repeats)`.
 
-        The 12-digit BCD value's last two digits (the "hundredths of a
-        second" position) are NOT real sub-second precision -- confirmed
-        2026-09-02 against 16/16 real alarm entries across every fixture
-        this project has: every single repeating alarm has exactly `01`
-        there and every single non-repeating alarm has exactly `00`,
-        which is far too clean a split to be genuine timing jitter (a
-        real alarm set from the keypad only ever has whole-second
-        precision in the first place). This is the actual, deterministic
-        marker real firmware uses to know whether a repeat register
-        follows -- not a magnitude/plausibility guess (see
-        `_looks_like_repeat_register()`'s docstring for how this
-        superseded that heuristic, and docs/alarms.md sec 12 for the full
-        writeup and the real-hardware bug this explains). `trigger_time`
-        is truncated to whole seconds -- the flag digit isn't part of the
-        real timestamp.'''
+        CORRECTED 2026-09-04 (docs/alarms.md sec 12 update pending): only
+        the very last BCD digit (the hundredths-of-a-second-units place)
+        is the deterministic repeats marker -- `0` for one-time, `1` for
+        repeating, confirmed 2026-09-02 against 16/16 real alarm entries,
+        plus 4 more real past-due samples since. The digit *before* it
+        (tenths of a second) is genuine time precision, not part of the
+        flag -- every sample above happened to have a `0` there (a
+        keypad-set alarm only ever has whole-second precision to begin
+        with), which is why the original 2026-09-02 pass treated the
+        whole last two digits as the flag (`cs % 100 != 0`). That was
+        falsified 2026-09-04 by `src/tests/data/tenthsofasecond.dm41`: a
+        real one-time alarm deliberately set to tenth-of-a-second
+        precision (confirmed against the real calculator's own `ALMCAT`,
+        which displays the `.9` and reads the alarm as non-repeating) --
+        the old check misread its nonzero tenths digit as the repeats
+        flag and raised `DM41LMemoryError` looking for a repeat register
+        that doesn't exist. `trigger_time` now keeps the tenths digit;
+        only the flag digit itself is zeroed out of it, since that digit
+        is a marker `_encode_time()` writes, not real elapsed time.'''
         cs = cls._decode_bcd_centiseconds(reg_bytes)
-        repeats = (cs % 100) != 0
-        trigger_time = _EPOCH + datetime.timedelta(seconds=cs // 100)
+        repeats = (cs % 10) == 1
+        cs_time = cs - (cs % 10)  # drop only the flag digit, keep tenths
+        trigger_time = _EPOCH + datetime.timedelta(seconds=cs_time / 100.0)
         return trigger_time, repeats
 
     @classmethod
     def _encode_time(cls, when: datetime.datetime, *, repeats: bool) -> bytes:
-        '''Encodes `when` (truncated to whole seconds) plus the
-        repeats-flag digit described in `_decode_time()` -- `repeats` must
-        match whether a repeat register will actually follow this time
-        register, or real hardware will misread the buffer exactly the
-        way it did 2026-09-02 (docs/alarms.md sec 12): a repeat register
-        present but the flag says no, so the repeat register's raw bytes
-        get read as the start of the message instead, and every
-        subsequent alarm in the buffer is misaligned by one register from
-        there on.'''
+        '''Encodes `when` (tenths-of-a-second precision preserved -- see
+        `_decode_time()`'s 2026-09-04 correction) plus the repeats-flag
+        digit in the last BCD position -- `repeats` must match whether a
+        repeat register will actually follow this time register, or real
+        hardware will misread the buffer exactly the way it did
+        2026-09-02 (docs/alarms.md sec 12): a repeat register present but
+        the flag says no, so the repeat register's raw bytes get read as
+        the start of the message instead, and every subsequent alarm in
+        the buffer is misaligned by one register from there on.'''
         delta = when - _EPOCH
         if delta.total_seconds() < 0:
             raise ValueError("Alarm trigger time can't be before 1900-01-01.")
-        cs = round(delta.total_seconds()) * 100 + (1 if repeats else 0)
+        cs_time = round(delta.total_seconds() * 100)
+        cs = cs_time - (cs_time % 10) + (1 if repeats else 0)
         return cls._encode_bcd_centiseconds(cs)
 
     @classmethod

@@ -177,6 +177,56 @@ def test_decode_goodalarms_confirms_the_repeats_flag_fix_on_real_hardware():
     assert alarms == sorted(alarms, key=lambda a: a.trigger_time)
 
 
+def test_decode_tenthsofasecond_preserves_tenths_and_reads_as_one_time():
+    """tenthsofasecond.dm41 (2026-09-04): the user deliberately set a
+    one-time alarm's trigger time to tenth-of-a-second precision (a
+    direct/synthetic write -- add_alarm() itself can't produce this,
+    see below) specifically to stress-test the sec-12 repeats-flag
+    digit. The 2026-09-02 version of _decode_time() treated the whole
+    last two BCD digits as the flag (`cs % 100 != 0`), so this alarm's
+    genuine `.9`-second tenths digit was misread as "repeats", and
+    decoding raised DM41LMemoryError looking for a repeat register that
+    doesn't exist -- a real bug, not just a docs gap. Confirmed against
+    the real calculator's own ALMCAT: it displays the `.9` and reads
+    this alarm as non-repeating, i.e. only the very last digit (the
+    hundredths-units place) is the real flag; the digit before it
+    (tenths) is genuine elapsed time. Fixed by checking `cs % 10`
+    instead of `cs % 100`, and no longer throwing the tenths digit away
+    when building `trigger_time`."""
+    memory = Memory.from_file(DATA_DIR / "tenthsofasecond.dm41")
+    alarms = memory.alarms.list_alarms()
+    assert len(alarms) == 1
+    alarm = alarms[0]
+    assert alarm.trigger_time == datetime.datetime(2026, 9, 4, 10, 30, 9, 900000)
+    assert alarm.repeat_interval is None
+    assert alarm.text == ""
+
+    time_reg = memory.get_register(alarm.start_addr).get_bytes()
+    assert time_reg[5] == 0x90  # tenths=9 (real), flag digit=0 (one-time)
+
+
+def test_encode_time_preserves_tenths_while_still_setting_the_repeats_flag():
+    """Round-trip companion to the decode test above, directly against
+    Alarms._encode_time()/_decode_time() -- a trigger time with genuine
+    sub-second precision survives encoding, and the repeats flag is
+    still written correctly (as a separate digit) regardless."""
+    from memory.alarms import Alarms
+
+    when = datetime.datetime(2026, 9, 4, 10, 30, 9, 900000)
+
+    encoded_repeating = Alarms._encode_time(when, repeats=True)
+    decoded_time, decoded_repeats = Alarms._decode_time(encoded_repeating)
+    assert decoded_time == when
+    assert decoded_repeats is True
+    assert encoded_repeating[5] == 0x91  # tenths=9 preserved, flag digit=1
+
+    encoded_one_time = Alarms._encode_time(when, repeats=False)
+    decoded_time2, decoded_repeats2 = Alarms._decode_time(encoded_one_time)
+    assert decoded_time2 == when
+    assert decoded_repeats2 is False
+    assert encoded_one_time[5] == 0x90  # tenths=9 preserved, flag digit=0
+
+
 def test_decode_returns_empty_list_when_no_alarm_buffer():
     memory = Memory.from_file(DATA_DIR / "keyassigns.dm41")
     assert memory.alarms.list_alarms() == []
