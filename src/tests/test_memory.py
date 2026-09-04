@@ -608,18 +608,80 @@ def test_xm_program_header_rejects_non_signature_type1_nibble():
     assert ExtendedMemory._parse_header(0x263, bytes.fromhex("10000000014003")) is not None
 
 
-def test_xm_header_requires_aaa_match_own_address():
-    """A Data/ASCII header's AAA field (nibble 1-3) must equal its own
-    address -- confirmed reliable across every real header in every sample
-    dump."""
+def test_xm_header_does_not_require_aaa_match_own_address():
+    """A Data/ASCII header's AAA field (nibble 1-3) equals its own address
+    in every undisturbed real dump seen -- but _parse_header() must NOT
+    enforce that: a real DM41L PURFL delete can relocate a surviving
+    file's header without refreshing AAA to match (see
+    test_xm_delfl_purfl_delete_relocates_file_with_stale_aaa below), so a
+    mismatched AAA alone must not be fatal. What must still be rejected is
+    a header that fails the *reserved-zero-nibble* check -- that's what
+    actually disambiguates a real header from a coincidental false
+    positive (see docs/extended_memory.md sec. 6), not AAA."""
     real_header = bytes.fromhex("20580000020020")  # 6x-xm.dm41's XM4.000, AAA=0x058
     assert ExtendedMemory._parse_header(0x058, real_header) is not None
-    with pytest.raises(ValueError):
-        ExtendedMemory._parse_header(0x059, real_header)
+    # Same header content, parsed at a different address -- AAA (0x058) no
+    # longer matches addr (0x059), but the reserved nibbles are still zero,
+    # so this must still succeed.
+    assert ExtendedMemory._parse_header(0x059, real_header) is not None
 
-    phantom_header = bytes.fromhex("20555004574152")  # false header.
+    phantom_header = bytes.fromhex("20555004574152")  # false header -- reserved nibbles non-zero.
     with pytest.raises(ValueError):
         ExtendedMemory._parse_header(0x0ba, phantom_header)
+
+
+def test_xm_delfl_purfl_delete_relocates_file_with_stale_aaa():
+    """tests/data/delfl-xm.dm41: 6x-xm.dm41 loaded into the DM41L emulator,
+    then XM4.000 deleted with the emulator's own PURFL command (not this
+    tool's remove_file()) and the result saved back out -- the real-world
+    bug report that prompted _parse_header() to stop enforcing
+    AAA == addr (see its docstring and the class docstring above).
+
+    A real PURFL delete repacks extended memory using the very same
+    top-down/cross-region-spanning layout this tool already models for its
+    own add_file()/list_files(): it closes the gap XM4.000 left behind by
+    relocating XMALPHA into it (from header 0x2e5 down to 0x058 -- exactly
+    where XM4.000's own header used to sit, and PURXM down with it) -- but
+    it does NOT refresh XMALPHA's AAA field to match its new address (it's
+    still 0x2e5). Confirms every surviving file still loads, in its
+    relocated position, with byte-for-byte identical content to
+    6x-xm.dm41 -- despite that stale AAA."""
+    orig_files = {f.name: f for f in _load_xm("6x-xm.dm41").list_files()}
+    delfl_files = _load_xm("delfl-xm.dm41").list_files()
+    by_name = {f.name: f for f in delfl_files}
+
+    assert set(by_name) == {
+        "XM1.000", "XM2.000", "XM3.000", "XMALPHA", "PURXM  ",
+    }
+
+    # XM1-3 sit above XM4.000 in the stack and are untouched by its removal.
+    for name in ("XM1.000", "XM2.000", "XM3.000"):
+        assert by_name[name].header_addr == orig_files[name].header_addr
+
+    # XMALPHA is relocated into XM4.000's old slot -- header 0x2e5 -> 0x058
+    # -- and now spans regions itself (it didn't before).
+    xmalpha = by_name["XMALPHA"]
+    assert xmalpha.header_addr == 0x058
+    assert xmalpha.spans_regions is True
+    assert xmalpha.segments == [[0x041, 0x057], [0x287, 0x2EF]]
+
+    # PURXM (a Program file, found by its fixed signature rather than by
+    # AAA, so it was never at risk from this bug) shifts down with it.
+    purxm = by_name["PURXM  "]
+    assert purxm.header_addr == 0x285
+    assert purxm.segments == [[0x282, 0x284]]
+
+    # Every surviving file's content round-trips byte-for-byte through the
+    # relocation, regardless of file type.
+    for f in delfl_files:
+        orig_f = orig_files[f.name]
+        if f.file_type == ExtendedMemory.TYPE_DATA:
+            assert f.get_data_lines() == orig_f.get_data_lines()
+        elif f.file_type == ExtendedMemory.TYPE_ASCII:
+            assert f.get_records() == orig_f.get_records()
+        else:
+            assert f.get_program_bytes() == orig_f.get_program_bytes()
+            assert f.checksum_valid is True
 
 
 def test_xm_register_length_reads_full_three_nibble_field():

@@ -256,9 +256,14 @@ class ExtendedMemory(MemoryRegion):
     dumps (not from a documented spec -- see docs/memory.md for the sample
     data this is based on):
       nibble 0      file type: 1 = Program, 2 = Data, 3 = ASCII.
-      nibble 1-3    (Data/ASCII only) AAA, the header's own address.
-                    Confirmed against every real header in every sample
-                    dump with no exceptions -- see _parse_header().
+      nibble 1-3    (Data/ASCII only) AAA, the header's own address in
+                    every undisturbed real dump seen so far -- but NOT
+                    relied on by list_files() to identify a header: a real
+                    DM41L PURFL delete can relocate a surviving file's
+                    header to close the gap left behind, without updating
+                    AAA to match the new address, leaving it pointing at
+                    the file's *former* address instead (confirmed against
+                    tests/data/delfl-xm.dm41 -- see _parse_header()).
       remaining     Register-count (SSS, all three types) and, for
                     Program, instruction-byte-count (BBB) -- see
                     _parse_header(). RRR/CC (Data/ASCII) aren't decoded;
@@ -272,17 +277,17 @@ class ExtendedMemory(MemoryRegion):
                     3x-xm.dm41's saved "PURXM" program.
 
     list_files() finds Data/ASCII headers structurally: a register with a
-    Data/ASCII type nibble, whose AAA equals its own address, whose
-    reserved-zero nibbles are actually zero, immediately followed by a
-    register that looks like a 7-character name (mostly printable ASCII).
-    All four checks are needed -- confirmed against largedump.dm41, where a
-    run of ordinary packed text happened to satisfy the type-nibble and
-    name-shaped checks alone (see _parse_header() for the specifics) but
-    failed both AAA and the reserved-zero check, and would have produced a
-    phantom file without them. Program headers are found by their fixed
-    signature instead (see _parse_header()), which is what keeps mid-stream
-    bytes of a packed ASCII record (which can also start with a nibble of
-    1) from being misread as a Program header.
+    Data/ASCII type nibble, whose reserved-zero nibbles are actually zero,
+    immediately followed by a register that looks like a 7-character name
+    (mostly printable ASCII). AAA is deliberately NOT checked here (see
+    _parse_header()) -- both remaining checks are needed on their own:
+    confirmed against largedump.dm41, where a run of ordinary packed text
+    happened to satisfy the type-nibble and name-shaped checks alone (see
+    _parse_header() for the specifics) but failed the reserved-zero check,
+    and would have produced a phantom file without it. Program headers are
+    found by their fixed signature instead (see _parse_header()), which is
+    what keeps mid-stream bytes of a packed ASCII record (which can also
+    start with a nibble of 1) from being misread as a Program header.
 
     """
 
@@ -334,6 +339,14 @@ class ExtendedMemory(MemoryRegion):
         (byte 5's low nibble + byte 6) and the 3-nibble BBB field (byte 4 +
         byte 5's high nibble) respectively -- these positions are the same
         across all three header formats in docs/memory.md.
+
+        Data/ASCII headers also carry an AAA field (the header's own
+        address, per docs/extended_memory.md sec. 3) which this method
+        parses but deliberately does NOT validate: a real DM41L PURFL
+        delete can relocate a surviving file's header without refreshing
+        AAA, leaving a perfectly valid header with a stale self-address
+        (confirmed against tests/data/delfl-xm.dm41 -- see the note further
+        down, on the aaa computation itself, for the full story).
         """
         if len(raw) != 7:
             raise ValueError("Not a 7-byte register.")
@@ -363,18 +376,30 @@ class ExtendedMemory(MemoryRegion):
         # encode the header's own address as AAA (nibble 1-3: the low
         # nibble of byte 0, plus all of byte 1) and both specify a reserved
         # run of nibbles that must literally be zero: nibble 4-7 for Data,
-        # nibble 4-5 for ASCII. Both are confirmed against every real
-        # header in every sample dump with no exceptions: AAA always equals
-        # the header's own address, and the reserved nibbles are always
-        # zero. Requiring both -- on top of the type nibble and
-        # the name-shaped check on the next register -- is what tells a
-        # real header apart from a register that merely coincidences into
-        # looking like one. (Certain advanced HP41 programming techniques
-        # can embed additional data in a file register; this is called
+        # nibble 4-5 for ASCII. The reserved-zero-nibble check (below) --
+        # on top of the type nibble and the name-shaped check on the next
+        # register, in list_files() -- is what tells a real header apart
+        # from a register that merely coincidences into looking like one;
+        # see the class docstring / docs/extended_memory.md sec. 6 for the
+        # confirmed largedump.dm41 false-positive that motivated it.
+        # (Certain advanced HP41 programming techniques can embed
+        # additional data in a file register; this is called
         # "Non-normalized data".)
-        aaa = ((raw[0] & 0x0F) << 8) | raw[1]
-        if aaa != addr:
-            raise ValueError("Invalid file header.")
+        #
+        # AAA itself is read but deliberately NOT enforced against addr.
+        # It equals the header's own address in every undisturbed real dump
+        # examined -- but tests/data/delfl-xm.dm41 (6x-xm.dm41 with
+        # XM4.000 deleted via the DM41L emulator's own PURFL command, not
+        # this tool's remove_file()) confirms it can legitimately go stale:
+        # deleting XM4.000 caused the emulator to relocate XMALPHA to close
+        # the gap -- from header 0x2e5 down to 0x058, exactly where
+        # XM4.000's own header used to sit, with XMALPHA's content
+        # otherwise preserved byte-for-byte -- without refreshing XMALPHA's
+        # AAA field to match its new address (it's still 0x2e5). Since the
+        # reserved-zero check already carries the false-positive-rejection
+        # weight on its own (see above), requiring AAA == addr here would
+        # just reject real, undamaged files like this one.
+        aaa = ((raw[0] & 0x0F) << 8) | raw[1]  # noqa: F841 (kept for parity with the header format's documented fields; intentionally unchecked -- see above)
         if file_type == cls.TYPE_DATA:
             if raw[2:4] != b"\x00\x00":
                 raise ValueError("Invalid DATA file header.")
