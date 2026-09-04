@@ -7,38 +7,33 @@ HP41C calculator hardware and it's implementation in the DM41L.
 
 Note on limitations: The DM41L specifically emulates the HP41CX calculator,
 which was an upgraded version of the HP41C and HP41CV models. The HP41C* series
-could be expanded with various ROM and RAM cartridges. The HP41C model had the
-most limited amount of main memory and no extended memory, while the HP41CV had
-the maximum amount of main memory already built in, but no extended memory. The
-HP41CX had the maximum amount of main memory and the equivalent of a time
-functions ROM cartridge, an extended functions ROM, and a extended memory
-cartridge already installed.
+could be expanded with various ROM and RAM cartridges. The HP41CX had the
+maximum amount of main memory and the equivalent of a time functions ROM
+cartridge, an extended functions cartridge, and an extended memory cartridge
+already installed.
 
-A note on confidence: most of this document describes hardware
-behavior confirmed against real memory dumps (see
-`src/tests/data/*.dm41`), or is derived from published
-documentation. Where something is still a guess, it's flagged
-as such rather than stated as fact.
+A note on confidence: most of this document describes hardware behavior
+confirmed against real memory dumps (see `src/tests/data/*.dm41`), or is
+derived from published documentation.
 
 A note on sources: Much of this data was derived from "HP-41 Advanced
 Programming Tips" by Alan McCornack & Keith Jarett, "HP41 Extended Functions
 Made Easy", "HP41 Synthetic Programming" by Jonathan Wickes, and other
-documentation found on the internet in PDF format. 
+documentation found on the internet.
 
 ## 1. Core Architectural Specifications
-- **Target Model:** DM41L which emulates the HP41CX
-- **Memory Hardware:** The HP41 organized its memory into 7-byte (56-bit)
-  registers. The DM41L emulator mimics this organization.
+- **Target Model:** DM41L which emulates the HP41CX calculator.
+- **Memory Hardware:** The HP41 series organized its memory into 7-byte (56-bit)
+  registers.
 - **Instruction Set:** Operates on a variable-length instruction set where
-  opcodes are between **1 and 3 bytes** long. This requires careful alignment
-  for disassembly as code fragments may not align with register boundaries.
+  opcodes are between **1 and 3 bytes** long.
 - **Execution Model:** When the HP41 series was developed, many modern computer
-  architecture conventions had not yet stablized. In particular, the HP41
-  employs a **Reverse Execution Model** where the instruction pointer moves
+  architecture conventions had not yet stablized. HP41 programs
+  employs an execution model where the instruction pointer moves
   from higher memory addresses to lower memory addresses ($N \rightarrow 0$).
   This explains why program termination sequences (like ".END.") appear at
   relatively low register indices in dumps, while the entry point resides in
-  high memory. This same high-to-low convention governs saved files in Extended
+  high memory. This same high-to-low convention governs files in Extended
   Memory (see §4), but not user data stored in main memory.
 
 ### 1.1 Reading Direction Quick Reference
@@ -132,7 +127,7 @@ reflected in the DM41L emulator.
 | d | User and System flags. | 0x0e | 
 | e | shifted key assignment bitmask: e[3:6], scratch: e[2], LineNo e[0:1] | 0x0f |
 
-#### 3.2 HP41 Alpha display:
+### 3.2 HP41 Alpha display:
 
 The alpha display of the HP41 series and the DM41L emulator is actually composed
 of Status Registers M, N, O, and part of register P. The user sees this as a
@@ -164,17 +159,11 @@ comprised of 7-byte registers.
 
 #### Key Assignment Registers
 
-This is explained further in `docs/key_assignments.md`, a separate document
-(the same relationship this doc has with `docs/program.md` — see below):
-the exact register format, the key-byte formula, why registers F and e are
-existence-check bitmaps rather than a cache of the assignment data, and why
-a user-program assignment doesn't touch this region at all.
+Key Assignments aare explained further in `docs/key_assignments.md`.
 
 #### Alarms
 
-These are explored further in `docs/alarms.md`. These are not well documented
-in the existing literature, although experimentation has revealed the overall
-structure.
+These are explored further in `docs/alarms.md`.
 
 #### Program Memory
 
@@ -182,11 +171,7 @@ HP41 programs begin at the register pointed to by R00-1 and proceed down
 through memory. The lowest register used by programs will be pointed to by
 .END. and will contain a 3-byte instruction that is also called ".END.".
 
-This is explained further in `docs/program.md`, a separate document
-(currently its own actively-researched doc rather than a section of this
-one — its internal numbering starts at "5." only because it's written as a
-continuation of this document's numbering, not because it's physically
-part of this file).
+This is explained further in `docs/program.md`.
 
 ### 3.4 Extended Memory
 

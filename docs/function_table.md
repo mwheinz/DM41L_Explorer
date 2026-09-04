@@ -1,4 +1,8 @@
-The following table shows HP41 instruction codes as they appear in programs ("Instruction Prefix") and as function codes ("Function"). In addition it indicates whether the code can be assigned to a keystroke.
+The following table shows HP41 instruction codes as they appear in programs
+("Instruction Prefix") and as function codes ("Function"). In addition it
+indicates whether the code can be assigned to a keystroke.
+
+# Primary functions
 
 | Dec | Hex | Instruction Prefix | Instruction Length | Function | Assignable? |
 |--|--|--|--|--|--|
@@ -259,7 +263,11 @@ The following table shows HP41 instruction codes as they appear in programs ("In
 | 254 | 0xFE | TEXT 14 | Var |  | No |
 | 255 | 0xFF | TEXT 15 | Var |  | No |
 
-Extended Functions ROM
+# Extended Functions ROM
+
+- Standard extended functions are in the `EXT FCN 2d` set. `CX EXT FCN` is the
+  set of functions that were added for the HP41CX.
+
 | Code | Cmd | 
 |--|--|
 | 25,00 | -EXT FCN 2D |
@@ -326,7 +334,11 @@ Extended Functions ROM
 | 25,61 | X>NN? |
 | 25,62 | X>=NN? |
 
-Time ROM
+# Time ROM
+
+- Standard time functions are in the `TIME 2C` set. `CX TIME` is the
+  set of functions that were added for the HP41CX.
+
 | Code | Cmd | 
 |--|--|
 | 26,0 | -TIME 2C |

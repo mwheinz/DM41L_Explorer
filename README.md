@@ -8,11 +8,11 @@ serial console.
 
 - **Overview** — A quick summary view of the contents of the DM41L's memory,
   including the stack & alpha registers, main memory, and extended memory. Also
-  shows the current values of R00, .END., ΣREG, and a memory-usage summary at
-  a glance.
+  shows the current values of R00, .END., ΣREG, and a memory-usage summary at a
+  glance.
 - **Flags** — all 56 status flags, named and editable.
-- **Programs** — a read-only catalog (for now) of the named programs and END
-  markers found in program memory.
+- **Programs** — list, import, export, and remove programs from the
+  calculator's memory.
 - **Data Registers** — browse and edit the user memory registers as numbers,
   text, or raw hex.
 - **XM Files** — list, add, edit, and remove files stored in extended memory
@@ -98,8 +98,9 @@ DM41L. Your Mileage May Vary.
 
 ![Programs](resources/screenshots/program_view.png) 
 
-The programs tab shows a scan of the DM41L's program memory. At the moment this
-is strictly read-only.
+The programs tab shows a list of the apps currently loaded into the DM41L's
+program memory. From this view you can export and remove loaded programs, and
+import new ones.
 
 ### Key Assignments Tab
 
@@ -131,7 +132,6 @@ Registers view, XM Files does limit you to either BCD or ASCII data, and
 Program files cannot be altered at this time.
 
 ### Hex View Tab
-
 
 ![Hex View](resources/screenshots/hex_view.png)
 

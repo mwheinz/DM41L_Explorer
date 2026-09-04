@@ -1,8 +1,7 @@
-Most of these flags are defined in the manuals for the HP41CX calculator, which can be found on the internet.
-
-Flags related to external hardware can probably be treated as "general use" on
-the DM41L but this has not been confirmed - and they may change state when the
-calculator is turned off and on. 
+These flags are defined in the manuals for the HP41CX calculator, which can be
+found on the internet. Flags related to external hardware can probably be
+treated as "general use" on the DM41L but this has not been confirmed - and
+they may change state when the calculator is turned off and on. 
 
 | Flag | description | flag | description |
 |---|---|---|---|
