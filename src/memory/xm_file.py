@@ -326,7 +326,7 @@ class ExtendedMemory(MemoryRegion):
         return sum(1 for b in raw if 0x20 <= b <= 0x7E) >= 5
 
     @classmethod
-    def _parse_header(cls, addr: int, raw: bytes) -> Optional[dict]:
+    def _parse_header(cls, raw: bytes) -> Optional[dict]:
         """
         Attempts to interpret a 7-byte register at `addr` as an XM file
         header. Returns None if `raw` doesn't match a known header shape,
@@ -344,9 +344,7 @@ class ExtendedMemory(MemoryRegion):
         address, per docs/extended_memory.md sec. 3) which this method
         parses but deliberately does NOT validate: a real DM41L PURFL
         delete can relocate a surviving file's header without refreshing
-        AAA, leaving a perfectly valid header with a stale self-address
-        (confirmed against tests/data/delfl-xm.dm41 -- see the note further
-        down, on the aaa computation itself, for the full story).
+        AAA, leaving a perfectly valid header with a stale self-address.
         """
         if len(raw) != 7:
             raise ValueError("Not a 7-byte register.")
@@ -399,7 +397,6 @@ class ExtendedMemory(MemoryRegion):
         # reserved-zero check already carries the false-positive-rejection
         # weight on its own (see above), requiring AAA == addr here would
         # just reject real, undamaged files like this one.
-        aaa = ((raw[0] & 0x0F) << 8) | raw[1]  # noqa: F841 (kept for parity with the header format's documented fields; intentionally unchecked -- see above)
         if file_type == cls.TYPE_DATA:
             if raw[2:4] != b"\x00\x00":
                 raise ValueError("Invalid DATA file header.")
@@ -459,7 +456,7 @@ class ExtendedMemory(MemoryRegion):
             header_addr = addr
             try:
                 header_register = self.get_register(addr)
-                header = ExtendedMemory._parse_header(addr, header_register.get_bytes())
+                header = ExtendedMemory._parse_header(header_register.get_bytes())
             except Exception as e:
                 raise DM41LMemoryError(
                     "Detected invalid XM file header. "

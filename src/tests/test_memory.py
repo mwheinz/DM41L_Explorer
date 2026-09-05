@@ -604,8 +604,8 @@ def test_xm_program_header_rejects_non_signature_type1_nibble():
     catches the exception, it never checks for a None return), so that's
     what we assert here."""
     with pytest.raises(ValueError):
-        ExtendedMemory._parse_header(0x62, bytes.fromhex("18444546474849"))
-    assert ExtendedMemory._parse_header(0x263, bytes.fromhex("10000000014003")) is not None
+        ExtendedMemory._parse_header(bytes.fromhex("18444546474849"))
+    assert ExtendedMemory._parse_header(bytes.fromhex("10000000014003")) is not None
 
 
 def test_xm_header_does_not_require_aaa_match_own_address():
@@ -619,15 +619,15 @@ def test_xm_header_does_not_require_aaa_match_own_address():
     actually disambiguates a real header from a coincidental false
     positive (see docs/extended_memory.md sec. 6), not AAA."""
     real_header = bytes.fromhex("20580000020020")  # 6x-xm.dm41's XM4.000, AAA=0x058
-    assert ExtendedMemory._parse_header(0x058, real_header) is not None
+    assert ExtendedMemory._parse_header(real_header) is not None
     # Same header content, parsed at a different address -- AAA (0x058) no
     # longer matches addr (0x059), but the reserved nibbles are still zero,
     # so this must still succeed.
-    assert ExtendedMemory._parse_header(0x059, real_header) is not None
+    assert ExtendedMemory._parse_header(real_header) is not None
 
     phantom_header = bytes.fromhex("20555004574152")  # false header -- reserved nibbles non-zero.
     with pytest.raises(ValueError):
-        ExtendedMemory._parse_header(0x0ba, phantom_header)
+        ExtendedMemory._parse_header(phantom_header)
 
 
 def test_xm_delfl_purfl_delete_relocates_file_with_stale_aaa():
