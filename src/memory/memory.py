@@ -135,7 +135,7 @@ class Memory:
                     base = int(token[0], 16)
                 except ValueError as e:
                     raise ValueError(
-                        f"{token[0]} is not a hexadecimal" 
+                        f"{token[0]} is not a hexadecimal"
                         f" number: {line}"
                     ) from e
                 if base < next_base:
