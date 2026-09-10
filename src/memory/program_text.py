@@ -23,7 +23,9 @@ own compiled output without any cross-instruction bookkeeping).
 
 The opcode table itself was derived by cross-checking three sources
 against each other, since ~/Work/hp41uc's C source isn't reachable from
-every environment this project is developed in:
+every environment this project is developed in (a fourth source, added
+later, covers the synthetic-only status-register postfixes M/N/O/P/Q/
+a/b/c/d/e -- see the module-level comment above _STACK_REGISTER_NAMES):
 
   1. `opcode_scan.py`'s byte-length classification (itself a port of
      hp41uc's `seek_end()`) -- which byte ranges are 1/2/3-byte or
@@ -52,6 +54,15 @@ value -- they follow the same pattern as a directly-confirmed neighbor
 of the two directly-observed values for Y and X) rather than being
 guesses out of nothing, but should be revisited if a fixture ever
 contradicts them.
+
+  4. W.C. Wickes' *Synthetic Programming on the HP-41C* (1980) -- the
+     same book docs/program.md sec 5.1 already cites for the chain-marker
+     distance math -- cross-checked against docs/pdfs/byte_table.html, a
+     second, independent full byte table. Used only for the
+     synthetic-only status-register postfixes (M/N/O/P/Q/a/b/c/d/e); see
+     the module-level comment above _STACK_REGISTER_NAMES for exactly
+     what's confirmed, what's merely named-but-undescribed, and the one
+     byte (0x7A) left out because the two sources actually disagree.
 '''
 
 import re
@@ -153,6 +164,41 @@ _SPARE_OPCODES = frozenset({0xAF, 0xB0})
 #     in their conventional T,Z,Y,X display order, with L immediately
 #     after) rather than directly observed -- flagged here in case a
 #     future fixture disagrees.
+#   0x75-0x79, 0x7B-0x7F: the "synthetic-only" status-register postfixes.
+#     These are unreachable from the keyboard on real hardware (the ALPHA
+#     key is disabled while entering an RCL/STO/etc. postfix, per W.C.
+#     Wickes' *Synthetic Programming on the HP-41C* (1980) sec 4A -- this
+#     project's own already-trusted source for the chain-marker distance
+#     math in docs/program.md sec 5.1) but are perfectly valid two-byte
+#     instructions once the postfix byte is written by other means.
+#     Wickes sec 4A, verbatim: "postfixes 75 through 7F display as 'M',
+#     'N', '0', 'P', 'Q', '+', 'a', 'b', 'c', 'd', and 'e', respectively."
+#     M/N/O/P are the four physical registers making up the 24-character
+#     ALPHA register (sec 4B); Q is a general-purpose scratch register
+#     (sec 4C); d holds all 56 system/user flags (sec 4D -- directly
+#     demonstrated there: "STO d" with X=0 clears every flag at once);
+#     e holds the key-assignment flags (sec 4E). docs/pdfs/
+#     byte_table.html independently lists the same ten names for the
+#     same ten byte values, cross-confirming them against a second
+#     source. a/b/c aren't individually described in the excerpted text
+#     beyond a warning that storing into them can be destructive on real
+#     hardware ("'0, STO c' causes MEMORY LOST") -- included here anyway
+#     since the name itself is unambiguous, and this module's job is
+#     representing the byte accurately, not judging its safety to use.
+#     Deliberately lowercase, matching Wickes' own glyphs -- see
+#     _parse_register_base()'s own docstring for why the encode side
+#     must check case *before* any folding: the uppercase spellings A-E
+#     are already local letter labels (see 0x66-0x6F above), a completely
+#     different, keyboard-reachable feature.
+#   0x7A is deliberately NOT included: Wickes' own text (quoted above)
+#     names its display glyph "+", but docs/pdfs/byte_table.html instead
+#     labels the same byte "Side T" -- a real disagreement between this
+#     project's two sources, not an OCR artifact (Wickes' sentence
+#     explicitly enumerates all ten *other* 0x75-0x7F names right
+#     alongside it). Left unrecognized (decodes as
+#     "; UNKNOWN OPCODE: ...", same as any other unmapped byte) until a
+#     fixture or a cleaner source settles it, matching this module's own
+#     no-guessing policy (see _format_unknown()).
 # Anything else doesn't decode to a known operand -- callers should treat
 # that as an unrecognized/spare instruction (see _format_unknown()).
 _STACK_REGISTER_NAMES = {
@@ -161,6 +207,16 @@ _STACK_REGISTER_NAMES = {
     0x72: "Y",   # confirmed: "STO IND Y" -> STO 0xF2 (0x80 | 0x72)
     0x73: "X",   # confirmed: "GTO IND X" -> GTO IND 0x73; "ARCL X" -> ARCL 0x73
     0x74: "L",   # inferred -- not directly observed in tower.txt
+    0x75: "M",   # Wickes sec 4A/4B -- one of the 4 ALPHA-register registers
+    0x76: "N",   # Wickes sec 4A/4B -- one of the 4 ALPHA-register registers
+    0x77: "O",   # Wickes sec 4A/4B -- one of the 4 ALPHA-register registers
+    0x78: "P",   # Wickes sec 4A/4B -- one of the 4 ALPHA-register registers
+    0x79: "Q",   # Wickes sec 4A/4C -- general-purpose scratch register
+    0x7B: "a",   # Wickes sec 4A -- named, but not individually described
+    0x7C: "b",   # Wickes sec 4A -- named, but not individually described
+    0x7D: "c",   # Wickes sec 4A -- named, but not individually described
+    0x7E: "d",   # Wickes sec 4A/4D -- the 56-bit system/user flag register
+    0x7F: "e",   # Wickes sec 4A/4E -- the key-assignment flag register
 }
 
 
@@ -799,10 +855,27 @@ def _parse_quoted_token(token: str) -> bytes:
 def _parse_register_base(token: str) -> int:
     '''Parses a bare (non-indirect) register/label/flag descriptor
     token -- a decimal register/flag number 0-99, a local letter label
-    A-J, or a stack register name T/Z/Y/X/L -- into its raw base value
-    (see the module-level comment above _decode_register_operand(), which
-    this reverses). Raises ValueError if `token` doesn't match any of
-    those forms.'''
+    A-J, a stack register name T/Z/Y/X/L, or one of the synthetic-only
+    status-register names M/N/O/P/Q/a/b/c/d/e (see the module-level
+    comment above _decode_register_operand(), which this reverses).
+    Raises ValueError if `token` doesn't match any of those forms.
+
+    Checks an exact-case match against _STACK_REGISTER_CODES *before*
+    any case-folding, then falls back to a case-insensitive match, then
+    the A-J local-label range. This order matters specifically for the
+    lowercase-only a/b/c/d/e names: they must resolve to the synthetic
+    status registers (0x7B-0x7F) while their uppercase counterparts A-E
+    keep meaning the unrelated, keyboard-reachable local letter labels
+    (0x66-0x6A) -- e.g. "a" -> register a (0x7B), but "A" -> local label
+    A (0x66). Checking the raw token first is what keeps those separate;
+    a blanket `token.upper()` before lookup (as this function used to do,
+    back when the only names here were the already-uppercase T/Z/Y/X/L)
+    would silently fold "a" into "A" and never reach register a at all.
+    The case-insensitive fallback below preserves the previous lenient
+    behavior for the genuinely case-insensitive names (T/Z/Y/X/L and the
+    new M/N/O/P/Q), e.g. "t" still resolves to stack register T.'''
+    if token in _STACK_REGISTER_CODES:
+        return _STACK_REGISTER_CODES[token]
     upper = token.upper()
     if upper in _STACK_REGISTER_CODES:
         return _STACK_REGISTER_CODES[upper]

@@ -672,3 +672,124 @@ def test_decode_program_txt_gto_ind_and_xeq_never_compact():
     compiled = decode_program_txt(text)
     assert compiled.hex().find("ae73") != -1  # GTO IND X -> 0xAE, descriptor 0x73
     assert compiled.hex().find("e00003") != -1  # XEQ 03 -> always general 3-byte
+
+
+# -- Synthetic-only status-register postfixes (M/N/O/P/Q/a/b/c/d/e) --------
+#
+# See memory/program_text.py's own module-level comment above
+# _STACK_REGISTER_NAMES for the W.C. Wickes citation these bytes are
+# confirmed against, and why 0x7A is deliberately excluded.
+
+
+def test_encode_program_txt_decodes_synthetic_status_registers():
+    data = bytes(
+        [
+            0x91, 0x75,  # STO M
+            0x90, 0x76,  # RCL N
+            0xCE, 0x77,  # X<> O
+            0x9B, 0x78,  # ARCL P
+            0x98, 0x79,  # VIEW Q
+            0x91, 0x7B,  # STO a
+            0x91, 0x7C,  # STO b
+            0x91, 0x7D,  # STO c
+            0x91, 0x7E,  # STO d
+            0x91, 0x7F,  # STO e
+        ]
+    )
+    lines = encode_program_txt(data).splitlines()
+    assert lines == [
+        "STO M",
+        "RCL N",
+        "X<> O",
+        "ARCL P",
+        "VIEW Q",
+        "STO a",
+        "STO b",
+        "STO c",
+        "STO d",
+        "STO e",
+    ]
+
+
+def test_encode_program_txt_decodes_synthetic_status_registers_indirect():
+    data = bytes(
+        [
+            0x91, 0xF5,  # STO IND M  (0x80 | 0x75)
+            0x90, 0xFB,  # RCL IND a  (0x80 | 0x7B)
+            0x91, 0xFE,  # STO IND d  (0x80 | 0x7E)
+        ]
+    )
+    lines = encode_program_txt(data).splitlines()
+    assert lines == ["STO IND M", "RCL IND a", "STO IND d"]
+
+
+def test_encode_program_txt_leaves_0x7a_postfix_unrecognized():
+    '''0x7A is the one byte in the 0x75-0x7F run this module deliberately
+    doesn't map -- Wickes' own text and docs/pdfs/byte_table.html disagree
+    on its name (see the module-level comment). It must fall back to the
+    same "; UNKNOWN OPCODE" treatment as any other unmapped operand byte,
+    not silently guess either source's spelling.'''
+    data = bytes([0x91, 0x7A])  # would-be "STO <0x7A>"
+    lines = encode_program_txt(data).splitlines()
+    assert lines == ["; UNKNOWN OPCODE: 91 7A"]
+
+
+def test_decode_program_txt_synthetic_status_registers_round_trip():
+    text = (
+        'LBL "SYN"\n'
+        "STO M\n"
+        "RCL N\n"
+        "X<> O\n"
+        "STO IND P\n"
+        "RCL IND Q\n"
+        "STO a\n"
+        "STO b\n"
+        "STO c\n"
+        "STO d\n"
+        "STO IND e\n"
+        "END\n"
+    )
+    compiled = decode_program_txt(text)
+    assert encode_program_txt(compiled).splitlines() == [
+        'LBL "SYN"',
+        "STO M",
+        "RCL N",
+        "X<> O",
+        "STO IND P",
+        "RCL IND Q",
+        "STO a",
+        "STO b",
+        "STO c",
+        "STO d",
+        "STO IND e",
+        "END ;30 BYTES",
+    ]
+
+
+def test_decode_program_txt_synthetic_register_case_distinct_from_local_label():
+    '''Lowercase "a".."e" must compile to the synthetic status registers
+    (0x7B-0x7F); their uppercase counterparts "A".."E" must keep meaning
+    the unrelated, keyboard-reachable local letter labels (0x66-0x6A).
+    This is the exact ambiguity _parse_register_base()'s own docstring
+    describes -- checked here byte-for-byte in both directions so a
+    future change to the lookup order can't silently reintroduce it.'''
+    lower = decode_program_txt('LBL "CA"\nSTO a\nEND\n')
+    upper = decode_program_txt('LBL "CA"\nSTO A\nEND\n')
+    assert lower != upper
+    assert bytes([0x91, 0x7B]) in lower  # STO a -> descriptor 0x7B
+    assert bytes([0x91, 0x66]) in upper  # STO A -> local label A, 0x66
+
+    lower_e = decode_program_txt('LBL "CE"\nSTO e\nEND\n')
+    upper_e = decode_program_txt('LBL "CE"\nSTO E\nEND\n')
+    assert bytes([0x91, 0x7F]) in lower_e  # STO e -> descriptor 0x7F
+    assert bytes([0x91, 0x6A]) in upper_e  # STO E -> local label E, 0x66+4
+
+
+def test_decode_program_txt_synthetic_status_register_names_case_insensitive_for_mq():
+    '''Unlike a-e, the M/N/O/P/Q names don't collide with anything else
+    in the operand-token space (local letter labels stop at J), so they
+    keep the same case-insensitive leniency the stack registers T/Z/Y/X/L
+    already had.'''
+    mixed = decode_program_txt('LBL "CM"\nSTO m\nEND\n')
+    canonical = decode_program_txt('LBL "CM"\nSTO M\nEND\n')
+    assert mixed == canonical
