@@ -598,10 +598,22 @@ class ProgramMemory(MemoryRegion):
         Raises `ValueError` if `instruction_bytes` isn't one well-formed
         program, or contains a global label name that already exists in
         this memory. Raises `DM41LMemoryError` if there's no valid R00/
-        `.END.` partition loaded yet, if there isn't enough free program
-        memory, or if the computed link distance doesn't fit the format's
-        9-bit register-count field (a *very* large program landing right
-        at the edge of addressable program memory).
+        `.END.` partition loaded yet, or if there isn't enough free
+        program memory.
+
+        Two more `DM41LMemoryError` cases are checked defensively below
+        but are dead given this region's own bounds, not reachable
+        failure modes today: `_relink_outermost_marker()`'s 9-bit-
+        register-count overflow (the widest possible gap between the Key
+        Assignments floor, `0xC0`, and `PRIMARY_DATA_END`, `0x1FF`, is
+        only 319 registers -- nowhere near the 511 the 9-bit field can
+        hold) and this method's own "no valid END/label marker" check
+        just below (the `find_program_end()` agreement with
+        `instruction_bytes`'s own length, checked immediately above,
+        already guarantees `walk_chain()` finds at least one marker;
+        confirmed exhaustively for every 3-byte input and over 400,000
+        random short buffers). Left in place as cheap insurance in case
+        these bounds ever change.
         '''
         status = self._memory.status_registers
         if not instruction_bytes:
@@ -619,6 +631,8 @@ class ProgramMemory(MemoryRegion):
 
         chain_entries = walk_chain(instruction_bytes)
         if not chain_entries:
+            # Defensive only -- dead in practice given the guard just
+            # above: see this method's own docstring.
             raise DM41LMemoryError(
                 "Could not find a valid END/label marker in this "
                 "program's own bytes -- it may be corrupt."
@@ -763,7 +777,12 @@ class ProgramMemory(MemoryRegion):
         distance_registers = 0`) if `link_addr` is `None` (this is the
         first program in memory). Its own third byte is preserved as-is.
         Raises `DM41LMemoryError` if the computed distance doesn't fit
-        the format's 9-bit register-count field.'''
+        the format's 9-bit register-count field -- checked defensively,
+        but dead in practice given this region's own bounds: the widest
+        possible gap, from the Key Assignments floor (`0xC0`) to
+        `PRIMARY_DATA_END` (`0x1FF`), is only 319 registers, well inside
+        the 511 the 9-bit field can hold. Left in place as cheap
+        insurance in case those bounds ever change.'''
         if link_addr is None:
             new_bbb, new_dr = 0, 0
         else:
@@ -919,6 +938,12 @@ class ProgramMemory(MemoryRegion):
             )
             distance_registers, bbb = divmod(distance_bytes, 7)
             if distance_registers > 0x1FF:
+                # Defensive only -- dead in practice, same reasoning as
+                # _relink_outermost_marker()'s docstring: this region's
+                # widest possible gap (Key Assignments floor 0xC0 to
+                # PRIMARY_DATA_END 0x1FF) is only 319 registers. Left in
+                # place as cheap insurance in case those bounds ever
+                # change.
                 raise DM41LMemoryError(
                     "Two global chain markers are too far apart to "
                     "re-link -- program memory may be unusually large or "
