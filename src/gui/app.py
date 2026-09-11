@@ -28,6 +28,7 @@ from engine.commands import (
 from config import ProjectConfig
 from gui.port_dialog import PortSelectionDialog
 from gui.preferences_dialog import PreferencesDialog
+from gui.help_dialog import KeyboardShortcutsDialog
 from gui.overview_tab import OverviewTab
 from gui.flags_tab import FlagsTab
 from gui.data_registers_tab import DataRegistersTab
@@ -450,12 +451,18 @@ class DM41LExplorerApp(ctk.CTk):
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         # Help Menu
+        help_menu = Menu(menubar, tearoff=0)
         if PLATFORM_SYSTEM != "Darwin":
-            help_menu = Menu(menubar, tearoff=0)
             help_menu.add_command(
                 label="About DM41L Explorer", command=self._show_about
             )
-            menubar.add_cascade(label="Help", menu=help_menu)
+            help_menu.add_separator()
+        help_menu.add_command(
+            label="Keyboard Shortcuts",
+            command=self.show_keyboard_shortcuts,
+            underline=0,
+        )
+        menubar.add_cascade(label="Help", menu=help_menu)
 
         self.config(menu=menubar)
         self._rebuild_recent_files_menu()
@@ -1060,6 +1067,9 @@ class DM41LExplorerApp(ctk.CTk):
         PreferencesDialog(
             self, self.config_store, self.serial, on_saved=self._on_preferences_saved
         )
+
+    def show_keyboard_shortcuts(self):
+        KeyboardShortcutsDialog(self)
 
     def _on_preferences_saved(self):
         ctk.set_appearance_mode(self.config_store.appearance_mode)
