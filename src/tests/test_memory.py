@@ -1020,6 +1020,99 @@ def test_xm_add_file_no_room_raises():
         xm.add_file("HUGE", xm.TYPE_DATA, numbers=[float(i) for i in range(4000)])
 
 
+def test_xm_add_file_one_register_over_total_capacity_raises_cleanly():
+    """Regression test for a user-reported bug: a file needing exactly 1
+    register more than extended memory can safely hold used to be
+    ACCEPTED by add_file() -- the write succeeded -- and corrupted the
+    directory so badly that the very next list_files() call raised
+    DM41LMemoryError trying to parse unrelated memory past the region as
+    a header.
+
+    Root cause: _allocate_segments()'s spanning-into-region-1 capacity
+    check was `cursor + 1 <= XM_REGIONS[next_region][0]` (equivalent to
+    `cursor < XM_REGIONS[next_region][0]`), one register too permissive
+    -- it let a file's data land so that its own successor (another
+    file's name register, or list_files()'s EOM sentinel) would have to
+    go exactly ON region 1's own reserved pointer register, which
+    _place_file() then correctly refuses to overwrite with a bogus EOM,
+    but leaves with NO terminator at all. Fixed to `cursor <=
+    XM_REGIONS[next_region][0]`, so add_file() now rejects this case up
+    front -- before any registers are written -- instead of writing a
+    directory with no way to signal its own end."""
+    region0, region1 = XM_REGIONS
+
+    # The largest single file (as the very first thing ever written to
+    # an empty extended memory) that still leaves room for a directory
+    # terminator: every usable register in region 0 except the 2 this
+    # file's own name+header consume, plus every usable register in
+    # region 1 except the 1 reserved for the terminator that follows.
+    max_safe = (region0[1] - region0[0] - 2) + (region1[1] - region1[0] - 1)
+    one_over = max_safe + 1
+
+    xm = _load_xm("empty.dm41")
+    xm.add_file("MAXSAFE", xm.TYPE_DATA, numbers=[1.0] * max_safe)
+    # Must round-trip cleanly -- this is the exact scenario the bug broke.
+    files = xm.list_files()
+    assert len(files) == 1
+    assert files[0].get_numbers() == [1.0] * max_safe
+
+    xm2 = _load_xm("empty.dm41")
+    with pytest.raises(DM41LMemoryError, match="Not enough free space"):
+        xm2.add_file("ONEOVER", xm2.TYPE_DATA, numbers=[1.0] * one_over)
+    # And confirm the rejection happened before any writes -- extended
+    # memory must be left exactly as it started, not partially corrupted.
+    assert xm2.list_files() == []
+    assert xm2.get_register(region0[0]) == ZERO_REGISTER
+
+
+def test_xm_add_file_exact_single_region_fill_does_not_falsely_span():
+    """Regression test for a related, but distinct, off-by-one found
+    while investigating the bug above: a file that exactly fills a
+    single region -- using every one of its usable registers, leaving
+    none there for a directory terminator -- correctly gets its
+    terminator pushed into the next region (this is necessary, not a
+    bug: region 0's own reserved pointer register can't double as a
+    terminator slot), but was then misreported as "spanning regions"
+    even though not one byte of its own data lives in the next region.
+
+    XMFile.spans_regions now only counts non-empty segments, so a file
+    like this reports spans_regions is False while a file that
+    genuinely does spill data into the next region still reports True
+    (see test_xm_add_file_spans_regions_when_it_does_not_fit)."""
+    region0, region1 = XM_REGIONS
+
+    # Every usable register in region 0 after this file's own
+    # name+header, with nothing left over -- the exact boundary that
+    # forces a terminator-only push into region 1.
+    exact_fill = region0[1] - region0[0] - 2
+
+    xm = _load_xm("empty.dm41")
+    added = xm.add_file("EXACT", xm.TYPE_DATA, numbers=[1.0] * exact_fill)
+    assert added.spans_regions is False
+    assert added.get_numbers() == [1.0] * exact_fill
+
+    # Region 1's own pointer register must still have been bootstrapped
+    # -- the terminator genuinely lives there even though this file's
+    # data doesn't.
+    assert xm.get_register(region1[0]) != ZERO_REGISTER
+
+    # Must round-trip identically through list_files().
+    files = xm.list_files()
+    assert len(files) == 1
+    assert files[0].spans_regions is False
+    assert files[0].get_numbers() == [1.0] * exact_fill
+
+    # A second file must still be placed correctly, continuing from the
+    # terminator's real location in region 1 -- not corrupted by the
+    # first file's now-accurate (but still internally 2-segment, for
+    # next_name_addr's sake) segment bookkeeping.
+    second = xm.add_file("SECOND", xm.TYPE_DATA, numbers=[2.0, 3.0])
+    assert second.spans_regions is False
+    files = xm.list_files()
+    assert len(files) == 2
+    assert files[1].get_numbers() == [2.0, 3.0]
+
+
 def test_xm_add_file_rejects_name_over_seven_characters():
     xm = _load_xm("empty.dm41")
     with pytest.raises(ValueError):

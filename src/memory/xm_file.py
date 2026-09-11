@@ -100,12 +100,28 @@ class XMFile:
 
     @property
     def spans_regions(self) -> bool:
-        """True if this file's data continues past the region its header
-        lives in, into the top of one or more subsequent XM regions."""
-        return len(self.segments) > 1
+        """True if this file's OWN data continues past the region its
+        header lives in, into the top of one or more subsequent XM
+        regions.
+
+        Deliberately checked as "more than one *non-empty* segment", not
+        just `len(self.segments) > 1`: a file that exactly fills its
+        region right up to the last usable register leaves no room
+        there for a directory terminator (another file's name register,
+        or list_files()'s EOM sentinel), so _allocate_segments()/
+        list_files() push a placeholder segment into the next region to
+        reserve that terminator's address, even though not one byte of
+        this file's own content lives there -- see the matching comment
+        in _allocate_segments(). That placeholder is always an empty,
+        start > end range (contributes nothing to num_registers()/
+        data_registers(), which already skip it structurally), so it's
+        excluded here rather than counted as a real second segment."""
+        return sum(1 for start, end in self.segments if end >= start) > 1
 
     def __repr__(self):
-        span = ", ".join(f"0x{s:03x}-0x{e:03x}" for s, e in self.segments)
+        span = ", ".join(
+            f"0x{s:03x}-0x{e:03x}" for s, e in self.segments if e >= s
+        )
         return f"XMFile({self.name!r}, {self.type_label}, {span})"
 
     def data_registers(self) -> list:
@@ -533,6 +549,21 @@ class ExtendedMemory(MemoryRegion):
 
         if cursor <= XM_REGIONS[region_index][0]:
             # Spans into the next region, identically to the reading side.
+            # This `<=` (not `<`) is deliberate, not itself an off-by-one:
+            # `cursor` is also next_name_addr's starting point below, and
+            # it must land on a real address inside THIS region for a
+            # terminator (this file's successor's name register, or
+            # list_files()'s EOM sentinel) to go -- so a file that would
+            # leave *zero* room for one (cursor landing exactly on
+            # region_index's own reserved pointer register) has to be
+            # handled here too, even though none of its own data actually
+            # overflows. `s` (below) tells the two cases apart: s > 0
+            # means real data registers spill into the next region; s ==
+            # 0 means only the terminator does, and this file's own
+            # content still fits entirely in region_index -- see
+            # XMFile.spans_regions(), which reports False for exactly
+            # this s == 0 case rather than treating "spans" as merely
+            # "touched the next region for bookkeeping purposes".
             segments = [[XM_REGIONS[region_index][0] + 1, header_addr - 1]]
             s = XM_REGIONS[region_index][0] - cursor
             next_region = region_index + 1
@@ -544,12 +575,34 @@ class ExtendedMemory(MemoryRegion):
                 )
             ceiling = XM_REGIONS[next_region][1]
             cursor = ceiling - s
-            if cursor + 1 <= XM_REGIONS[next_region][0]:
+            # `cursor` (== next_name_addr, returned below) is where this
+            # file's successor -- another file's name register, or
+            # list_files()'s EOM sentinel if there is no successor -- has
+            # to go, so it must itself be a real, writable address in
+            # this region: strictly greater than the region's own
+            # reserved pointer register, i.e. NOT `<=`. Getting this
+            # boundary wrong by one (the previous version of this check
+            # was `cursor + 1 <= ...`, equivalent to `cursor <
+            # XM_REGIONS[next_region][0]`) let a file land `cursor`
+            # exactly ON the next region's pointer-register address
+            # through -- using every last usable register in both
+            # regions combined, with nothing free for a terminator.
+            # add_file() accepted it and wrote it successfully;
+            # _place_file() then correctly avoided clobbering that
+            # pointer register with a bogus EOM_REGISTER (its own
+            # `next_name_addr > XM_REGIONS[ending_region][0]` guard) --
+            # but never wrote ANY terminator there either, so the very
+            # next list_files() call walked straight past the (perfectly
+            # valid) pointer register it found, mistook it for another
+            # file's name register, and crashed trying to parse unrelated
+            # memory beyond the region as a header. Confirmed by direct
+            # repro. Rejecting it here instead -- before any registers
+            # are written -- keeps a directory this close to full from
+            # ever losing its terminator in the first place.
+            if cursor <= XM_REGIONS[next_region][0]:
                 raise DM41LMemoryError(
                     "Not enough free space in extended memory for this "
-                    "file -- it would need to spill into a third region, "
-                    "which isn't supported (or confirmed to work on real "
-                    "hardware -- see docs/memory.md sec. 4.5)."
+                    "file."
                 )
             segments.append([cursor + 1, ceiling])
             return segments, cursor, next_region
