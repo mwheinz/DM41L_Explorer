@@ -109,6 +109,23 @@ def decode_program_raw(data: bytes) -> bytes:
 
 _DAT_WHITESPACE = b" \t\r\n\v\f"
 
+_ASCII_HEX_DIGITS = frozenset(b"0123456789ABCDEFabcdef")
+
+
+def _parse_strict_hex(data: bytes) -> int:
+    '''A strict ASCII-hex-digits-ONLY parse. Unlike plain `int(data, 16)`,
+    which also accepts a leading sign, an `0x`/`0X` prefix, and PEP 515
+    underscores, this rejects anything that isn't one of the 16 hex-digit
+    characters -- see `decode_program_dat()`'s own docstring for why that
+    distinction matters for a file's length header specifically. (A
+    stricter parser already exists elsewhere in this codebase for base
+    addresses, but that one's own leniency is deliberate there, so this
+    is a separate, narrower helper rather than a shared one.) Raises
+    ValueError if `data` is empty or contains any non-hex-digit byte.'''
+    if not data or any(b not in _ASCII_HEX_DIGITS for b in data):
+        raise ValueError(f"not all ASCII hex digits: {data!r}")
+    return int(data, 16)
+
 
 def decode_program_dat(data: bytes) -> bytes:
     '''
@@ -118,6 +135,13 @@ def decode_program_dat(data: bytes) -> bytes:
 
     Raises DM41LMemoryError if `data` is too short for its own declared
     length, contains non-hex-digit data, or the checksum doesn't match.
+
+    The header is parsed with `_parse_strict_hex()`, not bare
+    `int(data, 16)`: the latter also accepts a leading sign, an `0x`/`0X`
+    prefix, and PEP 515 underscores, so a header like `b'-001'` would
+    otherwise silently parse as -1 instead of being rejected here, and
+    only fail much later with a confusing "DAT file is shorter than its
+    own declared length (-1 bytes)" error from the length check below.
     '''
     stripped = bytes(b for b in data if b not in _DAT_WHITESPACE)
 
@@ -127,7 +151,7 @@ def decode_program_dat(data: bytes) -> bytes:
         )
 
     try:
-        length = int(stripped[:4], 16)
+        length = _parse_strict_hex(stripped[:4])
     except ValueError as e:
         raise DM41LMemoryError(
             f"DAT file's 4-byte header isn't hex digits: {stripped[:4]!r}."
