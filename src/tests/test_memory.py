@@ -505,7 +505,6 @@ def test_status_registers_alpha_construction(status_memory):
     # Currently it will likely fail with TypeError unless Register implements __add__.
     try:
         assert isinstance(sr.alpha, Register)
-        assert sr.alpha.ascii_only is True
     except TypeError:
         pytest.fail(
             "StatusRegisters alpha construction failed - check if Register implements __add__ or use byte concatenation."

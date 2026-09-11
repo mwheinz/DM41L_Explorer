@@ -107,7 +107,7 @@ class StatusRegisters(MemoryRegion):
             + self.get_register(6).get_bytes()
             + self.get_register(5).get_bytes()
         )
-        return AlphaRegister(data=data, ascii_only=True, read_only=True)
+        return AlphaRegister(data=data)
 
     def label_for(self, addr: int) -> Optional[str]:
         '''The system-register name (e.g. 'X') for an address in this

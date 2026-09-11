@@ -37,24 +37,12 @@ class Register:
         self,
         data: bytes = None,
         size: int = 0,
-        ascii_only: bool = False,
-        read_only: bool = False,
     ):
         if data is not None:
             self._data = bytearray(data)
         else:
             self._data = bytearray(size)
         self.size = len(self._data)
-
-        # These are "advisory" settings. ascii_only indicates that the
-        # register is only intended for ascii data. read_only indicates that
-        # the user should not manually alter the value (but the value can
-        # still be altered by other operations, such as adjusting the size of
-        # main memory, adding a program to program memory, and similar
-        # operations. TODO: turns out these fields weren't needed - delete
-        # them.
-        self.ascii_only = ascii_only
-        self.read_only = read_only
 
     @classmethod
     def from_hex(cls, hex_str: str) -> "Register":

@@ -91,16 +91,3 @@ class DataMemory(MemoryRegion):
     def numbers(self) -> list:
         '''Every data register's BCD value, R00 first.'''
         return [self._memory.get_register(addr).get_bcd_number() for addr in self]
-
-    def sigma_reg_address(self) -> int:
-        '''Absolute address of SIGMA-REG (the first of the six statistics
-        registers), straight out of status register c.'''
-        return self._memory.status_registers.SigmaReg()
-
-    def sigma_reg_number(self) -> int:
-        '''SIGMA-REG's data register number, or -1 if it points outside
-        the current data partition (an unloaded or corrupt dump).'''
-        addr = self.sigma_reg_address()
-        if addr not in self:
-            return -1
-        return addr - self.start

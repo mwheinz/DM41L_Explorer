@@ -52,19 +52,10 @@ class XMFile:
         self.name_addr = header_addr + 1
         self.file_type = file_type
         self.name = name
-        # The exact 7 raw bytes the name register holds, independent of
-        # `name` (which is get_ascii()'s lossy '.'-for-unprintable display
-        # form -- see ExtendedMemory.list_files() and _looks_like_name()).
-        # A real DM41L directory entry's name can contain bytes outside
-        # the printable-ASCII range that get_ascii() collapses to '.', so
-        # two structurally distinct files can share an identical `.name`
-        # while having different `name_bytes` -- see the note on
-        # ExtendedMemory._place_file()/remove_file() for why this
-        # distinction matters (a lossy `.name` was previously the only
-        # identity a file had, which could make unrelated files collide as
-        # "duplicates" and corrupt extended memory on remove/edit).
-        # Falls back to a same-length re-encode of `name` for callers that
-        # don't have the original raw bytes on hand.
+
+        # The exact 7 raw bytes the name register holds, independent of `name`
+        # (which is get_ascii()'s lossy '.'-for-unprintable display form --
+        # see ExtendedMemory.list_files().
         self.name_bytes = name_bytes if name_bytes is not None else name.encode(
             "ascii", errors="replace"
         )
@@ -315,15 +306,6 @@ class ExtendedMemory(MemoryRegion):
     TYPE_PROGRAM = XMFile.TYPE_PROGRAM
     TYPE_DATA = XMFile.TYPE_DATA
     TYPE_ASCII = XMFile.TYPE_ASCII
-
-    @staticmethod
-    def _looks_like_name(raw: bytes) -> bool:
-        """A register is 'name-shaped' if most of its bytes are printable
-        ASCII -- true for every real file name seen so far (always exactly
-        7 characters, sometimes space-padded), and not true for BCD data,
-        the all-zero/all-FF filler seen elsewhere, or packed ASCII-record
-        content (which mixes in raw length-prefix bytes)."""
-        return sum(1 for b in raw if 0x20 <= b <= 0x7E) >= 5
 
     @classmethod
     def _parse_header(cls, raw: bytes) -> Optional[dict]:
