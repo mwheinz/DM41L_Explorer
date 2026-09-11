@@ -133,9 +133,14 @@ class ProgramMemory(MemoryRegion):
     def _decode_chain_marker(self, reg: int, offset: int) -> Optional[dict]:
         '''Decodes the 3-byte '1100 bbb rrrrrrrrr eeeeffff' marker at
         (reg, offset) -- docs/program.md sec 5.1. Returns None if the byte
-        at (reg, offset) doesn't start with the 0xC0-0xCD marker nibble.'''
+        at (reg, offset) doesn't start with the 0xC0-0xCD marker range --
+        `bbb` is a byte offset within a 7-byte register and so is only
+        ever 0-6 for a real marker; `0xCE`/`0xCF` (bbb == 7) are ordinary
+        2-byte opcodes elsewhere in FOCAL code, never markers (see
+        `program_chain.decode_chain_marker()`, the byte-buffer twin of
+        this method).'''
         raw = self.read_bytes_forward(reg, offset, 3)
-        if (raw[0] >> 4) != 0xC:
+        if not 0xC0 <= raw[0] <= 0xCD:
             return None
         val = (raw[0] << 16) | (raw[1] << 8) | raw[2]
         is_label = (raw[2] >> 4) == 0xF

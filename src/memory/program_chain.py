@@ -33,12 +33,18 @@ def decode_chain_marker(data: bytes, index: int) -> Optional[dict]:
     '''
     Decodes the 3-byte marker at `data[index:index+3]`. Returns None if
     `index` is out of bounds or the byte there doesn't start with the
-    0xC0-0xCD marker nibble .
+    0xC0-0xCD marker range (docs/program.md sec 5.1) -- `bbb`, the 3-bit
+    field packed into this byte alongside the 0xC nibble, is a byte
+    offset within a 7-byte register and so is only ever 0-6 for a real
+    marker; `0xCE`/`0xCF` (bbb == 7) are never markers, and are in active
+    use as ordinary 2-byte opcodes elsewhere in FOCAL code (`X<>` on a
+    synthetic status register, `LBL nn` in its general/non-compact form
+    -- see src/tests/test_program_text.py).
     '''
     if index < 0 or index + 3 > len(data):
         return None
     raw = data[index : index + 3]
-    if (raw[0] >> 4) != 0xC:
+    if not 0xC0 <= raw[0] <= 0xCD:
         return None
     val = (raw[0] << 16) | (raw[1] << 8) | raw[2]
     is_label = (raw[2] >> 4) == 0xF
