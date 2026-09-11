@@ -16,7 +16,13 @@ from typing import Dict, Optional, Union
 from pathlib import Path
 
 from .registers import Register
-from .constants import XM_REGIONS, MIN_SANE_R00, ZERO_REGISTER
+from .constants import (
+    XM_REGIONS,
+    MIN_SANE_R00,
+    ZERO_REGISTER,
+    REGISTER_SIZE_BYTES,
+    SPECIAL_REGISTER_SIZE_OVERRIDES,
+)
 from .regions import RegionSpan, VoidRegion, FreeSpace
 from .status_registers import StatusRegisters
 from .key_assignments import KeyAssignments
@@ -146,7 +152,14 @@ class Memory:
 
                 i = 0
                 for hex_str in token[1:]:
-                    memory._core_memory[base + i] = Register.from_hex(hex_str)
+                    register = Register.from_hex(hex_str)
+                    if register.size != REGISTER_SIZE_BYTES:
+                        raise ValueError(
+                            f"Register at 0x{base + i:x} is "
+                            f"{register.size} bytes, expected "
+                            f"{REGISTER_SIZE_BYTES}: {line}"
+                        )
+                    memory._core_memory[base + i] = register
                     i += 1
                 if i > 4:
                     raise ValueError(f"Line too long: {line}")
@@ -161,7 +174,17 @@ class Memory:
                     if ":" != token[i][1]:
                         raise ValueError(f"Malformed line {line}")
                     label = token[i][0]
-                    memory._special_registers[label] = Register.from_hex(token[i + 1])
+                    register = Register.from_hex(token[i + 1])
+                    expected_size = SPECIAL_REGISTER_SIZE_OVERRIDES.get(
+                        label, REGISTER_SIZE_BYTES
+                    )
+                    if register.size != expected_size:
+                        raise ValueError(
+                            f"Special register {label} is "
+                            f"{register.size} bytes, expected "
+                            f"{expected_size}: {line}"
+                        )
+                    memory._special_registers[label] = register
 
         # The only region whose extent isn't derivable on demand -- see
         # KeyAssignments.end.

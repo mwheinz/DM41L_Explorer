@@ -408,6 +408,47 @@ def test_memory_malformed_dump():
         Memory.from_string("DM41\nXX 01020304050607")
 
 
+def test_memory_from_string_rejects_short_core_register():
+    """A core-memory register field that is fewer than 7 bytes is a
+    corrupt/truncated dump and must be rejected, not silently loaded as
+    an under-sized Register."""
+    with pytest.raises(ValueError, match="6 bytes, expected 7"):
+        Memory.from_string("DM41\n00 010203040506")
+
+
+def test_memory_from_string_rejects_long_core_register():
+    """Symmetric case: a register field with extra bytes is just as
+    corrupt as a short one and must also be rejected."""
+    with pytest.raises(ValueError, match="8 bytes, expected 7"):
+        Memory.from_string("DM41\n00 0102030405060708")
+
+
+def test_memory_from_string_rejects_wrong_length_special_register():
+    """The A/B/C/S/M/N special registers are full 7-byte hardware
+    registers too, so a short one is just as corrupt as a short core
+    register and must be rejected the same way."""
+    dump = (
+        "DM41\n"
+        "A: c000f50046494c B: 8000000000c196 C: 0000002c0480fd "
+        "S: 00101100100000 M: 00011cd5ff73cb N: 0000 G: 00"
+    )
+    with pytest.raises(ValueError, match="Special register N is 2 bytes, expected 7"):
+        Memory.from_string(dump)
+
+
+def test_memory_from_string_accepts_one_byte_g_register():
+    """G is a documented exception -- a single status byte, not a full
+    hardware register -- so it must stay accepted at its real 1-byte
+    size instead of being forced to 7."""
+    dump = (
+        "DM41\n"
+        "A: c000f50046494c B: 8000000000c196 C: 0000002c0480fd "
+        "S: 00101100100000 M: 00011cd5ff73cb N: 00000000000000 G: 00"
+    )
+    mem = Memory.from_string(dump)
+    assert mem.get_register("G").get_hex() == "00"
+
+
 # ---- StatusRegisters tests
 
 
