@@ -194,9 +194,13 @@ class ProgramMemory(MemoryRegion):
         friends) uses, since a key assignment lives on one label's own
         header regardless of how many labels its program has.
 
-        Returns [] if program memory is empty, or if R00/.END. don't look
-        like a real partition (e.g. a fresh, never-loaded Memory()). The
-        permanent `.END.` marker itself is otherwise included as the last
+        Returns [] if program memory is empty, if R00/.END. don't look
+        like a real partition, or if a fresh, never-loaded Memory()'s own
+        "Memory Lost" register defaults (which decode as R00=0x19C,
+        .END.=0x19B) pass that check but then fail to decode any marker
+        at all -- see the MIN_SANE_R00 comment below for the actual
+        mechanism in that last case. The permanent `.END.` marker itself
+        is otherwise included as the last
         (newest) entry -- see ProgramInfo's docstring -- unless it truly
         has nothing chained to it yet (see docs/program.md's first worked
         example), in which case there's nothing to report at all.
@@ -212,8 +216,16 @@ class ProgramMemory(MemoryRegion):
         status = self._memory.status_registers
         r00 = status.R00()
         dend = status.DotEnd()
-        # MIN_SANE_R00 -- a fresh, never-loaded Memory() decodes R00 as 0,
-        # which isn't a real partition boundary.
+        # MIN_SANE_R00 -- guards against an R00 value below any real
+        # partition boundary. This is NOT what makes a fresh,
+        # never-loaded Memory() return [] below: Memory.__init__ seeds
+        # registers 0x0C/0x0D with "Memory Lost" defaults, so a fresh
+        # Memory() actually decodes R00 as 0x19C and .END. as 0x19B --
+        # both pass the checks here. The empty result in that case
+        # instead comes from the walk itself, just below: register 0x19B
+        # is all zeroes, so the very first _decode_chain_marker() call
+        # returns None and the loop breaks immediately, before ever
+        # appending an entry.
         if not (MIN_SANE_R00 <= r00 <= PRIMARY_DATA_END) or not (
             KEY_ASSIGNMENTS_RANGE[0] <= dend < r00
         ):
