@@ -141,7 +141,10 @@ class Register:
         # The stored exponent assumes the mantissa is d.ddddddddd (one digit
         # before the implied decimal point), so shift back by 9 to treat
         # mantissa_val as the plain 10-digit integer it actually is.
-        return ms_sign * mantissa_val * (10 ** (total_exponent - 9))
+        #
+        # Do this reconstruction in Decimal, not float.
+        result = Decimal(mantissa_val) * Decimal(10) ** (total_exponent - 9)
+        return float(ms_sign * result)
 
     def set_bcd_number(self, number: float):
         '''Writes a float to this register in BCD format.'''
