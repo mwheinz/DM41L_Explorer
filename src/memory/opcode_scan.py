@@ -114,6 +114,10 @@ def scan_global_markers_forward(data: bytes) -> list:
     Never raises -- like `find_program_end()`, an opcode that would run
     past the end of `data` (a genuinely truncated/corrupt stream) simply
     ends the scan at whatever's already been found, rather than raising.
+    This includes a label marker whose own header/name would run past
+    the end of `data`: `decode_label_name()` is only called once its
+    bytes are confirmed to fit (see `program_chain.walk_chain()`, which
+    guards the same way).
     '''
     entries = []
     state = State.BYTE1
@@ -154,6 +158,11 @@ def scan_global_markers_forward(data: bytes) -> list:
             entry = dict(marker)
             entry["index"] = marker_start
             if marker["is_label"]:
+                label_end = marker_start + 4 + max(marker["label_length"], 0)
+                if label_end > len(data):
+                    break  # label's own header/name runs past data's end --
+                           # truncated/corrupt stream, stop here like
+                           # find_program_end() would
                 name, key = decode_label_name(data, marker_start, marker["label_length"])
                 entry["name"] = name
                 entry["key_assignment"] = key

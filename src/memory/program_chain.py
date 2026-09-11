@@ -115,11 +115,13 @@ def walk_chain(data: bytes) -> list:
     Never raises -- stops (silently, the same defensive posture as
     `list_global_chain()`) if a computed target lands out of `data`'s own
     bounds (this is the normal/expected way the walk ends, not an error),
-    if a target lands in-bounds but doesn't decode to a valid marker
-    (shouldn't happen for well-formed HP-41 code; treated as if the
-    current entry were outermost rather than raising, in case of a
-    slightly-off fixture), or after a generous iteration cap as a
-    backstop against a corrupt circular chain.
+    if a target lands in-bounds but doesn't decode to a valid marker, or
+    decodes as a global label whose own header/name would run past the
+    end of `data` (shouldn't happen for well-formed HP-41 code; treated
+    as if the current entry were outermost rather than raising, in case
+    of a slightly-off fixture or a truncated/corrupt buffer), or after a
+    generous iteration cap as a backstop against a corrupt circular
+    chain.
     '''
     if len(data) < 3:
         return []
@@ -139,6 +141,10 @@ def walk_chain(data: bytes) -> list:
         entry = dict(marker)
         entry["index"] = index
         if marker["is_label"]:
+            label_end = index + 4 + max(marker["label_length"], 0)
+            if label_end > len(data):
+                break  # label's own header/name runs past data's end --
+                       # truncated/corrupt input, not a real label here
             name, key = decode_label_name(data, index, marker["label_length"])
             entry["name"] = name
             entry["key_assignment"] = key
