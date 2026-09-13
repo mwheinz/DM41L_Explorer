@@ -39,6 +39,12 @@ STATUS_REGISTER_LABELS = [
     "b", "c", "d / Flags", "e",
 ]
 
-# The extended-memory regions the calculator can address. Regions 0 and 1
-# are always present in the DM41L emulator.
+# The extended-memory regions the calculator can address. Regions 0 and 1 are
+# always present in the DM41L emulator, with Region 0 emulating an Extended
+# Functions module and Region 1 emulating an Extended Memory module. Note that
+# the this XM region actually extends to address 0x200, but that register is
+# never used on a DM41L and is always zero. I believe register 0x200 would be
+# a pointer to a third XM region if the DM41L supported one. (My memory is that
+# the HP41 series could support an Extended Functions module and up to 2
+# Extended Memory modules.)
 XM_REGIONS = [(0x40, 0xBF), (0x201, 0x2EF)]
