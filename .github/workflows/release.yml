@@ -116,12 +116,7 @@ jobs:
           # resource forks / code-signing metadata, so the .app has to be
           # its own ditto call.
           ditto -c -k --sequesterRsrc --keepParent "DM41L Explorer.app" "../../DM41L-Explorer-${{ github.ref_name }}-macos.zip"
-          # library/ (GitHub issue #30) and README.md are plain data/text
-          # siblings of the .app (see build.sh) with no signing concerns,
-          # so a regular `zip` -- which happily appends to an
-          # already-existing archive -- adds them into the same zip
-          # ditto just created.
-          zip -r "../../DM41L-Explorer-${{ github.ref_name }}-macos.zip" library README.md
+          zip -r "../../DM41L-Explorer-${{ github.ref_name }}-macos.zip" README.md
           cd ../..
           shasum -a 256 "DM41L-Explorer-${{ github.ref_name }}-macos.zip" > "DM41L-Explorer-${{ github.ref_name }}-macos.zip.sha256"
 
