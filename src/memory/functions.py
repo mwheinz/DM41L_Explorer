@@ -58,7 +58,7 @@ SINGLE_BYTE_FUNCTIONS = {
     0x62: 'FACT',
     0x63: 'X≠0?',
     0x64: 'X>0?',
-    0x65: 'LNX+1',
+    0x65: 'LN1+X',
     0x66: 'X<0?',
     0x67: 'X=0?',
     0x68: 'INT',

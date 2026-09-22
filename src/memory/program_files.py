@@ -214,24 +214,38 @@ def encode_program_txt(data: bytes) -> bytes:
     return _encode_program_txt(data).encode("utf-8")
 
 
+def _decode_txt_bytes(data: bytes) -> str:
+    '''
+    Turns a TXT file's raw bytes into text: UTF-8 (a leading byte-order
+    mark is dropped), falling back to CP437 if the file isn't valid
+    UTF-8. hp41uc-era listings are 8-bit DOS text, and hp41uc's own
+    compiler recognizes CP437 byte 0xE4 as Sigma (Σ+, CLΣ, ΣREG). CP437
+    maps every byte to a character, so this never fails; a file that
+    was really some other encoding shows up as a compile error instead
+    (docs/mnemonic_dialects_plan.md sec 3.7).
+    '''
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("cp437")
+
+
 def decode_program_txt(data: bytes) -> bytes:
     '''
     Recovers a program's instruction bytes from a TXT file's own raw
     bytes -- the reverse of `encode_program_txt()` above. Decodes `data`
-    as UTF-8 text, then compiles it via memory/program_text.py's own
-    `decode_program_txt()` (str -> bytes; see that function's own
-    docstring for the full compile-time rules and error conditions).
+    to text (see `_decode_txt_bytes()` below), then compiles it via
+    memory/program_text.py's own `decode_program_txt()` (str -> bytes;
+    see that function's own docstring for the full compile-time rules
+    and error conditions).
 
     Raises DM41LMemoryError -- not the plain ValueError
-    program_text.decode_program_txt() itself raises -- if `data` isn't
-    valid UTF-8, or if it doesn't compile, so this matches
-    decode_program_raw()/decode_program_dat()'s own error type (and what
-    gui/program_tab.py's `_IMPORT_FORMATS` dispatch already catches).
+    program_text.decode_program_txt() itself raises -- if `data` doesn't
+    compile, so this matches decode_program_raw()/decode_program_dat()'s
+    own error type (and what gui/program_tab.py's `_IMPORT_FORMATS`
+    dispatch already catches).
     '''
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError as e:
-        raise DM41LMemoryError(f"TXT file isn't valid UTF-8: {e}") from e
+    text = _decode_txt_bytes(data)
     try:
         return _decode_program_txt(text)
     except ValueError as e:

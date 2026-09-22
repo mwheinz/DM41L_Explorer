@@ -389,8 +389,26 @@ def test_decode_program_txt_reads_towers_own_txt_file():
     assert decode_program_txt(file_bytes) == raw_bytes
 
 
-def test_decode_program_txt_rejects_invalid_utf8():
-    with pytest.raises(DM41LMemoryError, match="UTF-8"):
+def test_decode_program_txt_ignores_utf8_bom():
+    # Some Windows editors save UTF-8 with a leading byte-order mark;
+    # left in, it would glue itself onto the first token (LBL).
+    assert decode_program_txt(b'\xef\xbb\xbfLBL "T1"\nSIN\nEND\n') == (
+        decode_program_txt(b'LBL "T1"\nSIN\nEND\n')
+    )
+
+
+def test_decode_program_txt_falls_back_to_cp437():
+    # hp41uc-era DOS listings: CP437 byte 0xE4 is Sigma. b"\xe4+" isn't
+    # valid UTF-8, so this only compiles via the CP437 fallback.
+    compiled = decode_program_txt(b'LBL "T1"\n\xe4+\nCL\xe4\nEND\n')
+    assert compiled[6:8] == bytes([0x47, 0x70])  # Σ+, CLΣ
+
+
+def test_decode_program_txt_non_utf8_garbage_is_a_compile_error():
+    # CP437 decodes any byte, so non-UTF-8 junk is no longer rejected at
+    # the decoding step -- it must still fail as an unrecognized
+    # instruction, and still as DM41LMemoryError.
+    with pytest.raises(DM41LMemoryError, match="unrecognized instruction"):
         decode_program_txt(b'LBL "T1"\n\xff\xfe\nEND\n')
 
 

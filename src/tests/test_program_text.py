@@ -480,6 +480,14 @@ def test_decode_program_txt_single_byte_category():
     assert encode_program_txt(compiled).splitlines()[1:4] == ["SIN", "COS", "+"]
 
 
+def test_ln1_plus_x_name():
+    # 0x65 is LN1+X on the HP-41 (and in hp41uc); functions.py used to
+    # spell it LNX+1, which hp41uc rejects.
+    compiled = decode_program_txt('LBL "T1"\nLN1+X\nEND\n')
+    assert compiled[6] == 0x65
+    assert encode_program_txt(compiled).splitlines()[1] == "LN1+X"
+
+
 def test_decode_program_txt_postfix_register_category():
     text = (
         'LBL "T2"\n'

@@ -107,7 +107,7 @@ indicates whether the code can be assigned to a keystroke.
 | 098 | 0x62 | FACT | 1 | FACT | Yes |
 | 099 | 0x63 | X≠0 | 1 | X≠0? | Yes |
 | 100 | 0x64 | X>0 | 1 | X>0? | Yes |
-| 101 | 0x65 | LN1+X | 1 | LNX+1 | Yes |
+| 101 | 0x65 | LN1+X | 1 | LN1+X | Yes |
 | 102 | 0x66 | X<0? | 1 | X<0? | Yes |
 | 103 | 0x67 | X=0? | 1 | X=0? | Yes |
 | 104 | 0x68 | INT | 1 | INT | Yes |
