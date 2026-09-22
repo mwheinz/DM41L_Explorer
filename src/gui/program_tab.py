@@ -140,15 +140,10 @@ class ProgramTab(ctk.CTkFrame):
 
         self._caption = build_caption_label(
             self,
-            "One row per real program in program memory, delimited by "
-            "explicit END markers (or the permanent .END. sentinel for "
-            "the single newest program) -- not by global label, since a "
-            "program can have zero, one, or several. Labels lists every "
-            "global label a program contains, or \"(unlabelled)\" if it "
-            "has none. Select a row and click Export... to save that "
-            "program as a standalone HP-41 program file, Remove to delete "
-            "it from program memory, or click Import... to add a "
-            "RAW/DAT/PPC/TXT program file as a new program.",
+            "Each row indicates a separate HP41 program, separated by "
+            "explicit END markers. The \"Label\" column lists the "
+            "global labels contained in the program and each program may "
+            "have zero or more global labels as identifiers.",
         )
 
         _, self._tree = build_tab_treeview(self, _TREE_COLUMNS, style=_TREE_STYLE)

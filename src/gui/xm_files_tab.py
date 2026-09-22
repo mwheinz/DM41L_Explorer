@@ -27,6 +27,7 @@ import customtkinter as ctk
 from memory import Memory, ExtendedMemory, DM41LMemoryError, parse_data_line
 from gui.xm_file_dialog import XMFileDialog
 from gui.tab_common import (
+    build_caption_label,
     build_tab_header,
     build_tab_treeview,
     style_treeview,
@@ -128,6 +129,14 @@ class XMFilesTab(ctk.CTkFrame):
         )
         remove_button.pack(side="right", padx=(0, 8))
 
+        self._caption = build_caption_label(
+            self,
+            "Each row indicates a separate XM file. "
+            "Files are listed in the order they occur in extended memory. "
+            "Data and ASCII files can be imported, exported, or edited "
+            "right in DM41 Explorer but Program files cannot be altered "
+            "at this time.",
+        )
         _, self._tree = build_tab_treeview(self, _TREE_COLUMNS, style=_TREE_STYLE)
 
         self._tree.bind("<Double-1>", lambda e: self._edit_selected())
