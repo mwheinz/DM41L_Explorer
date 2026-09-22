@@ -365,24 +365,34 @@ def test_decode_program_txt_round_trips_every_sample_program_modulo_memory_state
     second program (captured with a permanent ".END." terminator, which
     -- see _normalize_memory_state_fields()'s own docstring -- can never
     survive a text round trip since it decodes identically to a plain
-    END), is carved out explicitly rather than silently ignored.'''
+    END), is carved out explicitly rather than silently ignored.
+
+    Unneeded NULLs (an unpacked program's) are dropped on decompile, as
+    hp41uc does, so a program containing them recompiles shorter. For
+    those, the check is that the recompiled program decompiles to the
+    same listing (apart from the END trailer's byte count).'''
     mismatches = []
+    nulls_dropped = 0
     for filename, program, instruction_bytes in _dm41_sample_programs():
         if filename == "twolabels.dm41" and program.terminator == ".END.":
             continue
         text = encode_program_txt(instruction_bytes)
         recompiled = decode_program_txt(text)
-        if len(recompiled) != len(instruction_bytes):
-            mismatches.append(
-                f"{filename} {program.labels}: length {len(recompiled)} != "
-                f"{len(instruction_bytes)}"
-            )
-            continue
-        if _normalize_memory_state_fields(recompiled) != _normalize_memory_state_fields(
+        if _normalize_memory_state_fields(recompiled) == _normalize_memory_state_fields(
             instruction_bytes
         ):
-            mismatches.append(f"{filename} {program.labels}: content mismatch")
+            continue
+        if (
+            len(recompiled) < len(instruction_bytes)
+            and encode_program_txt(recompiled).splitlines()[:-1]
+            == text.splitlines()[:-1]
+        ):
+            nulls_dropped += 1
+            continue
+        mismatches.append(f"{filename} {program.labels}: content mismatch")
     assert not mismatches, "\n".join(mismatches)
+    # 3x-xm.dm41/manyfiles.dm41's XMBCD and XMALPHA are unpacked.
+    assert nulls_dropped > 0
 
 
 def test_decode_program_txt_cannot_recover_permanent_end_marker():
@@ -548,17 +558,25 @@ def test_decode_program_txt_xrom_category():
     assert decompiled[1] == "XROM 25,46 ;X<>F"
 
 
-def test_decode_program_txt_xrom_rejects_unsupported_module():
-    with pytest.raises(ValueError, match="unsupported XROM"):
-        decode_program_txt('LBL "T6"\nXROM 1,01\nEND\n')
+def test_decode_program_txt_xrom_accepts_any_module():
+    '''Any module 00-31 / function 00-63 compiles, emulated or not
+    (hp41uc does the same). A7 83 is the card reader's XROM 30,03, from
+    GhostTown.ppc.'''
+    compiled = decode_program_txt(
+        'LBL "T6"\nXROM 30,03\nXROM 1,01\nXROM 25,00\nXROM 31,63\nEND\n'
+    )
+    assert bytes([0xA7, 0x83]) in compiled
+    assert bytes([0xA0, 0x41]) in compiled
+    assert bytes([0xA6, 0x40]) in compiled
+    assert bytes([0xA7, 0xFF]) in compiled
+    lines = encode_program_txt(compiled).splitlines()
+    assert lines[1:5] == ["XROM 30,03", "XROM 01,01", "XROM 25,00", "XROM 31,63"]
 
 
-def test_decode_program_txt_xrom_rejects_unrecognized_function():
-    # ff=0 -> byte2=0x40, one below XROM_FUNCTIONS' lowest module-25
-    # entry (0x41/ALENG) -- a real module, but not a real function
-    # within it.
-    with pytest.raises(ValueError, match="unsupported XROM"):
-        decode_program_txt('LBL "T7"\nXROM 25,00\nEND\n')
+def test_decode_program_txt_xrom_rejects_out_of_range():
+    for bad in ("XROM 32,00", "XROM 25,64", "XROM 99,99"):
+        with pytest.raises(ValueError, match="out of range"):
+            decode_program_txt(f'LBL "T7"\n{bad}\nEND\n')
 
 
 def test_decode_program_txt_xrom_accepts_extended_function_mnemonic():
@@ -674,11 +692,117 @@ def test_decode_program_txt_gto_ind_and_xeq_never_compact():
     assert compiled.hex().find("e00003") != -1  # XEQ 03 -> always general 3-byte
 
 
-# -- Synthetic-only status-register postfixes (M/N/O/P/Q/a/b/c/d/e) --------
+# -- NULL bytes and XROMs from other modules (GhostTown.ppc, 2026-09-22) ---
+
+
+def test_encode_program_txt_skips_null_before_number():
+    '''An unpacked program keeps the NULL the HP-41 inserts in front of
+    every keyed-in number, even after a non-number instruction. It's a
+    no-op, so it's skipped silently, as hp41uc does.'''
+    data = bytes([0x91, 0xF0, 0x00, 0x11, 0x92, 0x04])  # STO IND T, NULL, 1, ST+ 04
+    assert encode_program_txt(data).splitlines() == ["STO IND T", "1", "ST+ 04"]
+
+
+def test_null_before_number_dropped_on_round_trip():
+    '''The unneeded NULL is gone after a round trip; the one separating
+    two adjacent numbers is re-inserted.'''
+    text = encode_program_txt(
+        bytes([0x91, 0xF0, 0x00, 0x11, 0x00, 0x12, 0xC0, 0x00, 0x0D])
+    )  # STO IND T, NULL, 1, NULL, 2, END
+    assert text.splitlines()[:3] == ["STO IND T", "1", "2"]
+    assert decode_program_txt(text)[:6] == bytes([0x91, 0xF0, 0x11, 0x00, 0x12, 0xC0])
+
+
+def test_encode_program_txt_skips_stray_nulls():
+    data = bytes([0x00, 0x00, 0x87, 0x00, 0x85])  # NULL NULL CLA NULL RTN
+    assert encode_program_txt(data).splitlines() == ["CLA", "RTN"]
+
+
+def test_encode_program_txt_decodes_xrom_from_any_module():
+    '''0xA0-0xA7 are all XROM prefixes, not just 0xA6 (Extended
+    Functions/Time). Unknown modules get no name comment.'''
+    data = bytes(
+        [
+            0xA7, 0x83,  # XROM 30,03 (card reader)
+            0xA0, 0x41,  # XROM 01,01
+            0xA6, 0x6A,  # XROM 25,42 ;SEEKPT
+        ]
+    )
+    assert encode_program_txt(data).splitlines() == [
+        "XROM 30,03",
+        "XROM 01,01",
+        "XROM 25,42 ;SEEKPT",
+    ]
+
+
+# -- GTO IND / XEQ IND (shared opcode 0xAE) --------------------------------
+#
+# The operand's high bit selects XEQ IND; it is not the usual "indirect"
+# flag. See _XEQ_IND_FLAG's comment in memory/program_text.py for sources.
+
+
+def test_encode_program_txt_decodes_xeq_ind():
+    data = bytes(
+        [
+            0xAE, 0x05,  # GTO IND 05
+            0xAE, 0x85,  # XEQ IND 05
+            0xAE, 0x73,  # GTO IND X
+            0xAE, 0xF3,  # XEQ IND X
+            0xAE, 0xAA,  # XEQ IND 42 (Wickes' own example)
+        ]
+    )
+    lines = encode_program_txt(data).splitlines()
+    assert lines == [
+        "GTO IND 05",
+        "XEQ IND 05",
+        "GTO IND X",
+        "XEQ IND X",
+        "XEQ IND 42",
+    ]
+
+
+def test_decode_program_txt_xeq_ind():
+    compiled = decode_program_txt('LBL "XI"\nXEQ IND 05\nXEQ IND X\nEND\n')
+    assert bytes([0xAE, 0x85]) in compiled
+    assert bytes([0xAE, 0xF3]) in compiled
+
+
+def test_decode_program_txt_gto_ind_keeps_high_bit_clear():
+    compiled = decode_program_txt('LBL "GI"\nGTO IND 42\nEND\n')
+    assert bytes([0xAE, 0x2A]) in compiled  # Wickes: AE 2A is GTO IND 42
+
+
+def test_decode_program_txt_gto_xeq_ind_round_trip():
+    text = (
+        'LBL "IND"\n'
+        "GTO IND 05\n"
+        "XEQ IND 05\n"
+        "XEQ IND L\n"
+        "GTO IND a\n"
+        "XEQ IND e\n"
+        "END\n"
+    )
+    lines = encode_program_txt(decode_program_txt(text)).splitlines()
+    assert lines[1:-1] == [
+        "GTO IND 05",
+        "XEQ IND 05",
+        "XEQ IND L",
+        "GTO IND a",
+        "XEQ IND e",
+    ]
+
+
+def test_decode_program_txt_xeq_ind_rejects_bad_operands():
+    for bad in ("XEQ IND", "XEQ IND 05 06", "XEQ IND IND 05", "XEQ IND 100"):
+        with pytest.raises(ValueError):
+            decode_program_txt(f'LBL "B"\n{bad}\nEND\n')
+
+
+# -- Synthetic-only status-register postfixes (M/N/O/P/Q/R/a/b/c/d/e) ------
 #
 # See memory/program_text.py's own module-level comment above
 # _STACK_REGISTER_NAMES for the W.C. Wickes citation these bytes are
-# confirmed against, and why 0x7A is deliberately excluded.
+# confirmed against, and for 0x7A ("R").
 
 
 def test_encode_program_txt_decodes_synthetic_status_registers():
@@ -723,15 +847,20 @@ def test_encode_program_txt_decodes_synthetic_status_registers_indirect():
     assert lines == ["STO IND M", "RCL IND a", "STO IND d"]
 
 
-def test_encode_program_txt_leaves_0x7a_postfix_unrecognized():
-    '''0x7A is the one byte in the 0x75-0x7F run this module deliberately
-    doesn't map -- Wickes' own text and docs/pdfs/byte_table.html disagree
-    on its name (see the module-level comment). It must fall back to the
-    same "; UNKNOWN OPCODE" treatment as any other unmapped operand byte,
-    not silently guess either source's spelling.'''
-    data = bytes([0x91, 0x7A])  # would-be "STO <0x7A>"
+def test_encode_program_txt_decodes_0x7a_postfix_as_r():
+    '''0x7A is status register R, spelled as hp41uc spells it (see the
+    module-level comment above _STACK_REGISTER_NAMES).'''
+    data = bytes([0x91, 0x7A, 0x90, 0xFA])  # STO R, RCL IND R
     lines = encode_program_txt(data).splitlines()
-    assert lines == ["; UNKNOWN OPCODE: 91 7A"]
+    assert lines == ["STO R", "RCL IND R"]
+
+
+def test_decode_program_txt_0x7a_postfix_round_trip():
+    compiled = decode_program_txt('LBL "R"\nSTO R\nRCL IND r\nEND\n')
+    assert bytes([0x91, 0x7A]) in compiled
+    assert bytes([0x90, 0xFA]) in compiled  # lowercase r folds to R
+    lines = encode_program_txt(compiled).splitlines()
+    assert lines[1:3] == ["STO R", "RCL IND R"]
 
 
 def test_decode_program_txt_synthetic_status_registers_round_trip():

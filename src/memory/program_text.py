@@ -25,7 +25,7 @@ The opcode table itself was derived by cross-checking three sources
 against each other, since ~/Work/hp41uc's C source isn't reachable from
 every environment this project is developed in (a fourth source, added
 later, covers the synthetic-only status-register postfixes M/N/O/P/Q/
-a/b/c/d/e -- see the module-level comment above _STACK_REGISTER_NAMES):
+R/a/b/c/d/e -- see the module-level comment above _STACK_REGISTER_NAMES):
 
   1. `opcode_scan.py`'s byte-length classification (itself a port of
      hp41uc's `seek_end()`) -- which byte ranges are 1/2/3-byte or
@@ -59,10 +59,9 @@ contradicts them.
      same book docs/program.md sec 5.1 already cites for the chain-marker
      distance math -- cross-checked against docs/pdfs/byte_table.html, a
      second, independent full byte table. Used only for the
-     synthetic-only status-register postfixes (M/N/O/P/Q/a/b/c/d/e); see
-     the module-level comment above _STACK_REGISTER_NAMES for exactly
-     what's confirmed, what's merely named-but-undescribed, and the one
-     byte (0x7A) left out because the two sources actually disagree.
+     synthetic-only status-register postfixes (M/N/O/P/Q/R/a/b/c/d/e);
+     see the module-level comment above _STACK_REGISTER_NAMES for
+     exactly what's confirmed and what's merely named-but-undescribed.
 '''
 
 import re
@@ -135,13 +134,25 @@ _GTO_COMPACT_BASE = 0xB1
 _GTO_COMPACT_MAX = 14
 _GTO_COMPACT_FIXED_BYTE2 = 0x00
 
-# 0xAF and 0xB0 -- the two bytes between GTO-IND (0xAE) and the compact
+# 0xAF and 0xB0 -- the two bytes between GTO/XEQ IND (0xAE) and the compact
 # GTO block (0xB1-0xBF) -- are confirmed-spare, unassigned opcodes: see
 # docs/program_text_io_plan.md sec 2.3 ("hp41uc also emits informational
 # ... comments for two truly unassigned 'spare' opcode bytes (0xAF,
 # 0xB0)"). They fall in opcode_scan's 2-byte-instruction range, so each
 # still consumes one operand byte; see _decode_2byte() below.
 _SPARE_OPCODES = frozenset({0xAF, 0xB0})
+
+# 0xAE is shared by GTO IND and XEQ IND. Its operand's high bit selects
+# which one: clear = GTO IND, set = XEQ IND; the low 7 bits are the
+# register. So unlike every other register-operand instruction, 0xAE's
+# high bit is NOT the usual "indirect" flag -- both forms are always
+# indirect. Confirmed by three independent sources: Wickes' *Synthetic
+# Programming on the HP-41C* ("AE 2A is 'GTO IND 42', whereas AE AA is
+# 'XEQ IND 42'"), *A Programmer's Handbook* v2.07 ("1010 1110 trrr rrrr
+# ... t is 0=GTO IND or 1=XEQ IND"), and hp41uc's decomp.c.
+# docs/pdfs/byte_table.html labels 0xAE "GTO/XEQ IND".
+_GTO_XEQ_IND_OPCODE = 0xAE
+_XEQ_IND_FLAG = 0x80
 
 # -- Register/flag/data "descriptor" operand byte -----------------------
 #
@@ -164,7 +175,7 @@ _SPARE_OPCODES = frozenset({0xAF, 0xB0})
 #     in their conventional T,Z,Y,X display order, with L immediately
 #     after) rather than directly observed -- flagged here in case a
 #     future fixture disagrees.
-#   0x75-0x79, 0x7B-0x7F: the "synthetic-only" status-register postfixes.
+#   0x75-0x7F: the "synthetic-only" status-register postfixes.
 #     These are unreachable from the keyboard on real hardware (the ALPHA
 #     key is disabled while entering an RCL/STO/etc. postfix, per W.C.
 #     Wickes' *Synthetic Programming on the HP-41C* (1980) sec 4A -- this
@@ -190,15 +201,7 @@ _SPARE_OPCODES = frozenset({0xAF, 0xB0})
 #     must check case *before* any folding: the uppercase spellings A-E
 #     are already local letter labels (see 0x66-0x6F above), a completely
 #     different, keyboard-reachable feature.
-#   0x7A is deliberately NOT included: Wickes' own text (quoted above)
-#     names its display glyph "+", but docs/pdfs/byte_table.html instead
-#     labels the same byte "Side T" -- a real disagreement between this
-#     project's two sources, not an OCR artifact (Wickes' sentence
-#     explicitly enumerates all ten *other* 0x75-0x7F names right
-#     alongside it). Left unrecognized (decodes as
-#     "; UNKNOWN OPCODE: ...", same as any other unmapped byte) until a
-#     fixture or a cleaner source settles it, matching this module's own
-#     no-guessing policy (see _format_unknown()).
+#
 # Anything else doesn't decode to a known operand -- callers should treat
 # that as an unrecognized/spare instruction (see _format_unknown()).
 _STACK_REGISTER_NAMES = {
@@ -212,6 +215,7 @@ _STACK_REGISTER_NAMES = {
     0x77: "O",   # Wickes sec 4A/4B -- one of the 4 ALPHA-register registers
     0x78: "P",   # Wickes sec 4A/4B -- one of the 4 ALPHA-register registers
     0x79: "Q",   # Wickes sec 4A/4C -- general-purpose scratch register
+    0x7A: "R",   # hp41uc's name; Wickes/byte_table.html show its glyph (a sideways T)
     0x7B: "a",   # Wickes sec 4A -- named, but not individually described
     0x7C: "b",   # Wickes sec 4A -- named, but not individually described
     0x7D: "c",   # Wickes sec 4A -- named, but not individually described
@@ -411,7 +415,7 @@ def _decode_xrom(byte1: int, byte2: int) -> str:
     mm = ((byte1 & 0x07) << 2) | (byte2 >> 6)
     ff = byte2 & 0x3F
     name = XROM_FUNCTIONS.get((byte1, byte2))
-    text = f"XROM {mm},{ff:02d}"
+    text = f"XROM {mm:02d},{ff:02d}"  # hp41uc: "%02d" for both (decomp.c)
     if name is not None:
         text += f" ;{name}"
     return text
@@ -446,26 +450,24 @@ def encode_program_txt(data: bytes) -> str:
     while i < n:
         c = data[i]
 
-        # -- A digit-literal run (one number). hp41uc's compiler inserts
-        # a single 0x00 separator byte between two back-to-back numeric
-        # literals (docs/program_text_io_plan.md sec 2.3 -- digit bytes
-        # 0x10-0x1C have no length prefix and would otherwise run
-        # together), confirmed against numtest.dm41's real, purpose-built
-        # "12345" then "67890" example. That separator is a pure
-        # technical necessity with no display text of its own -- it's
-        # swallowed rather than rendered as its own line -- but it still
-        # ends the *first* run: hp41uc's own decompiler (and the plan
-        # doc's own description of it, sec 2.3: "a Python decompiler
-        # emits two plain number lines back to back") emits "12345" and
-        # "67890" as two separate lines, not one merged "1234567890" --
-        # confirmed directly against numtest.dm41's own real DM41
-        # hardware capture. So the run this loop builds stops at the
-        # first byte that isn't itself a digit-literal character
-        # (whether that's a 0x00 separator or anything else); the
-        # separator-swallow below only ever skips a *single* 0x00 that
-        # sits between this run and the very next one, once this run's
-        # own line has already been appended -- it can never extend the
-        # current run.
+        # -- NULL (0x00). A no-op on real hardware: the HP-41 inserts one
+        # in front of every number keyed into a program, and PACK removes
+        # the ones that aren't needed to keep two consecutive numbers
+        # apart. An unpacked program (e.g. GhostTown.ppc, "STO IND T" /
+        # NULL / "1") still has them. hp41uc's decompiler skips 0x00
+        # silently (decomp.c, BYTE1 state), and so do we. The compiler
+        # re-inserts a NULL only where two number lines are adjacent.
+        if c == 0x00:
+            i += 1
+            continue
+
+        # -- A digit-literal run (one number). hp41uc's decompiler emits
+        # each run as its own line; two back-to-back numbers are kept
+        # apart in the bytes by a NULL, which the branch above skips (so
+        # the run ends at it, and "12345" NULL "67890" -- numtest.dm41's
+        # real hardware capture -- decompiles as two lines, not one).
+        # decode_program_txt() re-inserts that NULL between adjacent
+        # number lines.
         if c in _DIGIT_CHARS:
             chars = [_DIGIT_CHARS[c]]
             i += 1
@@ -473,8 +475,6 @@ def encode_program_txt(data: bytes) -> str:
                 chars.append(_DIGIT_CHARS[data[i]])
                 i += 1
             lines.append(_render_number_run(chars))
-            if i < n and data[i] == 0x00 and i + 1 < n and data[i + 1] in _DIGIT_CHARS:
-                i += 1  # swallow the separator -- no line of its own
             continue
 
         # -- GTO"/XEQ"-with-a-global-name, or an unrecognized 2-byte form
@@ -520,11 +520,17 @@ def encode_program_txt(data: bytes) -> str:
                 mnemonic = _SMALL_DIGIT_OPERAND_PREFIXES[c]
                 text = _decode_small_digit_operand(operand)
                 _append_mnemonic(lines, mnemonic, text, data, i, 2)
-            elif c == 0xA6:
+            elif 0xA0 <= c <= 0xA7:
+                # Every XROM, not just the Extended Functions/Time pair at
+                # 0xA6 -- e.g. A7 83 is XROM 30,03 (card reader). Same
+                # "XROM mm,ff" rendering hp41uc uses for any module.
                 lines.append(_decode_xrom(c, operand))
-            elif c == 0xAE:
-                text = _decode_register_operand(operand)
-                _append_mnemonic(lines, "GTO IND", text, data, i, 2)
+            elif c == _GTO_XEQ_IND_OPCODE:
+                # High bit picks GTO vs XEQ, not "indirect" -- see
+                # _XEQ_IND_FLAG's comment.
+                mnemonic = "XEQ IND" if operand & _XEQ_IND_FLAG else "GTO IND"
+                text = _decode_register_operand(operand & ~_XEQ_IND_FLAG)
+                _append_mnemonic(lines, mnemonic, text, data, i, 2)
             elif c in _SPARE_OPCODES:
                 lines.append(_format_unknown(data, i, 2))
             elif _GTO_COMPACT_BASE <= c <= _GTO_COMPACT_BASE + _GTO_COMPACT_MAX:
@@ -856,7 +862,7 @@ def _parse_register_base(token: str) -> int:
     '''Parses a bare (non-indirect) register/label/flag descriptor
     token -- a decimal register/flag number 0-99, a local letter label
     A-J, a stack register name T/Z/Y/X/L, or one of the synthetic-only
-    status-register names M/N/O/P/Q/a/b/c/d/e (see the module-level
+    status-register names M/N/O/P/Q/R/a/b/c/d/e (see the module-level
     comment above _decode_register_operand(), which this reverses).
     Raises ValueError if `token` doesn't match any of those forms.
 
@@ -1019,14 +1025,16 @@ def _resolve_xrom_mnemonic(mnemonic: str) -> Optional[Tuple[int, int]]:
 
 def _encode_xrom(tokens: List[str]) -> bytes:
     '''"XROM mm,ff" -- reverses _decode_xrom()'s mm/ff-recovery formula
-    (byte1 = 0xA0 | ((mm>>2)&7), byte2 = ((mm&3)<<6) | (ff&0x3F)) and then
-    -- per docs/program_text_io_plan.md sec 3.1's decision -- requires
-    the resulting (byte1, byte2) pair to already be a known entry in
-    functions.py's XROM_FUNCTIONS table (covering exactly the two ROM
-    modules, Extended Functions and Time, the DM41L emulates). Any other
-    module number, or an unrecognized function number within those two
-    modules, is a compile error -- never a silent fallback to the literal
-    bytes the way hp41uc itself handles an unknown module.
+    (byte1 = 0xA0 | ((mm>>2)&7), byte2 = ((mm&3)<<6) | (ff&0x3F)).
+
+    Accepts any module 00-31 and function 00-63, whether or not the
+    DM41L emulates that module -- matching hp41uc, and matching RAW/DAT/
+    PPC import, which already accept these bytes. (Changed 2026-09-22:
+    this used to reject anything outside Extended Functions/Time, so a
+    program using e.g. the card reader's XROM 30,03 could be exported to
+    .txt but not imported back.) On the calculator, an XROM for a module
+    that isn't present shows as "XROM mm,ff" and only errors
+    (NONEXISTENT) if executed.
 
     This is only reached for the numeric "XROM mm,ff" spelling --
     _encode_instruction() tries _resolve_xrom_mnemonic() first, so a
@@ -1040,13 +1048,13 @@ def _encode_xrom(tokens: List[str]) -> bytes:
     if not match:
         raise ValueError(f"malformed XROM operand (expected 'mm,ff'): {tokens[1]!r}")
     mm, ff = int(match.group(1)), int(match.group(2))
+    if not (0 <= mm <= 31 and 0 <= ff <= 63):
+        raise ValueError(
+            f"XROM {mm},{ff:02d} out of range -- module must be 00-31 and "
+            "function 00-63"
+        )
     byte1 = 0xA0 | ((mm >> 2) & 0x07)
     byte2 = ((mm & 0x03) << 6) | (ff & 0x3F)
-    if (byte1, byte2) not in XROM_FUNCTIONS:
-        raise ValueError(
-            f"unsupported XROM {mm},{ff:02d} -- only Extended Functions (module "
-            "25) and Time (module 26) functions the DM41L emulates are supported"
-        )
     return bytes([byte1, byte2])
 
 
@@ -1054,8 +1062,8 @@ def _encode_gto_xeq(mnemonic: str, tokens: List[str]) -> bytes:
     '''GTO/XEQ -- three forms, matching encode_program_txt()'s own three
     GTO/XEQ decode branches exactly: a quoted global name reference
     (`GTO "NAME"`/`XEQ "NAME"`, the 0x1D/0x1E-prefixed form), `GTO IND
-    <reg>` (the single dedicated 0xAE opcode -- GTO only, no XEQ
-    equivalent exists in this module's opcode table), or a bare local
+    <reg>`/`XEQ IND <reg>` (the shared 0xAE opcode, with the operand's
+    high bit set for XEQ -- see _XEQ_IND_FLAG), or a bare local
     target number/letter (GTO additionally prefers the compact 2-byte
     form for a local number 00-14, matching _GTO_COMPACT_BASE's own
     module-level comment; XEQ has no compact form at all and always uses
@@ -1079,11 +1087,16 @@ def _encode_gto_xeq(mnemonic: str, tokens: List[str]) -> bytes:
         prefix = 0x1D if mnemonic == "GTO" else 0x1E
         return bytes([prefix, 0xF0 | len(content)]) + content
 
-    if mnemonic == "GTO" and first_operand.upper() == "IND":
+    if first_operand.upper() == "IND":
         if len(operand_tokens) != 2:
-            raise ValueError(f"GTO IND needs exactly one register operand: {tokens!r}")
-        descriptor = _parse_register_operand([operand_tokens[1]])
-        return bytes([0xAE, descriptor])
+            raise ValueError(
+                f"{mnemonic} IND needs exactly one register operand: {tokens!r}"
+            )
+        # A bare (non-IND) base, so always < 0x80 -- leaves the high bit
+        # free to carry the GTO/XEQ flag.
+        base = _parse_register_base(operand_tokens[1])
+        flag = _XEQ_IND_FLAG if mnemonic == "XEQ" else 0x00
+        return bytes([_GTO_XEQ_IND_OPCODE, flag | base])
 
     if len(operand_tokens) != 1:
         raise ValueError(
@@ -1249,8 +1262,7 @@ def decode_program_txt(text: str) -> bytes:
     Raises ValueError -- with the 1-based line number and a description
     of the problem -- for a line that doesn't parse as any recognized
     instruction, an operand that doesn't fit its field width, an XROM
-    reference outside the two modules the DM41L emulates (sec 3.1's
-    compile-time-error decision), or a missing/misplaced terminating
+    module/function number out of range, or a missing/misplaced terminating
     END. Never silently drops or guesses at malformed input.
     '''
     out = bytearray()
