@@ -30,7 +30,7 @@ stores USER-mode key assignments.
 - **Global label / program assignment** — assigns a key to run a user-written
   program by its global label (`LBL "NAME"`). Stored within the global label
   itself, not in the key assignment area.
-- **KEYFLAGS** — the 36-bit-per-shift-state bitmap in registers F and e that
+- **KEYFLAGS** — the 36-bit-per-shift-state bitmap in registers R and e that
   records *whether* a key has been reassigned.
 
 ## 3. Overview
@@ -38,7 +38,7 @@ stores USER-mode key assignments.
 Key Assignment Registers hold the user-mode assignments of built-in and XROM
 functions and occupy addresses `0x0C0` upward, growing toward `.END.` as more
 are added. Nearly every key on the HP41/DM41L can be reassigned, only "ON",
-"User", "PRGM", "Shift", and "Alpha" cannot. Registers "F" (`0x0A`) and "e"
+"User", "PRGM", "Shift", and "Alpha" cannot. Registers "R" (`0x0A`) and "e"
 (`0x0F`) hold the KEYFLAGS bitmaps. Global-label assignments are actually parts
 of the global labels themselves.
 
@@ -105,7 +105,7 @@ width, while on the DM41L it is double height.
 
 The processor keeps 72 flags — one bit per key, per shift state (36 unshifted +
 36 shifted, inclkuding the unused key position under the double-sized ENTER key) —
-packed as the first 36 bits of register F (unshifted) and the first 36 bits of
+packed as the first 36 bits of register R (unshifted) and the first 36 bits of
 register e (shifted) respectively. This is a fast existence check consulted
 *before* searching the Key Assignment Registers or scanning global labels.
 

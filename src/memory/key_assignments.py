@@ -191,10 +191,10 @@ class KeyAssignments(MemoryRegion):
 
     @classmethod
     def _keyflags_bit(cls, key_number: int) -> int:
-        '''Bit position within the KEYFLAGS bitmap (register F or e) for
+        '''Bit position within the KEYFLAGS bitmap (register R or e) for
         `key_number` (docs sec 4.5): `36 - M - 8*(N-1)`, where `N` is the
         *physical* column (see _physical_column()). The same bit number
-        is used in both registers -- which register (F vs. e)
+        is used in both registers -- which register (R vs. e)
         distinguishes unshifted from shifted, not the bit position.'''
         m, n = cls._key_row_col(key_number)
         n_phys = cls._physical_column(m, n)
@@ -202,7 +202,7 @@ class KeyAssignments(MemoryRegion):
 
     # -- KEYFLAGS (sec 4.5) ----------------------------------------------
     #
-    # The bits themselves live in status registers F and e (see
+    # The bits themselves live in status registers R and e (see
     # StatusRegisters.get_keyflag_bit/set_keyflag_bit); which bit means
     # which key is this region's business, so the mapping lives here.
 

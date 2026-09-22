@@ -212,7 +212,7 @@ class OverviewTab(ctk.CTkScrollableFrame):
 
         rows = [
             ("Q (scratch)", sr.Q().get_hex()),
-            ("F (Append)", sr.F().get_hex()),
+            ("R (Append)", sr.R().get_hex()),
             ("a (Ret. stack)", sr.a().get_hex()),
             ("b (Ret. stack)", sr.b().get_hex()),
             ("c", sr.c().get_hex()),

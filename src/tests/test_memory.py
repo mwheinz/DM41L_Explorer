@@ -1909,7 +1909,7 @@ def test_keyflags_bit_matches_all_three_real_fixtures():
         # Only the first 36 bits are the KEYFLAGS bitmap (docs sec 4.5) --
         # the remaining 20 bits of the 56-bit register hold something else
         # entirely (confirmed non-zero, e.g. bits 40-54, in real captures
-        # like keyassigns.dm41's register F), so comparing the whole
+        # like keyassigns.dm41's register R), so comparing the whole
         # register would spuriously fail against real, correct data.
         bits = set()
         for byte_index, byte in enumerate(register_bytes):

@@ -74,7 +74,10 @@ class StatusRegisters(MemoryRegion):
     def Q(self) -> Register:
         return self.get_register(9)
 
-    def F(self) -> Register:
+    def R(self) -> Register:
+        '''Status register 0x0A. Also called "F" or "Append" by some
+        sources; "R" matches hp41uc and program-text postfix 0x7A (see
+        docs/memory.md sec 3.1).'''
         return self.get_register(10)
 
     def a(self) -> Register:
@@ -238,15 +241,15 @@ class StatusRegisters(MemoryRegion):
         binary = format(bits, f"0{self.FLAG_COUNT}b")
         return [c == "1" for c in binary]
 
-    # -- KEYFLAGS bitmaps (registers F and e) ----------------------------
+    # -- KEYFLAGS bitmaps (registers R and e) ----------------------------
     #
-    # docs/key_assignments.md sec 4.5: register F holds the unshifted-key
+    # docs/key_assignments.md sec 4.5: register R holds the unshifted-key
     # existence bits, register e the shifted-key ones. The meaning of the
     # individual bits is defined in key_assignments.py; these two primitives
     # just read and write a numbered bit of whichever of the two registers is
     # named.
 
-    KEYFLAGS_UNSHIFTED_ADDR = 0x0A  # F
+    KEYFLAGS_UNSHIFTED_ADDR = 0x0A  # R
     KEYFLAGS_SHIFTED_ADDR = 0x0F  # e
 
     def get_keyflag_bit(self, bit: int, shifted: bool) -> bool:

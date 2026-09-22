@@ -35,7 +35,7 @@ EOM_REGISTER = Register.from_hex(EOM_REGISTER_HEX)
 STATUS_REGISTER_LABELS = [
     "T", "Z", "Y", "X",
     "LastX", "M", "N", "O",
-    "P", "Q", "F", "a",
+    "P", "Q", "R", "a",
     "b", "c", "d / Flags", "e",
 ]
 
