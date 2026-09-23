@@ -250,6 +250,8 @@ def test_encode_program_txt_never_raises_on_every_sample_program():
             instruction_bytes = memory.programs.get_program_bytes(program)
             text = encode_program_txt(instruction_bytes)
             assert text.splitlines()[-1].startswith("END ;"), filename
+            # hp41uc text is 7-bit ASCII (docs/mnemonic_dialects_plan.md R2).
+            assert text.isascii(), filename
 
 
 # ===========================================================================

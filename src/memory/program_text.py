@@ -34,9 +34,13 @@ R/a/b/c/d/e -- see the module-level comment above _STACK_REGISTER_NAMES):
      length scanner.
   2. `functions.py`'s SINGLE_BYTE_FUNCTIONS/XROM_FUNCTIONS tables --
      already confirmed (per docs/program_text_io_plan.md sec 3) to give
-     the correct in-*program*-byte mnemonic for every entry at 0x40 and
-     above, and the correct XROM (0xA6, byte2) name table for the two
-     ROM modules (Extended Functions, Time) the DM41L emulates.
+     the correct in-*program*-byte instruction for every entry at 0x40
+     and above, and the correct XROM (0xA6, byte2) table for the two
+     ROM modules (Extended Functions, Time) the DM41L emulates. The
+     instruction *names* come from memory/mnemonics.py, which builds on
+     those tables: export writes hp41uc's canonical names, and import
+     accepts any spelling mnemonics.resolve() knows
+     (docs/mnemonic_dialects_plan.md).
   3. `src/tests/data/tower.raw`/`tower.txt` -- a real 1088-byte program
      hp41uc itself compiled and decompiled, used to empirically pin down
      every byte range/format `functions.py` doesn't already cover:
@@ -67,12 +71,18 @@ contradicts them.
 import re
 from typing import List, Optional, Tuple
 
-from .functions import (
-    SINGLE_BYTE_FUNCTIONS,
-    SINGLE_BYTE_NAMES,
-    XROM_FUNCTIONS,
-    XROM_NAMES,
-    normalize_function_name_input,
+from .mnemonics import (
+    END,
+    GTO,
+    LBL,
+    XEQ,
+    XROM,
+    OpKind,
+    canonical,
+    function_op,
+    is_known,
+    resolve,
+    xrom_op,
 )
 from .program_chain import decode_chain_marker, encode_chain_marker
 
@@ -158,7 +168,7 @@ _XEQ_IND_FLAG = 0x80
 #
 # Shared by every 2-byte instruction that takes a register, flag, or
 # other small numeric operand (RCL, STO, ST+/-/*//, ISG, DSE, VIEW,
-# SIGMAREG, ASTO, ARCL, SF, CF, FS?/FC?(C), X<>, and the compact/general
+# SREG, ASTO, ARCL, SF, CF, FS?/FC?(C), X<>, and the compact/general
 # LBL and GTO/XEQ forms above). The high bit (0x80) flags "indirect
 # through" -- confirmed: "STO IND 16" is STO + 0x90 (0x80 | 0x10), vs.
 # plain "STO 16" being STO + 0x10. Below that:
@@ -256,60 +266,26 @@ def _decode_small_digit_operand(byte: int) -> Optional[str]:
     return _decode_register_operand(byte)
 
 
-# Mnemonic names for every 2-byte-instruction prefix byte this module
-# knows how to decode, split by which operand-formatting rule applies.
-# Reuses functions.py's SINGLE_BYTE_FUNCTIONS directly for the mnemonic
-# text -- confirmed reusable for program-byte decoding at every entry
-# 0x40 and above (see this module's own docstring, point 2).
-_REGISTER_OPERAND_PREFIXES = {
-    0x90: "RCL", 0x91: "STO", 0x92: "ST+", 0x93: "ST-",
-    0x94: "ST*", 0x95: "ST/", 0x96: "ISG", 0x97: "DSE",
-    0x98: "VIEW", 0x99: "SIGMAREG", 0x9A: "ASTO", 0x9B: "ARCL",
-    0xA8: "SF", 0xA9: "CF", 0xAA: "FS?C", 0xAB: "FC?C",
-    0xAC: "FS?", 0xAD: "FC?",
-    0xCE: "X<>",
-}
-_SMALL_DIGIT_OPERAND_PREFIXES = {
-    0x9C: "FIX", 0x9D: "SCI", 0x9E: "ENG", 0x9F: "TONE",
-}
-
-# functions.py's own names for 0x99/SIGMAREG use the real Sigma glyph
-# ("ΣREG"); hp41uc's own text format is 7-bit ASCII, so this module uses
-# a plain-ASCII spelling for it directly above rather than round-tripping
-# through functions.py's unicode name -- not exercised by tower.txt, but
-# consistent with the ASCII substitutions confirmed for other symbols
-# below (ASCII_DISPLAY_NAMES).
-
-# hp41uc-style ASCII spellings for the handful of SINGLE_BYTE_FUNCTIONS
-# names that contain a non-ASCII symbol. '<=' and '#' are directly
-# confirmed against tower.txt ("X<=Y?", "X<=0?", "X#Y?", "X#0?"); '->HMS'
-# collapsing to bare "HMS" is also directly confirmed ("HMS" alone, not
-# "->HMS" or "HMS" with any arrow at all -- tower.txt line "HMS"). The
-# rest of this table (->HR, ->OCT, and the P->R/R->P/D->R/R->D pairs) is
-# *not* exercised by tower.txt; it follows the same "drop the arrow, keep
-# the format name" pattern confirmed for ->HMS, which is a reasonable
-# but unverified extrapolation -- revisit if a fixture ever contradicts
-# it. Sigma (Σ) and up-arrow (↑) names (ΣREG, Σ+, Σ-, CLΣ, X↑2, Y↑X,
-# ENTER↑, E↑X, 10↑X, R↑, E↑X-1) are also unexercised by tower.txt and are
-# left as functions.py's own unicode spelling for now, since no fixture
-# evidence favors any one particular ASCII substitute over another.
-ASCII_DISPLAY_NAMES = {
-    "X≤Y?": "X<=Y?",
-    "X≤0?": "X<=0?",
-    "X≠Y?": "X#Y?",
-    "X≠0?": "X#0?",
-    "→HMS": "HMS",
-    "→HR": "HR",
-    "→OCT": "OCT",
-    "P→R": "PR",
-    "R→P": "RP",
-    "D→R": "DR",
-    "R→D": "RD",
-}
+# Every 2-byte-instruction prefix byte this module knows how to decode,
+# split by which operand-formatting rule applies. Their names come from
+# memory/mnemonics.py (canonical() on export, resolve() on import).
+_REGISTER_OPERAND_PREFIX_CODES = frozenset(
+    {
+        0x90, 0x91, 0x92, 0x93, 0x94, 0x95,  # RCL STO ST+ ST- ST* ST/
+        0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B,  # ISG DSE VIEW SREG ASTO ARCL
+        0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD,  # SF CF FS?C FC?C FS? FC?
+        0xCE,  # X<>
+    }
+)
+_SMALL_DIGIT_OPERAND_PREFIX_CODES = frozenset(
+    {0x9C, 0x9D, 0x9E, 0x9F}  # FIX SCI ENG TONE
+)
+_RCL_PREFIX = 0x90
+_STO_PREFIX = 0x91
 
 
-def _display_name(name: str) -> str:
-    return ASCII_DISPLAY_NAMES.get(name, name)
+def _name_for_byte(byte: int) -> str:
+    return canonical(function_op(byte))
 
 
 def _append_mnemonic(lines, mnemonic, operand_text, data, start, length):
@@ -414,10 +390,10 @@ def _decode_xrom(byte1: int, byte2: int) -> str:
     ARCLREC, GETKEY, X<>F all check out exactly).'''
     mm = ((byte1 & 0x07) << 2) | (byte2 >> 6)
     ff = byte2 & 0x3F
-    name = XROM_FUNCTIONS.get((byte1, byte2))
-    text = f"XROM {mm:02d},{ff:02d}"  # hp41uc: "%02d" for both (decomp.c)
-    if name is not None:
-        text += f" ;{name}"
+    text = f"{canonical(XROM)} {mm:02d},{ff:02d}"  # hp41uc: "%02d" (decomp.c)
+    op = xrom_op(byte1, byte2)
+    if is_known(op):
+        text += f" ;{canonical(op)}"
     return text
 
 
@@ -497,9 +473,9 @@ def encode_program_txt(data: bytes) -> str:
                 break
             name = _decode_alpha_instruction(data, i, 2, count)
             if c == 0x1D:
-                lines.append(f"GTO {name}")
+                lines.append(f"{canonical(GTO)} {name}")
             elif c == 0x1E:
-                lines.append(f"XEQ {name}")
+                lines.append(f"{canonical(XEQ)} {name}")
             else:  # 0x1F -- not confirmed to mean anything; see docstring
                 lines.append(_format_unknown(data, i, total))
             i += total
@@ -512,12 +488,12 @@ def encode_program_txt(data: bytes) -> str:
                 break
             operand = data[i + 1]
 
-            if c in _REGISTER_OPERAND_PREFIXES:
-                mnemonic = _display_name(_REGISTER_OPERAND_PREFIXES[c])
+            if c in _REGISTER_OPERAND_PREFIX_CODES:
+                mnemonic = _name_for_byte(c)
                 text = _decode_register_operand(operand)
                 _append_mnemonic(lines, mnemonic, text, data, i, 2)
-            elif c in _SMALL_DIGIT_OPERAND_PREFIXES:
-                mnemonic = _SMALL_DIGIT_OPERAND_PREFIXES[c]
+            elif c in _SMALL_DIGIT_OPERAND_PREFIX_CODES:
+                mnemonic = _name_for_byte(c)
                 text = _decode_small_digit_operand(operand)
                 _append_mnemonic(lines, mnemonic, text, data, i, 2)
             elif 0xA0 <= c <= 0xA7:
@@ -528,7 +504,8 @@ def encode_program_txt(data: bytes) -> str:
             elif c == _GTO_XEQ_IND_OPCODE:
                 # High bit picks GTO vs XEQ, not "indirect" -- see
                 # _XEQ_IND_FLAG's comment.
-                mnemonic = "XEQ IND" if operand & _XEQ_IND_FLAG else "GTO IND"
+                target_op = XEQ if operand & _XEQ_IND_FLAG else GTO
+                mnemonic = f"{canonical(target_op)} IND"
                 text = _decode_register_operand(operand & ~_XEQ_IND_FLAG)
                 _append_mnemonic(lines, mnemonic, text, data, i, 2)
             elif c in _SPARE_OPCODES:
@@ -536,12 +513,12 @@ def encode_program_txt(data: bytes) -> str:
             elif _GTO_COMPACT_BASE <= c <= _GTO_COMPACT_BASE + _GTO_COMPACT_MAX:
                 target = c - _GTO_COMPACT_BASE
                 if operand == _GTO_COMPACT_FIXED_BYTE2:
-                    lines.append(f"GTO {target:02d}")
+                    lines.append(f"{canonical(GTO)} {target:02d}")
                 else:
                     lines.append(_format_unknown(data, i, 2))
             elif c == 0xCF:
                 text = _decode_register_operand(operand)
-                _append_mnemonic(lines, "LBL", text, data, i, 2)
+                _append_mnemonic(lines, canonical(LBL), text, data, i, 2)
             else:
                 lines.append(_format_unknown(data, i, 2))
             i += 2
@@ -562,7 +539,7 @@ def encode_program_txt(data: bytes) -> str:
                     break
                 name_bytes = data[i + 4 : i + header_len]
                 name = _encode_alpha_content(name_bytes)
-                lines.append(f'LBL "{name}"')
+                lines.append(f'{canonical(LBL)} "{name}"')
                 i += header_len
                 continue
             # A plain END or the permanent .END. -- this program's own
@@ -579,7 +556,7 @@ def encode_program_txt(data: bytes) -> str:
             # find_program_end(), which this mirrors: a program's real
             # end is always its own first terminating END, never
             # wherever the caller's buffer happens to stop.
-            lines.append(f"END ;{i + 3} BYTES")
+            lines.append(f"{canonical(END)} ;{i + 3} BYTES")
             break
 
         # -- 3-byte instructions: GTO/XEQ's general long form (0xD0/0xE0),
@@ -590,7 +567,7 @@ def encode_program_txt(data: bytes) -> str:
                 break
             byte2, byte3 = data[i + 1], data[i + 2]
             if c in (0xD0, 0xE0) and byte2 == 0x00:
-                mnemonic = "GTO" if c == 0xD0 else "XEQ"
+                mnemonic = canonical(GTO if c == 0xD0 else XEQ)
                 text = _decode_register_operand(byte3)
                 _append_mnemonic(lines, mnemonic, text, data, i, 3)
             else:
@@ -614,13 +591,13 @@ def encode_program_txt(data: bytes) -> str:
         # compact blocks and the digit-literal range already handled
         # above; also 0x01-0x0F's compact local LBL block).
         if _LBL_COMPACT_BASE <= c <= _LBL_COMPACT_BASE + _LBL_COMPACT_MAX:
-            lines.append(f"LBL {c - _LBL_COMPACT_BASE:02d}")
+            lines.append(f"{canonical(LBL)} {c - _LBL_COMPACT_BASE:02d}")
         elif _RCL_COMPACT_BASE <= c <= _RCL_COMPACT_BASE + _COMPACT_REGISTER_MAX:
-            lines.append(f"RCL {c - _RCL_COMPACT_BASE:02d}")
+            lines.append(f"{_name_for_byte(_RCL_PREFIX)} {c - _RCL_COMPACT_BASE:02d}")
         elif _STO_COMPACT_BASE <= c <= _STO_COMPACT_BASE + _COMPACT_REGISTER_MAX:
-            lines.append(f"STO {c - _STO_COMPACT_BASE:02d}")
-        elif c in SINGLE_BYTE_FUNCTIONS and c >= 0x40:
-            lines.append(_display_name(SINGLE_BYTE_FUNCTIONS[c]))
+            lines.append(f"{_name_for_byte(_STO_PREFIX)} {c - _STO_COMPACT_BASE:02d}")
+        elif c >= 0x40 and is_known(function_op(c)):
+            lines.append(_name_for_byte(c))
         else:
             lines.append(_format_unknown(data, i, 1))
         i += 1
@@ -656,22 +633,6 @@ _AMBIGUOUS_NUMBER_LITERAL_TEXT = "-"
 
 # Reverse of _STACK_REGISTER_NAMES: display name -> raw base value.
 _STACK_REGISTER_CODES = {v: k for k, v in _STACK_REGISTER_NAMES.items()}
-
-# Reverse of _REGISTER_OPERAND_PREFIXES/_SMALL_DIGIT_OPERAND_PREFIXES:
-# mnemonic text -> prefix byte. Built from those tables rather than
-# transcribed a second time, so the two directions can never drift apart
-# -- same reasoning as functions.py's own SINGLE_BYTE_NAMES/XROM_NAMES.
-_REGISTER_OPERAND_PREFIX_BYTES = {v: k for k, v in _REGISTER_OPERAND_PREFIXES.items()}
-_SMALL_DIGIT_OPERAND_PREFIX_BYTES = {
-    v: k for k, v in _SMALL_DIGIT_OPERAND_PREFIXES.items()
-}
-_REGISTER_OPERAND_PREFIX_NAMES = frozenset(_REGISTER_OPERAND_PREFIX_BYTES)
-_SMALL_DIGIT_OPERAND_PREFIX_NAMES = frozenset(_SMALL_DIGIT_OPERAND_PREFIX_BYTES)
-
-# Reverse of ASCII_DISPLAY_NAMES: the ASCII spelling this module's own
-# decoder emits -> the real (possibly non-ASCII) name SINGLE_BYTE_NAMES
-# is keyed by, e.g. "X<=Y?" -> "X≤Y?", "HMS" -> "→HMS".
-_CANONICAL_NAME_FOR_DISPLAY = {v: k for k, v in ASCII_DISPLAY_NAMES.items()}
 
 # hp41uc's own C-style single-letter escapes (docs/program_text_io_plan.md
 # sec 5's decision: "accepted on decode ... none collide with
@@ -908,47 +869,18 @@ def _parse_register_operand(tokens: List[str]) -> int:
     return (0x80 if indirect else 0x00) | base
 
 
-def _resolve_single_byte_mnemonic(mnemonic: str) -> Optional[int]:
-    '''Reverses SINGLE_BYTE_FUNCTIONS/ASCII_DISPLAY_NAMES for a plain
-    (zero-operand) mnemonic token -- the compile-side counterpart of
-    _display_name() plus this module's own SINGLE_BYTE_FUNCTIONS
-    dispatch in encode_program_txt(). Tries, in order: (1) an exact match
-    against a real function name already in SINGLE_BYTE_NAMES (covers
-    every mnemonic that's already plain ASCII, e.g. "SIN", "AVIEW", "+");
-    (2) this module's own ASCII_DISPLAY_NAMES reversed (covers the
-    handful this module's own decoder substitutes, e.g. "X<=Y?" ->
-    "X≤Y?", "HMS" -> "→HMS"); (3) functions.py's own
-    normalize_function_name_input(), a courtesy extension covering the
-    small set of symbol substitutions it already knows about
-    ("->","<=","^","sigma") so hand-authored source using those spellings
-    compiles too, even though this module's own decoder never emits them.
-    Returns None (never raises) if nothing matches, or if the only match
-    is a Key-Assignment-Register-only entry below 0x40 (see this module's
-    own top-of-file docstring, point 2) -- those aren't valid in-program
-    opcodes at all, matching encode_program_txt()'s own `c >= 0x40`
-    guard.'''
-    for name in (
-        mnemonic,
-        _CANONICAL_NAME_FOR_DISPLAY.get(mnemonic),
-        normalize_function_name_input(mnemonic),
-    ):
-        if name is None:
-            continue
-        byte = SINGLE_BYTE_NAMES.get(name)
-        if byte is not None and byte >= 0x40:
-            return byte
-    return None
-
-
-def _encode_register_operand_instruction(mnemonic: str, tokens: List[str]) -> bytes:
-    '''RCL/STO/ST+/ST-/ST*/ST//ISG/DSE/VIEW/SIGMAREG/ASTO/ARCL/SF/CF/
+def _encode_register_operand_instruction(prefix: int, tokens: List[str]) -> bytes:
+    '''RCL/STO/ST+/ST-/ST*/ST//ISG/DSE/VIEW/SREG/ASTO/ARCL/SF/CF/
     FS?C/FC?C/FS?/FC?/X<> -- every mnemonic sharing the register/flag
     "descriptor" operand byte scheme. RCL/STO additionally prefer the
     compact single-byte form for a direct (non-IND) register 00-15,
     mirroring encode_program_txt()'s own compact-vs-general split exactly
     (see _RCL_COMPACT_BASE/_STO_COMPACT_BASE's own module-level
     comment) -- every other mnemonic in this group always uses the
-    general 2-byte form, since it has no compact form to begin with.'''
+    general 2-byte form, since it has no compact form to begin with.
+    `prefix` is the instruction's prefix byte; `tokens[0]` is its name
+    as written, used only in error messages.'''
+    mnemonic = tokens[0]
     operand_tokens = tokens[1:]
     if not operand_tokens:
         raise ValueError(f"{mnemonic} needs an operand: {' '.join(tokens)!r}")
@@ -961,20 +893,19 @@ def _encode_register_operand_instruction(mnemonic: str, tokens: List[str]) -> by
     base = _parse_register_base(base_tokens[0])
 
     is_compact_eligible = (
-        mnemonic in ("RCL", "STO")
+        prefix in (_RCL_PREFIX, _STO_PREFIX)
         and not indirect
         and 0 <= base <= _COMPACT_REGISTER_MAX
     )
     if is_compact_eligible:
-        compact_base = _RCL_COMPACT_BASE if mnemonic == "RCL" else _STO_COMPACT_BASE
+        compact_base = _RCL_COMPACT_BASE if prefix == _RCL_PREFIX else _STO_COMPACT_BASE
         return bytes([compact_base + base])
 
-    prefix = _REGISTER_OPERAND_PREFIX_BYTES[mnemonic]
     descriptor = (0x80 if indirect else 0x00) | base
     return bytes([prefix, descriptor])
 
 
-def _encode_small_digit_operand_instruction(mnemonic: str, tokens: List[str]) -> bytes:
+def _encode_small_digit_operand_instruction(prefix: int, tokens: List[str]) -> bytes:
     '''FIX/SCI/ENG/TONE -- the bare-0-9-digit operand style (see
     _decode_small_digit_operand()). Falls back to the general
     register-descriptor encode (supporting an "IND" operand) for anything
@@ -982,8 +913,7 @@ def _encode_small_digit_operand_instruction(mnemonic: str, tokens: List[str]) ->
     _decode_small_digit_operand()'s own fallback.'''
     operand_tokens = tokens[1:]
     if not operand_tokens:
-        raise ValueError(f"{mnemonic} needs an operand: {' '.join(tokens)!r}")
-    prefix = _SMALL_DIGIT_OPERAND_PREFIX_BYTES[mnemonic]
+        raise ValueError(f"{tokens[0]} needs an operand: {' '.join(tokens)!r}")
     is_bare_digit = (
         len(operand_tokens) == 1
         and operand_tokens[0].isdigit()
@@ -993,34 +923,6 @@ def _encode_small_digit_operand_instruction(mnemonic: str, tokens: List[str]) ->
         return bytes([prefix, int(operand_tokens[0])])
     descriptor = _parse_register_operand(operand_tokens)
     return bytes([prefix, descriptor])
-
-
-def _resolve_xrom_mnemonic(mnemonic: str) -> Optional[Tuple[int, int]]:
-    '''Reverses functions.py's XROM_NAMES for a plain (zero-operand)
-    mnemonic token spelled as the function's own name instead of the
-    numeric "XROM mm,ff" form -- e.g. "SEEKPT" or "X<>F" in place of
-    "XROM 25,42"/"XROM 25,46". This is the named-mnemonic counterpart of
-    _resolve_single_byte_mnemonic() below, and exists so program text
-    imported from other sources (which typically spell these functions
-    by name, not by hp41uc's own "mm,ff" catalog numbering) doesn't need
-    manual find-and-replace before it compiles here.
-
-    Tries, in order: (1) an exact match against a real XROM function
-    name already in XROM_NAMES (covers every mnemonic that's already
-    plain ASCII, e.g. "ALENG", "X<=NN?"); (2) functions.py's own
-    normalize_function_name_input(), covering the small set of symbol
-    substitutions it already knows about ("->","<=","^","sigma") so
-    e.g. "sigmareg?" also resolves to "ΣREG?". Returns None (never
-    raises) if nothing matches -- encode_program_txt() never emits a
-    bare XROM mnemonic itself (see _decode_xrom()'s own docstring), so
-    there's no ASCII_DISPLAY_NAMES-style substitution table to reverse
-    here the way _resolve_single_byte_mnemonic() has one for single-byte
-    functions.'''
-    for name in (mnemonic, normalize_function_name_input(mnemonic)):
-        byte_pair = XROM_NAMES.get(name)
-        if byte_pair is not None:
-            return byte_pair
-    return None
 
 
 def _encode_xrom(tokens: List[str]) -> bytes:
@@ -1036,10 +938,9 @@ def _encode_xrom(tokens: List[str]) -> bytes:
     that isn't present shows as "XROM mm,ff" and only errors
     (NONEXISTENT) if executed.
 
-    This is only reached for the numeric "XROM mm,ff" spelling --
-    _encode_instruction() tries _resolve_xrom_mnemonic() first, so a
-    function spelled by its own name (e.g. "SEEKPT") never gets here at
-    all.'''
+    This is only reached for the numeric "XROM mm,ff" spelling -- a
+    function spelled by its own name (e.g. "SEEKPT") resolves directly
+    to its XROM op in _encode_instruction() and never gets here.'''
     if len(tokens) != 2:
         raise ValueError(
             f"XROM needs exactly one 'mm,ff' operand: {' '.join(tokens)!r}"
@@ -1058,7 +959,7 @@ def _encode_xrom(tokens: List[str]) -> bytes:
     return bytes([byte1, byte2])
 
 
-def _encode_gto_xeq(mnemonic: str, tokens: List[str]) -> bytes:
+def _encode_gto_xeq(is_xeq: bool, tokens: List[str]) -> bytes:
     '''GTO/XEQ -- three forms, matching encode_program_txt()'s own three
     GTO/XEQ decode branches exactly: a quoted global name reference
     (`GTO "NAME"`/`XEQ "NAME"`, the 0x1D/0x1E-prefixed form), `GTO IND
@@ -1067,7 +968,9 @@ def _encode_gto_xeq(mnemonic: str, tokens: List[str]) -> bytes:
     target number/letter (GTO additionally prefers the compact 2-byte
     form for a local number 00-14, matching _GTO_COMPACT_BASE's own
     module-level comment; XEQ has no compact form at all and always uses
-    the general 3-byte form).'''
+    the general 3-byte form). `tokens[0]` is the name as written (GTO,
+    GOTO, XEQ, ...), used only in error messages.'''
+    mnemonic = tokens[0]
     operand_tokens = tokens[1:]
     if not operand_tokens:
         raise ValueError(f"{mnemonic} needs an operand: {' '.join(tokens)!r}")
@@ -1084,7 +987,7 @@ def _encode_gto_xeq(mnemonic: str, tokens: List[str]) -> bytes:
                 f"{mnemonic} global name must be 1-15 bytes, got {len(content)}: "
                 f"{first_operand!r}"
             )
-        prefix = 0x1D if mnemonic == "GTO" else 0x1E
+        prefix = 0x1E if is_xeq else 0x1D
         return bytes([prefix, 0xF0 | len(content)]) + content
 
     if first_operand.upper() == "IND":
@@ -1095,7 +998,7 @@ def _encode_gto_xeq(mnemonic: str, tokens: List[str]) -> bytes:
         # A bare (non-IND) base, so always < 0x80 -- leaves the high bit
         # free to carry the GTO/XEQ flag.
         base = _parse_register_base(operand_tokens[1])
-        flag = _XEQ_IND_FLAG if mnemonic == "XEQ" else 0x00
+        flag = _XEQ_IND_FLAG if is_xeq else 0x00
         return bytes([_GTO_XEQ_IND_OPCODE, flag | base])
 
     if len(operand_tokens) != 1:
@@ -1103,9 +1006,9 @@ def _encode_gto_xeq(mnemonic: str, tokens: List[str]) -> bytes:
             f"unexpected extra tokens after {mnemonic}: {' '.join(tokens)!r}"
         )
     base = _parse_register_base(first_operand)
-    if mnemonic == "GTO" and 0 <= base <= _GTO_COMPACT_MAX:
+    if not is_xeq and 0 <= base <= _GTO_COMPACT_MAX:
         return bytes([_GTO_COMPACT_BASE + base, _GTO_COMPACT_FIXED_BYTE2])
-    prefix = 0xD0 if mnemonic == "GTO" else 0xE0
+    prefix = 0xE0 if is_xeq else 0xD0
     return bytes([prefix, 0x00, base])
 
 
@@ -1135,9 +1038,12 @@ def _encode_instruction(tokens: List[str]) -> Tuple[bytes, bool]:
             )
         return bytes([0xF0 | len(content)]) + content, False
 
-    mnemonic = first.upper()
+    # Any accepted spelling of the instruction (mnemonics.resolve()).
+    # Raises UnknownMnemonicError, a ValueError, for anything else.
+    op = resolve(first)
+    mnemonic = first
 
-    if mnemonic == "END":
+    if op == END:
         if len(tokens) != 1:
             raise ValueError(f"unexpected extra tokens after END: {tokens!r}")
         # Always bbb=0/distance_registers=0 (an unlinked/"no predecessor"
@@ -1159,7 +1065,7 @@ def _encode_instruction(tokens: List[str]) -> Tuple[bytes, bool]:
         # match what hp41uc's own compiler actually emits.
         return encode_chain_marker(0, 0, 0x0D), True
 
-    if mnemonic == "LBL":
+    if op == LBL:
         if len(tokens) != 2:
             raise ValueError(f"LBL needs exactly one operand: {tokens!r}")
         operand = tokens[1]
@@ -1182,35 +1088,37 @@ def _encode_instruction(tokens: List[str]) -> Tuple[bytes, bool]:
             return bytes([_LBL_COMPACT_BASE + base]), False
         return bytes([0xCF, base]), False
 
-    if mnemonic in ("GTO", "XEQ"):
-        return _encode_gto_xeq(mnemonic, tokens), False
+    if op in (GTO, XEQ):
+        return _encode_gto_xeq(op == XEQ, tokens), False
 
-    if mnemonic == "XROM":
+    if op == XROM:
         return _encode_xrom(tokens), False
 
-    xrom_bytes = _resolve_xrom_mnemonic(mnemonic)
-    if xrom_bytes is not None:
+    if op.kind is OpKind.XROM:
         if len(tokens) != 1:
             raise ValueError(
                 f"unexpected operand(s) for {mnemonic}: {' '.join(tokens)!r}"
             )
-        return bytes(xrom_bytes), False
+        return bytes(op.code), False
 
-    if mnemonic in _REGISTER_OPERAND_PREFIX_NAMES:
-        return _encode_register_operand_instruction(mnemonic, tokens), False
+    # Everything left is a functions.py byte: a 2-byte prefix taking an
+    # operand, or a plain single-byte instruction.
+    byte = op.code
+    if byte in _REGISTER_OPERAND_PREFIX_CODES:
+        return _encode_register_operand_instruction(byte, tokens), False
 
-    if mnemonic in _SMALL_DIGIT_OPERAND_PREFIX_NAMES:
-        return _encode_small_digit_operand_instruction(mnemonic, tokens), False
+    if byte in _SMALL_DIGIT_OPERAND_PREFIX_CODES:
+        return _encode_small_digit_operand_instruction(byte, tokens), False
 
-    byte = _resolve_single_byte_mnemonic(mnemonic)
-    if byte is not None:
-        if len(tokens) != 1:
-            raise ValueError(
-                f"unexpected operand(s) for {mnemonic}: {' '.join(tokens)!r}"
-            )
-        return bytes([byte]), False
-
-    raise ValueError(f"unrecognized instruction: {' '.join(tokens)!r}")
+    if not 0x40 <= byte <= 0x8F:
+        # A programmable functions.py byte this compiler has no encoding
+        # rule for -- a gap in this module's tables, not bad input.
+        raise ValueError(f"no encoding rule for instruction {mnemonic!r}")
+    if len(tokens) != 1:
+        raise ValueError(
+            f"unexpected operand(s) for {mnemonic}: {' '.join(tokens)!r}"
+        )
+    return bytes([byte]), False
 
 
 def decode_program_txt(text: str) -> bytes:
@@ -1229,10 +1137,13 @@ def decode_program_txt(text: str) -> bytes:
     Functions/Time function may be written either the way
     encode_program_txt() itself decompiles it, numerically ("XROM
     25,42"), or by its own bare mnemonic name ("SEEKPT") -- see
-    _resolve_xrom_mnemonic() -- so program text imported from other
+    memory/mnemonics.py -- so program text imported from other
     sources (which typically use the name, not hp41uc's own "mm,ff"
     catalog numbering) doesn't need manual find-and-replace before it
-    compiles here. Two more exceptions:
+    compiles here. Instruction names can be any spelling
+    memory/mnemonics.py's resolve() accepts (canonical hp41uc names, the
+    HP-41's own display names, and their dialect/substitution variants;
+    docs/mnemonic_dialects_plan.md). Two more exceptions:
 
     - A numeric literal that encode_program_txt() rendered with a
       cosmetic space before a non-initial "E" (`_render_number_run()`,

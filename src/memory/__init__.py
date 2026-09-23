@@ -77,6 +77,13 @@ for readability. The current components are:
                     docs/program_text_io_plan.md); program_files.py
                     wraps these as the package's own TXT format entry,
                     matching RAW/DAT/PPC's bytes-in/bytes-out shape
+  mnemonics.py     the FOCAL instruction-name registry: resolve() any
+                    accepted spelling to an Op, canonical() (hp41uc,
+                    ASCII, for export) and display() (HP-41 native, for
+                    the GUI) names -- docs/mnemonic_dialects_plan.md
+  mnemonic_dialects.py
+                   hand-maintained alternate-spelling dialects that
+                    mnemonics.py folds into its registry
   memory.py        Memory (the top-level dump: parsing, serialization,
                     raw register access, whole-dump pack(), and the
                     region lookup -- Memory.region(key) plus the named

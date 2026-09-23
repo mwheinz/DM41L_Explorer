@@ -1,0 +1,297 @@
+"""
+The FOCAL instruction-name registry (docs/mnemonic_dialects_plan.md).
+
+Every instruction has three kinds of name:
+
+- **canonical**: hp41uc's spelling, pure 7-bit ASCII. Used for text
+  export only (`X^2`, `P-R`, `SREG`, `ENTER`).
+- **display**: what the HP-41/DM41L itself shows, with the FOCAL glyphs
+  it can actually display rendered as Unicode. Used by the GUI (`X↑2`,
+  `P-R`, `ΣREG`, `ENTER↑`).
+- **input aliases**: every spelling text import accepts -- canonical,
+  display, their character-substitution variants ("Layer 1": `SIGMAREG`,
+  `X**2`, `X!=Y?`, ...), and the hand-maintained dialect spellings in
+  memory/mnemonic_dialects.py ("Layer 2": `P->R`, `STO+`, `GOTO`, ...).
+
+The rest of the codebase shouldn't handle instruction spellings itself;
+it asks this module:
+
+- `resolve(token)` -> Op: any accepted spelling to the instruction.
+- `canonical(op)` / `display(op)`: an instruction's names.
+
+An `Op` identifies an instruction by its encoding, not its name:
+
+- OpKind.FUNCTION -- a functions.py SINGLE_BYTE_FUNCTIONS byte. From 0x40
+  up that is also the instruction's own program byte (or, for RCL/STO/
+  LBL/GTO/..., its prefix byte). Below 0x40 are the keyboard-only
+  functions (CAT, SST, ASN, ...), which can be key-assigned but can't
+  appear in a program; they are registered with programmable=False.
+- OpKind.XROM -- a functions.py XROM_FUNCTIONS (byte1, byte2) pair.
+- OpKind.KEYWORD -- END and XROM: text-format keywords with no single
+  function byte of their own.
+
+The registry is built once, at import time, and the build fails loudly
+if any spelling would mean two different instructions (plan sec 3.5).
+"""
+
+import enum
+import itertools
+import logging
+from dataclasses import dataclass
+from typing import Dict, FrozenSet, Hashable, Iterable, List, Set, Tuple
+
+from .functions import SINGLE_BYTE_FUNCTIONS, XROM_FUNCTIONS
+from .mnemonic_dialects import DIALECTS, Dialect
+
+logger = logging.getLogger(__name__)
+
+
+class OpKind(enum.Enum):
+    FUNCTION = enum.auto()
+    XROM = enum.auto()
+    KEYWORD = enum.auto()
+
+
+@dataclass(frozen=True)
+class Op:
+    """One instruction, identified by its encoding (see module docstring).
+    `code` is an int for FUNCTION, a (byte1, byte2) tuple for XROM, and
+    the keyword's canonical name for KEYWORD."""
+
+    kind: OpKind
+    code: Hashable
+
+
+def function_op(byte: int) -> Op:
+    return Op(OpKind.FUNCTION, byte)
+
+
+def xrom_op(byte1: int, byte2: int) -> Op:
+    return Op(OpKind.XROM, (byte1, byte2))
+
+
+# Instructions program_text.py dispatches on by identity.
+LBL = function_op(0xCF)
+GTO = function_op(0xD0)
+XEQ = function_op(0xE0)
+END = Op(OpKind.KEYWORD, "END")
+XROM = Op(OpKind.KEYWORD, "XROM")
+
+
+class UnknownMnemonicError(ValueError):
+    """resolve() couldn't turn a token into a usable instruction."""
+
+
+class MnemonicRegistryError(Exception):
+    """The registry's own tables are inconsistent (e.g. one spelling
+    would mean two instructions). A programming error, raised at import
+    time, never by user input."""
+
+
+# -- Display names ---------------------------------------------------------
+#
+# functions.py's names use -> and <= glyphs from later HP models (P→R,
+# X≤Y?, →HMS). The HP-41 can't show those; its own display reads P-R,
+# X<=Y?, HMS. These are the only functions.py names that differ from the
+# HP-41 display form (decision 1). Σ, ≠ and ↑ names are already native.
+_DISPLAY_OVERRIDES = {
+    0x46: "X<=Y?",
+    0x4E: "P-R",
+    0x4F: "R-P",
+    0x6A: "D-R",
+    0x6B: "R-D",
+    0x6C: "HMS",
+    0x6D: "HR",
+    0x6F: "OCT",
+    0x7B: "X<=0?",
+}
+
+# -- Character substitutions ("Layer 1") -----------------------------------
+#
+# ASCII stand-ins for the non-ASCII FOCAL glyphs in display names. The
+# first stand-in is hp41uc's canonical choice; the rest are other
+# spellings hp41uc's compiler accepts (compile.h alt_fcn1/alt_fcn2:
+# SIGMA+, SIGREG, CLSIGMA, X**2, X!=Y?, X<>Y?, ENTER^, ...). Every display
+# name gets every combination of these as input aliases.
+_SUBSTITUTIONS = {
+    "Σ": ("S", "SIG", "SIGMA"),
+    "≠": ("#", "!=", "<>"),
+    "↑": ("^", "**"),
+}
+
+# The one canonical name that isn't just the display name with each
+# glyph replaced by its first stand-in: hp41uc drops ENTER↑'s arrow.
+_CANONICAL_EXCEPTIONS = {function_op(0x83): "ENTER"}
+
+# Look-alike characters folded before lookup. Option-W on a Mac types
+# N-ARY SUMMATION (U+2211), not GREEK CAPITAL SIGMA (U+03A3).
+_UNICODE_FOLDS = str.maketrans({"∑": "Σ"})
+
+
+def _ascii_form(display_name: str) -> str:
+    return "".join(_SUBSTITUTIONS.get(ch, (ch,))[0] for ch in display_name)
+
+
+def _substitution_variants(text: str) -> Iterable[str]:
+    """`text` with each substitutable glyph replaced by each of its
+    stand-ins, in every combination (including `text` itself)."""
+    choices = [(ch,) + _SUBSTITUTIONS.get(ch, ()) for ch in text]
+    for combo in itertools.product(*choices):
+        yield "".join(combo)
+
+
+@dataclass(frozen=True)
+class Entry:
+    op: Op
+    canonical: str
+    display: str
+    programmable: bool
+    # Every accepted spelling, with where it came from ("canonical",
+    # "display", "substitution", or a dialect name).
+    aliases: Tuple[Tuple[str, str], ...]
+
+
+class Registry:
+    """The built lookup tables. Module-level functions below use one
+    shared instance built from DIALECTS; tests build their own to check
+    the safety rules."""
+
+    def __init__(self, dialects: Iterable[Dialect] = DIALECTS):
+        base = self._base_entries()
+        by_canonical: Dict[str, Op] = {}
+        for op, (canonical_name, _display, _prog) in base.items():
+            if not canonical_name.isascii():
+                raise MnemonicRegistryError(
+                    f"canonical name {canonical_name!r} for {op} isn't ASCII"
+                )
+            if by_canonical.setdefault(canonical_name, op) != op:
+                raise MnemonicRegistryError(
+                    f"canonical name {canonical_name!r} used by both "
+                    f"{by_canonical[canonical_name]} and {op}"
+                )
+
+        self._exact: Dict[str, Op] = {}
+        sources: Dict[Op, Dict[str, str]] = {op: {} for op in base}
+
+        def add(spelling: str, op: Op, source: str) -> None:
+            previous = self._exact.setdefault(spelling, op)
+            if previous != op:
+                raise MnemonicRegistryError(
+                    f"spelling {spelling!r} ({source}) would mean both "
+                    f"{base[previous][0]} and {base[op][0]}"
+                )
+            sources[op].setdefault(spelling, source)
+
+        for op, (canonical_name, display_name, _prog) in base.items():
+            add(canonical_name, op, "canonical")
+            add(display_name, op, "display")
+            for variant in _substitution_variants(display_name):
+                add(variant, op, "substitution")
+
+        for dialect in dialects:
+            for canonical_name, spellings in dialect.aliases.items():
+                op = by_canonical.get(canonical_name)
+                if op is None:
+                    raise MnemonicRegistryError(
+                        f"dialect {dialect.name!r} lists unknown canonical "
+                        f"name {canonical_name!r}"
+                    )
+                for spelling in spellings:
+                    for variant in _substitution_variants(spelling):
+                        add(variant, op, dialect.name)
+
+        # Case-insensitive fallback. Two ops sharing a folded spelling
+        # isn't a build error: an exact-case match can still tell them
+        # apart, so resolve() only complains if it gets that far.
+        self._folded: Dict[str, Set[Op]] = {}
+        for spelling, op in self._exact.items():
+            self._folded.setdefault(spelling.upper(), set()).add(op)
+
+        self._entries: Dict[Op, Entry] = {
+            op: Entry(
+                op=op,
+                canonical=canonical_name,
+                display=display_name,
+                programmable=programmable,
+                aliases=tuple(sources[op].items()),
+            )
+            for op, (canonical_name, display_name, programmable) in base.items()
+        }
+
+    @staticmethod
+    def _base_entries() -> Dict[Op, Tuple[str, str, bool]]:
+        """op -> (canonical, display, programmable), before aliases."""
+        base: Dict[Op, Tuple[str, str, bool]] = {}
+        for byte, name in SINGLE_BYTE_FUNCTIONS.items():
+            op = function_op(byte)
+            display_name = _DISPLAY_OVERRIDES.get(byte, name)
+            canonical_name = _CANONICAL_EXCEPTIONS.get(op, _ascii_form(display_name))
+            base[op] = (canonical_name, display_name, byte >= 0x40)
+        for (byte1, byte2), name in XROM_FUNCTIONS.items():
+            base[xrom_op(byte1, byte2)] = (_ascii_form(name), name, True)
+        for keyword in (END, XROM):
+            base[keyword] = (keyword.code, keyword.code, True)
+        return base
+
+    def resolve(self, token: str, *, programmable_only: bool = True) -> Op:
+        text = token.translate(_UNICODE_FOLDS)
+        op = self._exact.get(text)
+        if op is None:
+            candidates = self._folded.get(text.upper(), set())
+            if len(candidates) > 1:
+                names = ", ".join(
+                    sorted(self._entries[c].canonical for c in candidates)
+                )
+                raise UnknownMnemonicError(
+                    f"ambiguous instruction {token!r}: could be {names} "
+                    "(check upper/lower case)"
+                )
+            if candidates:
+                (op,) = candidates
+        if op is None:
+            raise UnknownMnemonicError(f"unrecognized instruction {token!r}")
+        if programmable_only and not self._entries[op].programmable:
+            raise UnknownMnemonicError(
+                f"{token!r} is a keyboard-only function and can't appear in a program"
+            )
+        return op
+
+    def entry(self, op: Op) -> Entry:
+        return self._entries[op]
+
+    def is_known(self, op: Op) -> bool:
+        return op in self._entries
+
+    def entries(self) -> List[Entry]:
+        return list(self._entries.values())
+
+
+_REGISTRY = Registry()
+
+
+def resolve(token: str, *, programmable_only: bool = True) -> Op:
+    """The instruction any accepted spelling `token` means. Tries an
+    exact-case match first, then a case-insensitive one. Raises
+    UnknownMnemonicError (a ValueError) if `token` isn't a known
+    spelling, is ambiguous without its exact case, or -- with
+    programmable_only -- names a keyboard-only function."""
+    return _REGISTRY.resolve(token, programmable_only=programmable_only)
+
+
+def canonical(op: Op) -> str:
+    """hp41uc's ASCII name for `op`, used for text export."""
+    return _REGISTRY.entry(op).canonical
+
+
+def display(op: Op) -> str:
+    """The HP-41's own name for `op`, for the GUI."""
+    return _REGISTRY.entry(op).display
+
+
+def is_known(op: Op) -> bool:
+    return _REGISTRY.is_known(op)
+
+
+def entries() -> List[Entry]:
+    """Every registered instruction, for reference listings."""
+    return _REGISTRY.entries()
