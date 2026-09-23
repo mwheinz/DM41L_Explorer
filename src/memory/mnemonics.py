@@ -100,13 +100,18 @@ class MnemonicRegistryError(Exception):
 # ASCII stand-ins for the non-ASCII FOCAL glyphs in display names. The
 # first stand-in is hp41uc's canonical choice; the rest are other
 # spellings hp41uc's compiler accepts (compile.h alt_fcn1/alt_fcn2:
-# SIGMA+, SIGREG, CLSIGMA, X**2, X!=Y?, X<>Y?, ENTER^, ...). Every display
-# name gets every combination of these as input aliases.
+# SIGMA+, SIGREG, CLSIGMA, X!=Y?, X<>Y?, ENTER^, ...). Every display name
+# gets every combination of these as input aliases.
 _SUBSTITUTIONS = {
     "Σ": ("S", "SIG", "SIGMA"),
     "≠": ("#", "!=", "<>"),
-    "↑": ("^", "**"),
+    "↑": ("^",),
 }
+
+# "**" also stands for ↑, but only where ↑ means "to the power of" --
+# hp41uc accepts X**2, Y**X, E**X, 10**X and E**X-1, not R** or ENTER**.
+_POWER_STANDINS = {"↑": ("**",)}
+_POWER_OPS = frozenset(function_op(b) for b in (0x51, 0x53, 0x55, 0x57, 0x58))
 
 # The one canonical name that isn't just the display name with each
 # glyph replaced by its first stand-in: hp41uc drops ENTER↑'s arrow.
@@ -121,10 +126,17 @@ def _ascii_form(display_name: str) -> str:
     return "".join(_SUBSTITUTIONS.get(ch, (ch,))[0] for ch in display_name)
 
 
-def _substitution_variants(text: str) -> Iterable[str]:
-    """`text` with each substitutable glyph replaced by each of its
-    stand-ins, in every combination (including `text` itself)."""
-    choices = [(ch,) + _SUBSTITUTIONS.get(ch, ()) for ch in text]
+def _substitution_variants(text: str, op: Op) -> Iterable[str]:
+    """`text` (a spelling of `op`) with each substitutable glyph replaced
+    by each of its stand-ins, in every combination (including `text`
+    itself)."""
+    power = op in _POWER_OPS
+    choices = [
+        (ch,)
+        + _SUBSTITUTIONS.get(ch, ())
+        + (_POWER_STANDINS.get(ch, ()) if power else ())
+        for ch in text
+    ]
     for combo in itertools.product(*choices):
         yield "".join(combo)
 
@@ -136,7 +148,8 @@ class Entry:
     display: str
     programmable: bool
     # Every accepted spelling, with where it came from ("canonical",
-    # "display", "substitution", or a dialect name).
+    # "display", "substitution", or a dialect name). Case-insensitive
+    # matches of these are accepted too.
     aliases: Tuple[Tuple[str, str], ...]
 
 
@@ -174,7 +187,7 @@ class Registry:
         for op, (canonical_name, display_name, _prog) in base.items():
             add(canonical_name, op, "canonical")
             add(display_name, op, "display")
-            for variant in _substitution_variants(display_name):
+            for variant in _substitution_variants(display_name, op):
                 add(variant, op, "substitution")
 
         for dialect in dialects:
@@ -186,7 +199,7 @@ class Registry:
                         f"name {canonical_name!r}"
                     )
                 for spelling in spellings:
-                    for variant in _substitution_variants(spelling):
+                    for variant in _substitution_variants(spelling, op):
                         add(variant, op, dialect.name)
 
         # Case-insensitive fallback. Two ops sharing a folded spelling
@@ -340,6 +353,17 @@ def entries() -> List[Entry]:
 # functions.py SINGLE_BYTE_FUNCTIONS key) or an XROM (byte1, byte2) pair
 # (docs/key_assignments.md sec 4.2) -- exactly an OpKind.FUNCTION or
 # OpKind.XROM Op's code.
+
+
+def character_substitutions() -> List[Tuple[str, Tuple[str, ...], Tuple[str, ...]]]:
+    """The Layer 1 table, for reference listings: (glyph, its ASCII
+    stand-ins, extra stand-ins accepted only in the power functions
+    X↑2/Y↑X/E↑X/10↑X/E↑X-1). The first stand-in is hp41uc's canonical
+    choice."""
+    return [
+        (glyph, standins, _POWER_STANDINS.get(glyph, ()))
+        for glyph, standins in _SUBSTITUTIONS.items()
+    ]
 
 
 def op_for_key_bytes(fn_byte1: int, fn_byte2: Optional[int]) -> Op:

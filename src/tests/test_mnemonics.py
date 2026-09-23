@@ -186,6 +186,21 @@ def test_unknown_mnemonic_error_is_a_value_error():
     assert issubclass(UnknownMnemonicError, ValueError)
 
 
+@pytest.mark.parametrize(
+    "spelling, byte",
+    [("X**2", 0x51), ("Y**X", 0x53), ("E**X", 0x55), ("10**X", 0x57), ("E**X-1", 0x58)],
+)
+def test_double_star_works_for_power_functions(spelling, byte):
+    assert resolve(spelling) == function_op(byte)
+
+
+@pytest.mark.parametrize("spelling", ["R**", "ENTER**"])
+def test_double_star_is_rejected_outside_power_functions(spelling):
+    # hp41uc accepts ** only where the arrow means "to the power of".
+    with pytest.raises(UnknownMnemonicError, match="unrecognized instruction"):
+        resolve(spelling)
+
+
 # -- Registry safety rules (plan sec 3.5) -----------------------------------
 
 

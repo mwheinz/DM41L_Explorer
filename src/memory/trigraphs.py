@@ -98,6 +98,33 @@ _UNICODE_BY_BYTE = {
 }
 
 
+def shorthand_trigraphs() -> list:
+    """Every shorthand trigraph as (escape text, byte value, the Unicode
+    symbol it stands for), in byte order -- for reference listings.
+    The escape text includes its leading backslash, e.g. "\\E"."""
+    return [
+        ("\\" + suffix, byte, _UNICODE_BY_BYTE[byte])
+        for byte, suffix in sorted(_SHORTHAND_BY_BYTE.items())
+    ]
+
+
+_BYTE_BY_UNICODE = {ch: b for b, ch in _UNICODE_BY_BYTE.items() if ch != "\\"}
+
+
+def unicode_to_trigraphs(text: str) -> str:
+    """The reverse of focal_to_unicode() for display names: each FOCAL
+    symbol (Σ, ↑, ≠, ...) becomes its shorthand trigraph, everything else
+    stays as it is. ΣREG -> \\EREG."""
+    return "".join(
+        (
+            "\\" + _SHORTHAND_BY_BYTE[_BYTE_BY_UNICODE[ch]]
+            if ch in _BYTE_BY_UNICODE
+            else ch
+        )
+        for ch in text
+    )
+
+
 def focal_to_unicode(data: bytes) -> str:
     """Renders raw HP41/DM41L character bytes as the Unicode text they
     display as: a trigraph shorthand's byte becomes its real symbol

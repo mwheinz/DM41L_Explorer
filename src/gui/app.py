@@ -29,6 +29,7 @@ from config import ProjectConfig
 from gui.port_dialog import PortSelectionDialog
 from gui.preferences_dialog import PreferencesDialog
 from gui.help_dialog import KeyboardShortcutsDialog
+from gui.mnemonics_reference_dialog import MnemonicsReferenceDialog
 from gui.overview_tab import OverviewTab
 from gui.flags_tab import FlagsTab
 from gui.data_registers_tab import DataRegistersTab
@@ -460,6 +461,11 @@ class DM41LExplorerApp(ctk.CTk):
         help_menu.add_command(
             label="Keyboard Shortcuts",
             command=self.show_keyboard_shortcuts,
+            underline=0,
+        )
+        help_menu.add_command(
+            label="FOCAL Mnemonics Reference",
+            command=self.show_mnemonics_reference,
             underline=0,
         )
         menubar.add_cascade(label="Help", menu=help_menu)
@@ -1070,6 +1076,18 @@ class DM41LExplorerApp(ctk.CTk):
 
     def show_keyboard_shortcuts(self):
         KeyboardShortcutsDialog(self)
+
+    def show_mnemonics_reference(self):
+        """Opens the non-modal mnemonics reference, or raises the one
+        already open."""
+        dialog = getattr(self, "_mnemonics_reference", None)
+        if dialog is not None and dialog.winfo_exists():
+            dialog.deiconify()
+            dialog.lift()
+            dialog.focus_set()
+            return dialog
+        self._mnemonics_reference = MnemonicsReferenceDialog(self)
+        return self._mnemonics_reference
 
     def _on_preferences_saved(self):
         ctk.set_appearance_mode(self.config_store.appearance_mode)

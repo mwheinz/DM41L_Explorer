@@ -84,6 +84,9 @@ for readability. The current components are:
   mnemonic_dialects.py
                    hand-maintained alternate-spelling dialects that
                     mnemonics.py folds into its registry
+  mnemonic_doc.py  the generated FOCAL mnemonic reference: rows for the
+                    Help menu dialog, and docs/mnemonics.md
+                    (`python -m memory.mnemonic_doc`)
   memory.py        Memory (the top-level dump: parsing, serialization,
                     raw register access, whole-dump pack(), and the
                     region lookup -- Memory.region(key) plus the named

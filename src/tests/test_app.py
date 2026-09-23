@@ -201,3 +201,13 @@ def test_new_memory_buffer_prompts_after_tab_edit(app):
         app.new_memory_buffer()
 
     confirm.assert_called_once()
+
+
+def test_mnemonics_reference_opens_once_and_is_reused(app):
+    first = app.show_mnemonics_reference()
+    assert first.winfo_exists()
+    assert app.show_mnemonics_reference() is first
+    first.destroy()
+    second = app.show_mnemonics_reference()
+    assert second is not first
+    second.destroy()
