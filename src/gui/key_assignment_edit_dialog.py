@@ -25,23 +25,17 @@ import customtkinter as ctk
 
 from gui.dialog_common import build_dialog_button_row
 from gui.tab_common import MONOSPACE_FONT_FAMILY
-from memory.functions import (
-    SINGLE_BYTE_NAMES,
-    XROM_NAMES,
-    bytes_for_function_name,
-    normalize_function_name_input,
-)
+from memory.mnemonics import assignable_display_names, key_bytes_for, resolve
 
 logger = logging.getLogger(__name__)
 
 PLATFORM_SYSTEM = platform.system()
 
-# Every assignable function's display name, alphabetically -- single-byte
-# and XROM/peripheral functions merged into one list (memory/functions.py
-# confirms there's no name collision between the two tables) since the
-# picker doesn't need to distinguish them; bytes_for_function_name() below
+# Every assignable function's HP-41 display name, alphabetically --
+# single-byte and XROM/peripheral functions merged into one list, since
+# the picker doesn't need to distinguish them; memory/mnemonics.py
 # resolves whichever encoding a chosen name actually needs.
-_ALL_FUNCTION_NAMES = sorted(set(SINGLE_BYTE_NAMES) | set(XROM_NAMES))
+_ALL_FUNCTION_NAMES = assignable_display_names()
 
 
 def _hex_for_assignment(assignment) -> str:
@@ -226,11 +220,14 @@ class KeyAssignmentEditDialog(ctk.CTkToplevel):
                 name = self._function_var.get().strip()
                 if not name:
                     raise ValueError("Choose a function.")
-                # GitHub issue #17: typed input doesn't have to match the
-                # display name's exact spelling/case -- "sigma", "x<=y?",
-                # "e^x", "p->r" all resolve to the real function this way.
-                name = normalize_function_name_input(name)
-                kind, value = "function", bytes_for_function_name(name)
+                # Typed input doesn't have to match the display name's
+                # exact spelling or case: any spelling program-text import
+                # accepts works here too ("sigma+", "x^2", "p->r", "\\EREG";
+                # docs/mnemonic_dialects_plan.md). Keyboard-only functions
+                # (CAT, SST, ...) are assignable, so programmable_only is
+                # off. An unknown name raises with "did you mean" hints.
+                op = resolve(name, programmable_only=False)
+                kind, value = "function", key_bytes_for(op)
             elif which == "Raw Hex":
                 text = self._hex_var.get().strip().replace(" ", "")
                 if len(text) == 2:

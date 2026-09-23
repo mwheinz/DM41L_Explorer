@@ -24,7 +24,7 @@ from typing import Optional, TYPE_CHECKING
 from .registers import Register
 from .regions import MemoryRegion
 from .constants import KEY_ASSIGNMENTS_RANGE, PRIMARY_DATA_END
-from . import functions as key_functions
+from .mnemonics import display_for_key_bytes
 
 if TYPE_CHECKING:
     from .memory import Memory
@@ -384,7 +384,7 @@ class KeyAssignments(MemoryRegion):
                     "shifted": shifted,
                     "fn_byte1": fn1,
                     "fn_byte2": fn2,
-                    "name": key_functions.function_name_for_bytes(fn1, fn2),
+                    "name": display_for_key_bytes(fn1, fn2),
                     "raw_key_byte": kb,
                 }
         return None
@@ -393,8 +393,8 @@ class KeyAssignments(MemoryRegion):
         '''Returns every built-in/peripheral key assignment currently in
         the Key Assignment Registers as a list of dicts:
         `{"key_number": int, "shifted": bool, "fn_byte1": int,
-        "fn_byte2": int|None, "name": str}` -- `name` is the looked-up
-        function name (memory/functions.py), or a "0xNN"-style fallback
+        "fn_byte2": int|None, "name": str}` -- `name` is the function's
+        HP-41 display name (memory/mnemonics.py), or a "0xNN"-style fallback
         string if the byte(s) don't match any known function. Order
         matches the buffer's own newest-first order (sec 4.4); global
         label assignments (sec 4.6) are NOT included here -- see
@@ -418,7 +418,7 @@ class KeyAssignments(MemoryRegion):
                 "shifted": shifted,
                 "fn_byte1": fn1,
                 "fn_byte2": fn2,
-                "name": key_functions.function_name_for_bytes(fn1, fn2),
+                "name": display_for_key_bytes(fn1, fn2),
                 "raw_key_byte": key_byte,
             })
         return results

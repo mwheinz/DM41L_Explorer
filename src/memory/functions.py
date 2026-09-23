@@ -4,9 +4,13 @@ Key Assignment Register entry (docs/key_assignments.md sec 4.2/4.8) -- NOT
 by the program-byte ("Instruction Prefix") encoding - there are some
 assignment instructions that can't actually be used in a program (SST, BST,
 ASN, etc..)
-'''
 
-import re
+Names are the HP-41's own display names (docs/mnemonic_dialects_plan.md
+sec 3.2): only the glyphs the HP-41 can show (Σ, ≠, ↑), never later
+models' → or ≤. These tables are raw data; memory/mnemonics.py builds the
+instruction-name registry (display/canonical names, input spellings) on
+top of them, and everything else should go through that module.
+'''
 
 # Single raw function byte -> function name, for every built-in HP-41
 # function function_table.md marks Assignable with a one-byte encoding.
@@ -27,7 +31,7 @@ SINGLE_BYTE_FUNCTIONS = {
     0x43: '/',
     0x44: 'X<Y?',
     0x45: 'X>Y?',
-    0x46: 'X≤Y?',
+    0x46: 'X<=Y?',
     0x47: 'Σ+',
     0x48: 'Σ-',
     0x49: 'HMS+',
@@ -35,8 +39,8 @@ SINGLE_BYTE_FUNCTIONS = {
     0x4B: 'MOD',
     0x4C: '%',
     0x4D: '%CH',
-    0x4E: 'P→R',
-    0x4F: 'R→P',
+    0x4E: 'P-R',
+    0x4F: 'R-P',
     0x50: 'LN',
     0x51: 'X↑2',
     0x52: 'SQRT',
@@ -63,12 +67,12 @@ SINGLE_BYTE_FUNCTIONS = {
     0x67: 'X=0?',
     0x68: 'INT',
     0x69: 'FRC',
-    0x6A: 'D→R',
-    0x6B: 'R→D',
-    0x6C: '→HMS',
-    0x6D: '→HR',
+    0x6A: 'D-R',
+    0x6B: 'R-D',
+    0x6C: 'HMS',
+    0x6D: 'HR',
     0x6E: 'RND',
-    0x6F: '→OCT',
+    0x6F: 'OCT',
     0x70: 'CLΣ',
     0x71: 'X<>Y',
     0x72: 'PI',
@@ -80,7 +84,7 @@ SINGLE_BYTE_FUNCTIONS = {
     0x78: 'X=Y?',
     0x79: 'X≠Y?',
     0x7A: 'SIGN',
-    0x7B: 'X≤0?',
+    0x7B: 'X<=0?',
     0x7C: 'MEAN',
     0x7D: 'SDEV',
     0x7E: 'AVIEW',
@@ -228,101 +232,3 @@ XROM_FUNCTIONS = {
     (0xA6, 0xA2): 'RCLALM',
     (0xA6, 0xA3): 'SWPT',
 }
-
-# Reverse lookups (name -> byte(s)), built from the tables above rather
-# than transcribed a second time so the two directions can never drift
-# apart.
-SINGLE_BYTE_NAMES = {v: k for k, v in SINGLE_BYTE_FUNCTIONS.items()}
-XROM_NAMES = {v: k for k, v in XROM_FUNCTIONS.items()}
-
-
-def function_name_for_bytes(fn_byte1: int, fn_byte2) -> str:
-    '''Looks up the display name for a decoded Key Assignment Register
-    entry's function byte(s) (`fn_byte2` is None for a single-byte
-    built-in function -- see memory.Memory._decode_key_assignment_entries).
-    Returns a "0xNN" / "0xNN 0xNN" fallback string, never raises, if the
-    byte(s) don't match any known function -- callers that want to
-    distinguish "known function" from "raw hex" should check
-    SINGLE_BYTE_FUNCTIONS/XROM_FUNCTIONS directly instead.'''
-    if fn_byte2 is None:
-        name = SINGLE_BYTE_FUNCTIONS.get(fn_byte1)
-        return name if name is not None else f"0x{fn_byte1:02X}"
-    name = XROM_FUNCTIONS.get((fn_byte1, fn_byte2))
-    return name if name is not None else f"0x{fn_byte1:02X} 0x{fn_byte2:02X}"
-
-
-def bytes_for_function_name(name: str):
-    '''Looks up the Key Assignment Register byte encoding for a function
-    name from either table above. Returns an int (single-byte function)
-    or a (byte1, byte2) tuple (XROM/peripheral function). Raises
-    ValueError if `name` isn't a known assignable function.'''
-    if name in SINGLE_BYTE_NAMES:
-        return SINGLE_BYTE_NAMES[name]
-    if name in XROM_NAMES:
-        return XROM_NAMES[name]
-    raise ValueError(f"Unknown assignable function: {name!r}")
-
-
-# -- Typed-input normalization (GitHub issue #17) ---------------------------
-#
-# Several assignable function names use characters that don't exist on a
-# standard keyboard: Sigma (Σ), an up arrow (↑), a right arrow (→), and
-# "less than or equal" (≤). gui/key_assignment_edit_dialog.py's Function
-# field lets the user type a name directly rather than only picking from
-# the dropdown, so normalize_function_name_input() below turns an ordinary
-# ASCII approximation into the exact spelling SINGLE_BYTE_NAMES/XROM_NAMES
-# use, case-insensitively.
-
-# Every known function name, keyed by its own uppercased spelling, so an
-# exact (case-insensitive) match can be tried before any symbol
-# substitution -- see the docstring below for why that order matters.
-_ALL_NAMES_BY_UPPER = {
-    name.upper(): name for name in list(SINGLE_BYTE_NAMES) + list(XROM_NAMES)
-}
-
-# ASCII sequence -> special character. Checked in this order, but the order
-# amongst themselves doesn't actually matter: none of the search patterns
-# share a character with any other pattern's replacement, so one
-# substitution can never accidentally create or destroy a match for
-# another. "sigma" is matched case-insensitively and as a substring, so it
-# composes into compound names too (e.g. "clsigma" -> "CLΣ", "sigmareg" ->
-# "ΣREG"), not just as a standalone word.
-_SYMBOL_SUBSTITUTIONS = [
-    (re.compile(r"->"), "→"),
-    (re.compile(r"<="), "≤"),
-    (re.compile(r"\^"), "↑"),
-    (re.compile(r"sigma", re.IGNORECASE), "Σ"),
-]
-
-
-def normalize_function_name_input(text: str) -> str:
-    '''Turns what a user typed on a standard keyboard into the exact
-    spelling memory/functions.py's tables use. Never raises -- an input
-    that still doesn't match anything after normalizing is passed through
-    as best-effort uppercased/substituted text, and it's on the caller
-    (bytes_for_function_name) to reject it as unknown.
-
-    Two passes:
-
-    1. Try an exact, case-insensitive match against every known function
-       name as-is, before any symbol substitution. This has to come
-       first: a few names are already spelled with plain ASCII --
-       'X<=NN?' and 'X>=NN?' and so on.
-    2. If nothing matched literally, apply the symbol substitutions in
-       _SYMBOL_SUBSTITUTIONS and uppercase every remaining ASCII letter
-       (every function name in the tables is already all-uppercase).
-       Typing "x<=y?" therefore doesn't match anything in pass 1, becomes
-       "X≤Y?" after pass 2, and does match.
-    '''
-    if not text:
-        return text
-    stripped = text.strip()
-
-    exact = _ALL_NAMES_BY_UPPER.get(stripped.upper())
-    if exact is not None:
-        return exact
-
-    result = stripped
-    for pattern, replacement in _SYMBOL_SUBSTITUTIONS:
-        result = pattern.sub(replacement, result)
-    return result.upper()

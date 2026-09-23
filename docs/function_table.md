@@ -76,7 +76,7 @@ indicates whether the code can be assigned to a keystroke.
 | 067 | 0x43 | / | 1 | / | Yes |
 | 068 | 0x44 | X<Y? | 1 | X<Y? | Yes |
 | 069 | 0x45 | X>Y? | 1 | X>Y? | Yes |
-| 070 | 0x46 | X≤Y? | 1 | X≤Y? | Yes |
+| 070 | 0x46 | X≤Y? | 1 | X<=Y? | Yes |
 | 071 | 0x47 | Σ+ | 1 | Σ+ | Yes |
 | 072 | 0x48 | Σ- | 1 | Σ- | Yes |
 | 073 | 0x49 | HMS+ | 1 | HMS+ | Yes |
@@ -84,8 +84,8 @@ indicates whether the code can be assigned to a keystroke.
 | 075 | 0x4B | MOD | 1 | MOD | Yes |
 | 076 | 0x4C | % | 1 | % | Yes |
 | 077 | 0x4D | %CH | 1 | %CH | Yes |
-| 078 | 0x4E | P→R | 1 | P→R | Yes |
-| 079 | 0x4F | R→P | 1 | R→P | Yes |
+| 078 | 0x4E | P→R | 1 | P-R | Yes |
+| 079 | 0x4F | R→P | 1 | R-P | Yes |
 | 080 | 0x50 | LN | 1 | LN | Yes |
 | 081 | 0x51 | X↑2 | 1 | X↑2 | Yes |
 | 082 | 0x52 | SQRT | 1 | SQRT | Yes |
@@ -112,12 +112,12 @@ indicates whether the code can be assigned to a keystroke.
 | 103 | 0x67 | X=0? | 1 | X=0? | Yes |
 | 104 | 0x68 | INT | 1 | INT | Yes |
 | 105 | 0x69 | FRC | 1 | FRC | Yes |
-| 106 | 0x6A | D→R | 1 | D→R  | Yes |
-| 107 | 0x6B | R→D | 1 | R→D  | Yes |
-| 108 | 0x6C | →HMS | 1 | →HMS  | Yes |
-| 109 | 0x6D | →HR | 1 | →HR  | Yes |
+| 106 | 0x6A | D→R | 1 | D-R | Yes |
+| 107 | 0x6B | R→D | 1 | R-D | Yes |
+| 108 | 0x6C | →HMS | 1 | HMS | Yes |
+| 109 | 0x6D | →HR | 1 | HR | Yes |
 | 110 | 0x6E | RND | 1 | RND | Yes |
-| 111 | 0x6F | →OCT | 1 | →OCT | Yes |
+| 111 | 0x6F | →OCT | 1 | OCT | Yes |
 | 112 | 0x70 | CL Σ | 1 | CLΣ | Yes |
 | 113 | 0x71 | X<>Y | 1 | X<>Y | Yes |
 | 114 | 0x72 | PI | 1 | PI | Yes |
@@ -129,7 +129,7 @@ indicates whether the code can be assigned to a keystroke.
 | 120 | 0x78 | X=Y? | 1 | X=Y? | Yes |
 | 121 | 0x79 | X≠Y? | 1 | X≠Y? | Yes |
 | 122 | 0x7A | SIGN | 1 | SIGN | Yes |
-| 123 | 0x7B | X≤0? | 1 | X≤0?  | Yes |
+| 123 | 0x7B | X≤0? | 1 | X<=0? | Yes |
 | 124 | 0x7C | MEAN | 1 | MEAN | Yes |
 | 125 | 0x7D | SDEV | 1 | SDEV | Yes |
 | 126 | 0x7E | AVIEW | 1 | AVIEW | Yes |

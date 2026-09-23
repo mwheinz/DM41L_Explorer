@@ -77,9 +77,9 @@ def test_typed_lowercase_or_ascii_name_resolves_on_save(root, typed, expected_by
 
 
 def test_typed_ascii_native_xrom_name_is_not_mangled(root):
-    """'X<=NN?' is already spelled with literal ASCII in the real table --
-    typing it (in any case) must resolve to itself, not get corrupted by
-    the "<=" -> "≤" substitution meant for 'X≤Y?'."""
+    """'X<=NN?' is spelled with literal ASCII in the real table -- typing
+    it (in any case) must resolve to that XROM, not to the unrelated
+    single-byte X<=Y? or X<=0?."""
     on_save = mock.Mock()
     dlg = _make_dialog(root, on_save=on_save)
     dlg._function_var.set("x<=nn?")
@@ -87,6 +87,33 @@ def test_typed_ascii_native_xrom_name_is_not_mangled(root):
     dlg._on_save_clicked()
 
     on_save.assert_called_once_with("function", (0xA6, 0x7C))
+
+
+def test_dropdown_uses_hp41_display_names(root):
+    dlg = _make_dialog(
+        root,
+        assignment={
+            "key_number": 1, "shifted": False,
+            "fn_byte1": 0x4E, "fn_byte2": None, "name": "P-R",
+        },
+    )
+    # The current assignment's display name is a real dropdown entry, so
+    # the Function tab (not Raw Hex) opens with it selected.
+    assert dlg._function_var.get() == "P-R"
+    assert dlg._tabs.get() == "Function"
+
+
+def test_unknown_function_error_suggests_close_match(root, monkeypatch):
+    errors = []
+    monkeypatch.setattr(
+        messagebox, "showerror", lambda title, msg: errors.append((title, msg))
+    )
+    dlg = _make_dialog(root)
+    dlg._function_var.set("sigmaregg")
+
+    dlg._on_save_clicked()
+
+    assert errors and "did you mean" in errors[0][1]
 
 
 def test_still_rejects_genuinely_unknown_function(root, monkeypatch):

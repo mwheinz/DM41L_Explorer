@@ -21,6 +21,8 @@ it asks this module:
   docs/trigraphs.md). An unknown token's error suggests the closest
   known instructions ("did you mean ...?").
 - `canonical(op)` / `display(op)`: an instruction's names.
+- Key Assignment helpers: `op_for_key_bytes()`, `key_bytes_for()`,
+  `display_for_key_bytes()`, `assignable_display_names()`.
 
 An `Op` identifies an instruction by its encoding, not its name:
 
@@ -42,7 +44,7 @@ import enum
 import itertools
 import logging
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, Hashable, Iterable, List, Set, Tuple
+from typing import Dict, Hashable, Iterable, List, Optional, Set, Tuple, Union
 
 from .functions import SINGLE_BYTE_FUNCTIONS, XROM_FUNCTIONS
 from .mnemonic_dialects import DIALECTS, Dialect
@@ -92,24 +94,6 @@ class MnemonicRegistryError(Exception):
     would mean two instructions). A programming error, raised at import
     time, never by user input."""
 
-
-# -- Display names ---------------------------------------------------------
-#
-# functions.py's names use -> and <= glyphs from later HP models (P→R,
-# X≤Y?, →HMS). The HP-41 can't show those; its own display reads P-R,
-# X<=Y?, HMS. These are the only functions.py names that differ from the
-# HP-41 display form (decision 1). Σ, ≠ and ↑ names are already native.
-_DISPLAY_OVERRIDES = {
-    0x46: "X<=Y?",
-    0x4E: "P-R",
-    0x4F: "R-P",
-    0x6A: "D-R",
-    0x6B: "R-D",
-    0x6C: "HMS",
-    0x6D: "HR",
-    0x6F: "OCT",
-    0x7B: "X<=0?",
-}
 
 # -- Character substitutions ("Layer 1") -----------------------------------
 #
@@ -229,7 +213,7 @@ class Registry:
         base: Dict[Op, Tuple[str, str, bool]] = {}
         for byte, name in SINGLE_BYTE_FUNCTIONS.items():
             op = function_op(byte)
-            display_name = _DISPLAY_OVERRIDES.get(byte, name)
+            display_name = name  # functions.py names are HP-41 display names
             canonical_name = _CANONICAL_EXCEPTIONS.get(op, _ascii_form(display_name))
             base[op] = (canonical_name, display_name, byte >= 0x40)
         for (byte1, byte2), name in XROM_FUNCTIONS.items():
@@ -348,3 +332,49 @@ def is_known(op: Op) -> bool:
 def entries() -> List[Entry]:
     """Every registered instruction, for reference listings."""
     return _REGISTRY.entries()
+
+
+# -- Key Assignment Register helpers ----------------------------------------
+#
+# A Key Assignment Register entry stores a function as one byte (a
+# functions.py SINGLE_BYTE_FUNCTIONS key) or an XROM (byte1, byte2) pair
+# (docs/key_assignments.md sec 4.2) -- exactly an OpKind.FUNCTION or
+# OpKind.XROM Op's code.
+
+
+def op_for_key_bytes(fn_byte1: int, fn_byte2: Optional[int]) -> Op:
+    """The Op a Key Assignment Register entry's function byte(s) encode
+    (`fn_byte2` is None for a single-byte function). Not necessarily a
+    known instruction -- check is_known()."""
+    if fn_byte2 is None:
+        return function_op(fn_byte1)
+    return xrom_op(fn_byte1, fn_byte2)
+
+
+def key_bytes_for(op: Op) -> Union[int, Tuple[int, int]]:
+    """The inverse of op_for_key_bytes(): an int for a single-byte
+    function, a (byte1, byte2) tuple for an XROM. Raises ValueError for
+    a text-format keyword (END, XROM), which can't be key-assigned."""
+    if op.kind is OpKind.KEYWORD:
+        raise ValueError(f"{op.code} can't be assigned to a key")
+    return op.code
+
+
+def display_for_key_bytes(fn_byte1: int, fn_byte2: Optional[int]) -> str:
+    """The display name for a Key Assignment Register entry's function
+    byte(s), or a "0xNN" / "0xNN 0xNN" fallback if they aren't a known
+    function. Never raises."""
+    op = op_for_key_bytes(fn_byte1, fn_byte2)
+    if is_known(op):
+        return display(op)
+    if fn_byte2 is None:
+        return f"0x{fn_byte1:02X}"
+    return f"0x{fn_byte1:02X} 0x{fn_byte2:02X}"
+
+
+def assignable_display_names() -> List[str]:
+    """Every key-assignable function's display name, sorted -- built-in
+    functions (including keyboard-only ones like CAT) and XROMs."""
+    return sorted(
+        e.display for e in _REGISTRY.entries() if e.op.kind is not OpKind.KEYWORD
+    )

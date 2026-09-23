@@ -1,166 +1,133 @@
-"""Tests for memory/functions.py's normalize_function_name_input()
-(GitHub issue #17): letting a user type an assignable function's name on a
-standard keyboard -- lowercase, ASCII approximations of Sigma/the arrows/
-less-than-or-equal -- and still resolve to the exact name
-bytes_for_function_name() expects.
+"""Tests for memory/functions.py's instruction tables and for typing a
+function name in the Key Assignment dialog (GitHub issue #17).
+
+functions.py's names are the HP-41's own display names
+(docs/mnemonic_dialects_plan.md sec 3.2). Typed names go through
+memory/mnemonics.py's resolve(programmable_only=False) -- the same
+spellings program-text import accepts, plus keyboard-only functions --
+then key_bytes_for() gives the Key Assignment Register encoding.
 """
 
 import pytest
 
-from memory.functions import (
-    bytes_for_function_name,
-    normalize_function_name_input,
-    SINGLE_BYTE_NAMES,
-    XROM_NAMES,
+from memory.functions import SINGLE_BYTE_FUNCTIONS, XROM_FUNCTIONS
+from memory.mnemonics import (
+    UnknownMnemonicError,
+    assignable_display_names,
+    display_for_key_bytes,
+    key_bytes_for,
+    resolve,
 )
 
 
-# -- Case folding -------------------------------------------------------
+def _key_bytes(typed):
+    return key_bytes_for(resolve(typed, programmable_only=False))
+
+
+# -- The tables themselves ------------------------------------------------
+
+
+def test_names_use_only_hp41_display_glyphs():
+    for name in list(SINGLE_BYTE_FUNCTIONS.values()) + list(XROM_FUNCTIONS.values()):
+        assert not set(name) & set("→≤≥√"), name
+
+
+def test_names_are_unique_across_both_tables():
+    names = list(SINGLE_BYTE_FUNCTIONS.values()) + list(XROM_FUNCTIONS.values())
+    assert len(names) == len(set(names))
+
+
+def test_assignable_names_cover_both_tables_and_nothing_else():
+    names = set(SINGLE_BYTE_FUNCTIONS.values()) | set(XROM_FUNCTIONS.values())
+    assert assignable_display_names() == sorted(names)
+
+
+# -- display_for_key_bytes() ----------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "typed,expected",
+    "fn1, fn2, expected",
     [
-        ("cos", "COS"),
-        ("Sin", "SIN"),
-        ("rtn", "RTN"),
-        ("xeq", "XEQ"),
+        (0x4E, None, "P-R"),
+        (0x6C, None, "HMS"),
+        (0x99, None, "ΣREG"),
+        (0x00, None, "CAT"),
+        (0xA6, 0x78, "ΣREG?"),
+        (0x05, None, "0x05"),
+        (0xA6, 0x3F, "0xA6 0x3F"),
     ],
 )
-def test_lowercase_letters_are_uppercased(typed, expected):
-    assert normalize_function_name_input(typed) == expected
+def test_display_for_key_bytes(fn1, fn2, expected):
+    assert display_for_key_bytes(fn1, fn2) == expected
 
 
-# -- Symbol substitution -------------------------------------------------
+# -- Typed input ------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "typed,expected",
+    "typed, expected",
     [
-        ("x^2", "X↑2"),
-        ("y^x", "Y↑X"),
-        ("r^", "R↑"),
-        ("enter^", "ENTER↑"),
-        ("e^x", "E↑X"),
-        ("10^x", "10↑X"),
+        ("cos", 0x5A),
+        ("Sin", 0x59),
+        ("rtn", 0x85),
+        ("xeq", 0xE0),
+        ("x^2", 0x51),
+        ("y^x", 0x53),
+        ("r^", 0x74),
+        ("enter^", 0x83),
+        ("e^x-1", 0x58),
+        ("p->r", 0x4E),
+        ("r->p", 0x4F),
+        ("d->r", 0x6A),
+        ("p-r", 0x4E),
+        ("hms", 0x6C),
+        ("oct", 0x6F),
+        ("sigma+", 0x47),
+        ("SIGMA-", 0x48),
+        ("clsigma", 0x70),
+        ("sigmareg", 0x99),
+        ("\\EREG", 0x99),
+        ("x<=y?", 0x46),
+        ("x<=0?", 0x7B),
+        ("x#y?", 0x79),
     ],
 )
-def test_caret_becomes_up_arrow(typed, expected):
-    assert normalize_function_name_input(typed) == expected
+def test_typed_names_resolve(typed, expected):
+    assert _key_bytes(typed) == expected
 
 
 @pytest.mark.parametrize(
-    "typed,expected",
+    "typed, expected",
     [
-        ("p->r", "P→R"),
-        ("r->p", "R→P"),
-        ("d->r", "D→R"),
-        ("->hms", "→HMS"),
-        ("->oct", "→OCT"),
+        ("x<=nn?", (0xA6, 0x7C)),
+        ("X<=NN?", (0xA6, 0x7C)),
+        ("x>=nn?", (0xA6, 0x7E)),
+        ("sigmareg?", (0xA6, 0x78)),
+        ("seekpt", (0xA6, 0x6A)),
     ],
 )
-def test_arrow_sequence_becomes_right_arrow(typed, expected):
-    assert normalize_function_name_input(typed) == expected
+def test_typed_xrom_names_resolve(typed, expected):
+    assert _key_bytes(typed) == expected
 
 
-@pytest.mark.parametrize(
-    "typed,expected",
-    [
-        ("sigma+", "Σ+"),
-        ("SIGMA-", "Σ-"),
-        ("clsigma", "CLΣ"),
-        ("sigmareg", "ΣREG"),
-        ("Sigma", "Σ"),
-    ],
-)
-def test_sigma_word_becomes_sigma_symbol(typed, expected):
-    assert normalize_function_name_input(typed) == expected
+def test_keyboard_only_functions_are_assignable():
+    assert _key_bytes("cat") == 0x00
+    assert _key_bytes("SST") == 0x08
 
 
-@pytest.mark.parametrize(
-    "typed,expected",
-    [
-        ("x<=y?", "X≤Y?"),
-        ("x<=0?", "X≤0?"),
-    ],
-)
-def test_less_or_equal_sequence_becomes_symbol(typed, expected):
-    assert normalize_function_name_input(typed) == expected
+@pytest.mark.parametrize("typed", ["->hms", "P→R", "X≤Y?", "not a real function"])
+def test_rejected_names(typed):
+    with pytest.raises(UnknownMnemonicError):
+        _key_bytes(typed)
 
 
-# -- The X<=NN?/X>=NN? conflict ------------------------------------------
-#
-# These two XROM names are already spelled with literal ASCII "<=" / ">="
-# (see docs/function_table.md's Extended Functions ROM table), right next
-# to 'X≤Y?'/'X≤0?' which use the real ≤ glyph. Typing them out directly
-# must not get mangled by the "<=" -> "≤" substitution.
-
-
-@pytest.mark.parametrize(
-    "typed,expected",
-    [
-        ("x<=nn?", "X<=NN?"),
-        ("X<=NN?", "X<=NN?"),
-        ("x>=nn?", "X>=NN?"),
-    ],
-)
-def test_ascii_native_names_are_not_mangled(typed, expected):
-    assert normalize_function_name_input(typed) == expected
-
-
-# -- Idempotence / passthrough -------------------------------------------
-
-
-@pytest.mark.parametrize("name", ["COS", "X≤Y?", "ΣREG", "P→R", "X<>Y", "1/X"])
-def test_already_canonical_names_pass_through_unchanged(name):
-    assert normalize_function_name_input(name) == name
-
-
-def test_leading_trailing_whitespace_is_stripped():
-    assert normalize_function_name_input("  cos  ") == "COS"
-
-
-def test_empty_string_is_returned_unchanged():
-    assert normalize_function_name_input("") == ""
-
-
-def test_unknown_input_is_normalized_but_not_rejected():
-    """normalize_function_name_input() never raises -- an unmatched result
-    is the caller's (bytes_for_function_name's) problem, not this
-    function's."""
-    result = normalize_function_name_input("not a real function")
-    assert result == "NOT A REAL FUNCTION"
-    with pytest.raises(ValueError):
-        bytes_for_function_name(result)
-
-
-# -- Integration with bytes_for_function_name -----------------------------
-
-
-@pytest.mark.parametrize(
-    "typed",
-    [
-        "cos",
-        "x^2",
-        "e^x-1",
-        "p->r",
-        "->hms",
-        "sigma+",
-        "clsigma",
-        "x<=y?",
-        "x<=nn?",
-        "x>=nn?",
-    ],
-)
-def test_normalized_input_resolves_via_bytes_for_function_name(typed):
-    # Just needs to not raise -- confirms every example above actually
-    # round-trips through the real lookup tables, not just the regexes.
-    bytes_for_function_name(normalize_function_name_input(typed))
+def test_text_format_keywords_are_not_assignable():
+    with pytest.raises(ValueError, match="can't be assigned"):
+        _key_bytes("END")
 
 
 def test_every_known_name_is_reachable_case_insensitively():
-    """Sanity check over the whole table, not just hand-picked examples:
-    lowercasing (then re-normalizing) any real function name must still
-    resolve to itself."""
-    for name in list(SINGLE_BYTE_NAMES) + list(XROM_NAMES):
-        assert normalize_function_name_input(name.lower()) == name
+    for byte, name in SINGLE_BYTE_FUNCTIONS.items():
+        assert _key_bytes(name.lower()) == byte, name
+    for pair, name in XROM_FUNCTIONS.items():
+        assert _key_bytes(name.lower()) == pair, name

@@ -614,7 +614,7 @@ def test_decode_program_txt_xrom_mnemonic_is_case_insensitive():
 
 
 def test_decode_program_txt_xrom_mnemonic_ascii_symbol_substitution():
-    # normalize_function_name_input()'s "sigma" substitution should let
+    # memory/mnemonics.py's "sigma" substitution should let
     # an ASCII-typed "sigmareg?" resolve to the real "ΣREG?" XROM name
     # (0xA6,0x78), the same way it already does for single-byte functions.
     by_typed = decode_program_txt('LBL "TC"\nsigmareg?\nEND\n')
