@@ -277,3 +277,92 @@ def test_keyboard_only_function_in_program_text_is_an_error():
 def test_later_model_spellings_are_rejected_in_program_text():
     with pytest.raises(ValueError, match="unrecognized instruction"):
         decode_program_txt('LBL "T"\nP→R\nEND\n')
+
+
+# -- Trigraph spellings (plan sec 3.3 step 1) --------------------------------
+
+
+@pytest.mark.parametrize(
+    "spelling, byte",
+    [
+        ("\\EREG", 0x99),
+        ("\\126REG", 0x99),
+        ("\\E+", 0x47),
+        ("CL\\E", 0x70),
+        ("X\\/=Y?", 0x79),
+        ("X\\/=0?", 0x63),
+        ("X\\^|2", 0x51),
+        ("ENTER\\^|", 0x83),
+        ("\\Ereg", 0x99),  # letters after the trigraph still fold case
+    ],
+)
+def test_trigraph_spellings_resolve(spelling, byte):
+    assert resolve(spelling) == function_op(byte)
+
+
+def test_trigraph_xrom_spelling_resolves():
+    assert resolve("\\EREG?") == xrom_op(0xA6, 0x78)
+
+
+@pytest.mark.parametrize("spelling", ["SREG", "ΣREG", "∑REG", "SIGMAREG", "\\EREG"])
+def test_all_sigma_reg_forms_compile_identically(spelling):
+    assert _compile_one(f"{spelling} 05") == bytes([0x99, 0x05])
+
+
+def test_trigraph_shorthand_is_case_sensitive():
+    # \e isn't a trigraph (only \E is Sigma), so this must not resolve,
+    # even though letters elsewhere in a token are case-insensitive.
+    with pytest.raises(UnknownMnemonicError, match="Unrecognized trigraph"):
+        resolve("\\eREG")
+
+
+def test_bad_trigraph_in_program_text_names_the_line():
+    with pytest.raises(ValueError, match="line 2: .*Unrecognized trigraph"):
+        decode_program_txt('LBL "T"\n\\qREG 05\nEND\n')
+
+
+# -- "Did you mean ...?" suggestions (decision 3) ---------------------------
+
+
+@pytest.mark.parametrize(
+    "typo, suggestion",
+    [
+        ("SIGMAREGG", "ΣREG (SREG)"),
+        ("ENTR", "ENTER↑ (ENTER)"),
+        ("P>R", "P-R"),
+        ("LN1X", "LN1+X"),
+        ("SEEKP", "SEEKPT"),
+        ("RCLL", "RCL"),
+    ],
+)
+def test_unknown_token_suggests_close_matches(typo, suggestion):
+    with pytest.raises(UnknownMnemonicError, match="did you mean") as info:
+        resolve(typo)
+    assert suggestion in str(info.value)
+
+
+def test_no_suggestion_when_nothing_is_close():
+    with pytest.raises(UnknownMnemonicError) as info:
+        resolve("ZZZZZ")
+    assert "did you mean" not in str(info.value)
+
+
+def test_suggestions_skip_keyboard_only_functions_in_programs():
+    with pytest.raises(UnknownMnemonicError) as info:
+        resolve("CATT")
+    assert "did you mean" not in str(info.value)
+    # ...but the Key Assignment side (programmable_only=False) gets it.
+    with pytest.raises(UnknownMnemonicError, match="did you mean: CAT"):
+        resolve("CATT", programmable_only=False)
+
+
+def test_suggestions_are_capped_at_three():
+    with pytest.raises(UnknownMnemonicError) as info:
+        resolve("RCLL")
+    listed = str(info.value).split("did you mean: ")[1].rstrip(")")
+    assert len(listed.split(", ")) <= 3
+
+
+def test_program_text_error_includes_suggestion():
+    with pytest.raises(ValueError, match=r"line 2: .*did you mean: ΣREG \(SREG\)"):
+        decode_program_txt('LBL "T"\nSIGMAREGG 05\nEND\n')

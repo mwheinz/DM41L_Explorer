@@ -3,7 +3,7 @@ Unit tests for the trigraph codec (memory/trigraphs.py -- docs/trigraphs.md).
 """
 
 import pytest
-from memory import encode_trigraphs, decode_trigraphs
+from memory import encode_trigraphs, decode_trigraphs, focal_to_unicode
 
 # --- Literal passthrough ---
 
@@ -182,3 +182,24 @@ def test_restrict_literals_still_allows_an_explicit_trigraph_for_the_same_byte()
 def test_restrict_literals_error_names_the_offending_character_and_position():
     with pytest.raises(ValueError, match="'g' at position 4"):
         decode_trigraphs("REPOg", restrict_literals=True)
+
+
+# -- focal_to_unicode() -----------------------------------------------------
+
+
+def test_focal_to_unicode_renders_shorthand_bytes_as_their_symbols():
+    assert focal_to_unicode(bytes([0x7E, 0x5E, 0x1D, 0x7F, 0x60])) == "Σ↑≠⊦⊤"
+    assert focal_to_unicode(bytes([0x01, 0x0C, 0x0D, 0x00])) == "×µ∡‾"
+
+
+def test_focal_to_unicode_keeps_plain_ascii():
+    assert focal_to_unicode(b"REG 05?") == "REG 05?"
+
+
+def test_focal_to_unicode_escapes_bytes_with_no_symbol():
+    assert focal_to_unicode(bytes([0x05, 0xC8])) == "\\005\\200"
+
+
+def test_focal_to_unicode_of_every_shorthand_trigraph():
+    # Each shorthand decodes to the byte whose symbol focal_to_unicode shows.
+    assert focal_to_unicode(decode_trigraphs("\\E\\^|\\/=\\+\\T")) == "Σ↑≠⊦⊤"

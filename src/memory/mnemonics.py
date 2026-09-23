@@ -16,7 +16,10 @@ Every instruction has three kinds of name:
 The rest of the codebase shouldn't handle instruction spellings itself;
 it asks this module:
 
-- `resolve(token)` -> Op: any accepted spelling to the instruction.
+- `resolve(token)` -> Op: any accepted spelling to the instruction,
+  including ones written with trigraph escapes (`\\EREG` for `ΣREG`,
+  docs/trigraphs.md). An unknown token's error suggests the closest
+  known instructions ("did you mean ...?").
 - `canonical(op)` / `display(op)`: an instruction's names.
 
 An `Op` identifies an instruction by its encoding, not its name:
@@ -34,6 +37,7 @@ The registry is built once, at import time, and the build fails loudly
 if any spelling would mean two different instructions (plan sec 3.5).
 """
 
+import difflib
 import enum
 import itertools
 import logging
@@ -42,6 +46,7 @@ from typing import Dict, FrozenSet, Hashable, Iterable, List, Set, Tuple
 
 from .functions import SINGLE_BYTE_FUNCTIONS, XROM_FUNCTIONS
 from .mnemonic_dialects import DIALECTS, Dialect
+from .trigraphs import decode_trigraphs, focal_to_unicode
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +239,7 @@ class Registry:
         return base
 
     def resolve(self, token: str, *, programmable_only: bool = True) -> Op:
-        text = token.translate(_UNICODE_FOLDS)
+        text = self._normalize(token)
         op = self._exact.get(text)
         if op is None:
             candidates = self._folded.get(text.upper(), set())
@@ -249,12 +254,60 @@ class Registry:
             if candidates:
                 (op,) = candidates
         if op is None:
-            raise UnknownMnemonicError(f"unrecognized instruction {token!r}")
+            message = f"unrecognized instruction {token!r}"
+            suggestions = self.suggest(text, programmable_only=programmable_only)
+            if suggestions:
+                message += f" (did you mean: {', '.join(suggestions)})"
+            raise UnknownMnemonicError(message)
         if programmable_only and not self._entries[op].programmable:
             raise UnknownMnemonicError(
                 f"{token!r} is a keyboard-only function and can't appear in a program"
             )
         return op
+
+    @staticmethod
+    def _normalize(token: str) -> str:
+        """Plan sec 3.3 steps 1-2. Trigraphs are decoded first, before
+        any case folding, because their shorthands are case-sensitive
+        (\\E is Sigma, \\e isn't a trigraph at all). The decoded FOCAL
+        bytes are then rendered as the display glyphs (\\E -> Σ,
+        \\/= -> ≠, \\^| -> ↑), which the alias table already knows."""
+        text = token
+        if "\\" in text:
+            try:
+                text = focal_to_unicode(decode_trigraphs(text))
+            except ValueError as exc:
+                raise UnknownMnemonicError(
+                    f"unrecognized instruction {token!r}: {exc}"
+                ) from exc
+        return text.translate(_UNICODE_FOLDS)
+
+    def suggest(
+        self, text: str, *, programmable_only: bool = True, limit: int = 3
+    ) -> List[str]:
+        """Up to `limit` instructions whose spellings are closest to
+        `text`, each as "DISPLAY" or "DISPLAY (CANONICAL)" when the two
+        differ. Empty if nothing is reasonably close."""
+        wanted = text.upper()
+        suggestions: List[str] = []
+        seen: Set[Op] = set()
+        for match in difflib.get_close_matches(
+            wanted, self._folded, n=limit * 4, cutoff=0.7
+        ):
+            for op in sorted(
+                self._folded[match], key=lambda o: self._entries[o].canonical
+            ):
+                entry = self._entries[op]
+                if op in seen or (programmable_only and not entry.programmable):
+                    continue
+                seen.add(op)
+                if entry.display == entry.canonical:
+                    suggestions.append(entry.display)
+                else:
+                    suggestions.append(f"{entry.display} ({entry.canonical})")
+            if len(suggestions) >= limit:
+                break
+        return suggestions[:limit]
 
     def entry(self, op: Op) -> Entry:
         return self._entries[op]

@@ -81,6 +81,40 @@ _SAFE_LITERAL_MIN = 0x20
 _SAFE_LITERAL_MAX = 0x65
 
 
+# The Unicode character for each FOCAL byte that a trigraph shorthand
+# stands for -- what the HP41/DM41L actually displays for it. Every other
+# printable byte (see _LITERAL_BYTES) is its own ASCII character.
+_UNICODE_BY_BYTE = {
+    0x00: "\u203e",  # ‾ high horizontal bar
+    0x01: "\u00d7",  # × times
+    0x0C: "\u00b5",  # µ micro
+    0x0D: "\u2221",  # ∡ angle
+    0x1D: "\u2260",  # ≠ not equal
+    0x5C: "\\",  # backslash
+    0x5E: "\u2191",  # ↑ up arrow
+    0x60: "\u22a4",  # ⊤ tee
+    0x7E: "\u03a3",  # Σ Sigma
+    0x7F: "\u22a6",  # ⊦ append
+}
+
+
+def focal_to_unicode(data: bytes) -> str:
+    """Renders raw HP41/DM41L character bytes as the Unicode text they
+    display as: a trigraph shorthand's byte becomes its real symbol
+    (0x7E -> Σ, 0x5E -> ↑, 0x1D -> ≠, ...), printable ASCII stays itself,
+    and any other byte falls back to its \\nnn trigraph so nothing is
+    lost. For display only -- decode_trigraphs() is the way back."""
+    out = []
+    for b in data:
+        if b in _UNICODE_BY_BYTE:
+            out.append(_UNICODE_BY_BYTE[b])
+        elif b in _LITERAL_BYTES:
+            out.append(chr(b))
+        else:
+            out.append(f"\\{b:03d}")
+    return "".join(out)
+
+
 def encode_trigraphs(data: bytes) -> str:
     """Renders raw HP41/DM41L character bytes as plain-ASCII text, using a
     trigraph escape (see the module docstring) for any byte that doesn't

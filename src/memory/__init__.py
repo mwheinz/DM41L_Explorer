@@ -17,7 +17,7 @@ for readability. The current components are:
 
   registers.py     Register, AlphaRegister, DM41LMemoryError,
                     format_data_line/parse_data_line (DATA line format)
-  trigraphs.py     encode_trigraphs/decode_trigraphs (docs/trigraphs.md --
+  trigraphs.py     encode_trigraphs/decode_trigraphs/focal_to_unicode (docs/trigraphs.md --
                     the HP41/DM41L FOCAL character set's non-ASCII symbols)
   constants.py     address-range and sentinel-register constants
   regions.py       MemoryRegion (the base class -- a live view of one
@@ -100,7 +100,7 @@ from .registers import (
     format_data_line,
     parse_data_line,
 )
-from .trigraphs import encode_trigraphs, decode_trigraphs
+from .trigraphs import encode_trigraphs, decode_trigraphs, focal_to_unicode
 from .constants import (
     STATUS_REGISTERS_RANGE,
     VOID_RANGE,
@@ -148,6 +148,7 @@ __all__ = [
     "parse_data_line",
     "encode_trigraphs",
     "decode_trigraphs",
+    "focal_to_unicode",
     "STATUS_REGISTERS_RANGE",
     "VOID_RANGE",
     "KEY_ASSIGNMENTS_RANGE",
