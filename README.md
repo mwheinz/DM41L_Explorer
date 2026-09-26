@@ -104,14 +104,18 @@ import new ones.
 
 ### Key Assignments Tab
 
-![Key Assigns](resources/screenshots/key_assigns.png)
+![Key Assigns - DM41L layout](resources/screenshots/key_assigns_dm41l.png)
+
+![Key Assigns - HP41 layout](resources/screenshots/key_assigns_hp41.png)
 
 The Key Assignments tab allows you to view and edit the user key assignments in
-the loaded dump. It displays the keys both in the original HP41 layout and (if
-you scroll down) the DM41L layout. Clicking on a key will let you edit that
-key's current assignment - you can either select one of the built-in HP41CX
-functions, or one of the currently loaded programs, or enter in two hexadecimal
-bytes if you want to experiment with synthetic programming.
+the loaded dump. It has two sub-tabs: the first shows the keys in the DM41L
+layout, and the second in the original HP41 layout. Both show the same
+assignments, so an edit made on either one appears on the other. Clicking on a
+key will let you edit that key's current assignment - you can either select
+one of the built-in HP41CX functions, or one of the currently loaded programs,
+or enter in two hexadecimal bytes if you want to experiment with synthetic
+programming.
 
 ### Data Registers Tab
 

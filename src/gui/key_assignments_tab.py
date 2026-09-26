@@ -1,6 +1,7 @@
 """
-Key Assignments tab: two synchronized keypad-shaped grids ("HP41" and
-"DM41L", docs/key_assignments.md sec 6 item 4) for viewing and editing
+Key Assignments tab: two synchronized keypad-shaped grids ("DM41L" and
+"HP41", docs/key_assignments.md sec 6 item 4), each on its own sub-tab
+(issue #39 -- DM41L first, HP41 second), for viewing and editing
 key assignments -- both the built-in/peripheral kind (sec 4.2, stored in
 the Key Assignment Registers) and global-label/program assignments (sec
 4.6, stored inside the program's own header instead). Both grids render
@@ -69,6 +70,10 @@ DM41L_LAYOUT = [
     ["USR", "PGM", 32, 35, 44, 41, 71, 72, 73, 74],
     ["ON", "SHIFT", "ALPHA", 33, 34, 41, 81, 82, 83, 84],
 ]
+
+# Sub-tab names for the two layouts (issue #39), in display order.
+DM41L_TAB = "DM41L"
+HP41_TAB = "HP41"
 
 UNASSIGNED_TEXT = "gray50"
 UNASSIGNED_FG = ("gray85", "gray24")
@@ -150,10 +155,11 @@ class KeyAssignmentsTab(ctk.CTkFrame):
         self._grids_built = False
         # (key_number, shifted) -> list of CTkButton, populated once by
         # _build_grid() and reused by _refresh_buttons() from then on. A
-        # list, not a single button, because the HP41 and DM41L layouts
+        # list, not a single button, because the DM41L and HP41 layouts
         # both reference the same 34 key numbers (just arranged
         # differently) -- each key number maps to one button per grid, and
-        # both need to stay in sync.
+        # both need to stay in sync. Order within each list follows grid
+        # build order in render(): DM41L button first, HP41 second.
         self._key_buttons = {}
 
         _, self._header_label = build_tab_header(self)
@@ -166,25 +172,16 @@ class KeyAssignmentsTab(ctk.CTkFrame):
             "assignments isn't handled here yet.",
         )
 
-        self._scroll = ctk.CTkScrollableFrame(self)
-        self._scroll.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        bind_touchpad_scroll(self._scroll)
-
-        ctk.CTkLabel(
-            self._scroll,
-            text="HP41",
-            font=ctk.CTkFont(weight="bold", size=14),
-        ).pack(anchor="w", padx=4, pady=(4, 2))
-        self._hp41_frame = ctk.CTkFrame(self._scroll, fg_color="transparent")
-        self._hp41_frame.pack(anchor="w", padx=4, pady=(0, 16))
-
-        ctk.CTkLabel(
-            self._scroll,
-            text="DM41L",
-            font=ctk.CTkFont(weight="bold", size=14),
-        ).pack(anchor="w", padx=4, pady=(4, 2))
-        self._dm41l_frame = ctk.CTkFrame(self._scroll, fg_color="transparent")
-        self._dm41l_frame.pack(anchor="w", padx=4, pady=(0, 4))
+        # Issue #39: one sub-tab per keyboard layout, instead of both
+        # grids stacked in a single scrolling frame. The DM41L layout comes
+        # first since it's the keyboard actually in the user's hand; the
+        # classic HP41 layout is second. CTkTabview keeps whichever sub-tab
+        # was last selected across render() calls, since render() never
+        # rebuilds the tabview itself (see the module docstring).
+        self._layout_tabs = ctk.CTkTabview(self)
+        self._layout_tabs.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self._dm41l_frame = self._build_layout_tab(DM41L_TAB)
+        self._hp41_frame = self._build_layout_tab(HP41_TAB)
 
         # A throwaway button, never packed/gridded, just to read back
         # CustomTkinter's own theme defaults for fg_color/text_color --
@@ -195,6 +192,22 @@ class KeyAssignmentsTab(ctk.CTkFrame):
         self._default_fg_color = probe.cget("fg_color")
         self._default_text_color = probe.cget("text_color")
         probe.destroy()
+
+    def _build_layout_tab(self, name: str):
+        """Adds one sub-tab to self._layout_tabs and returns the empty
+        frame its keypad grid will be built into (by _build_grid(), on the
+        first render()). Each sub-tab gets its own scrollable frame -- the
+        8-row HP41 grid can be taller than a small window. Having one
+        bind_touchpad_scroll() per frame is safe: its handler skips any
+        frame that isn't currently mapped, and CTkTabview unmaps every
+        sub-tab except the selected one."""
+        tab = self._layout_tabs.add(name)
+        scroll = ctk.CTkScrollableFrame(tab)
+        scroll.pack(fill="both", expand=True)
+        bind_touchpad_scroll(scroll)
+        grid_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        grid_frame.pack(anchor="w", padx=4, pady=4)
+        return grid_frame
 
     def _notify_change(self):
         if self._on_change:
@@ -219,16 +232,16 @@ class KeyAssignmentsTab(ctk.CTkFrame):
         self._header_label.configure(text=f"Key assignments: {count}")
 
         if not self._grids_built:
-            self._build_grid(self._hp41_frame, HP41_LAYOUT)
             self._build_grid(self._dm41l_frame, DM41L_LAYOUT)
+            self._build_grid(self._hp41_frame, HP41_LAYOUT)
             self._grids_built = True
 
         self._refresh_buttons()
 
     def _teardown_grids(self):
-        for widget in self._hp41_frame.winfo_children():
-            widget.destroy()
         for widget in self._dm41l_frame.winfo_children():
+            widget.destroy()
+        for widget in self._hp41_frame.winfo_children():
             widget.destroy()
         self._key_buttons = {}
         self._grids_built = False
